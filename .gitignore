@@ -1,0 +1,39 @@
+# ===================================================================
+# NOTEN GEHOEREN NICHT IN DIESES REPO
+#
+# Das Repo ist oeffentlich. Alles, was hier eingecheckt wird, ist ueber
+# https://snoopes335.github.io/ fuer jeden im Netz herunterladbar — ohne
+# Passwort, ohne Anmeldung.
+#
+# Gescannte Notenausgaben sind fremdes Urheberrecht und duerfen hier
+# nicht liegen. Dasselbe gilt fuer die Arrangements der Band.
+#
+# Jens' eigener Notenbestand liegt seit dem 29. Juli 2026 unter
+#   ~/Documents/Privat/Claude/BandStand-Noten/
+# also NEBEN dem Repo, nicht darin.
+#
+# Diese Regel gilt ohne Ausnahme. Wer sie umgehen will, hat ein anderes
+# Problem als eine .gitignore-Zeile.
+# ===================================================================
+tunes/
+*.pdf
+*.mp3
+*.m4a
+*.wav
+*.aac
+
+# Lokale Arbeitsdateien – nie ins oeffentliche Repo pushen
+CLAUDE.md
+docs/
+Output/
+design_handoff_bandstand/
+
+# Claude-Code-Sitzungseinstellungen
+.claude/
+.worktreeinclude
+
+# Entwuerfe und Ablagen, die auf dem Mac bleiben
+Icon Entwürfe ChatGPT/
+
+# macOS-Ablage
+.DS_Store

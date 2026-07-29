@@ -1,0 +1,6 @@
+# BandStand ist eine persoenliche Anwendung, keine Veroeffentlichung.
+# Suchmaschinen sollen sie nicht einsammeln und nicht in ihre Verzeichnisse
+# aufnehmen. Das ist kein Zugriffsschutz — die Seite bleibt fuer jeden
+# erreichbar, der die Adresse kennt. Es haelt sie nur aus den Trefferlisten.
+User-agent: *
+Disallow: /
