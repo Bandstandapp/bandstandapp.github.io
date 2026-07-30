@@ -1255,6 +1255,12 @@
   .vlade{color:var(--text-body);margin:auto}
   .vfehler{color:var(--danger-ink);margin:auto;padding:24px;text-align:center}
 
+  /* Versteckte Datei-Eingabefelder. NICHT `display:none`: Safari auf dem iPad
+     oeffnet den Dateien-Dialog fuer ein so verstecktes Feld nicht zuverlaessig,
+     und zwar ohne jede Meldung. Aus dem Bild geschoben wird es gefunden und
+     angeklickt wie jedes andere. */
+  .dateifeld{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+
   /* Die Zeile traegt seit Schritt 7 in beiden Ausrichtungen dieselben Masse —
      sie sind fuer die schmale Spalte des Querformats entworfen. Nur die
      Auswahl-Box wird dort kleiner. */
@@ -1774,6 +1780,48 @@ function nameZerlegen(dateiname, trenner){
   return { titel:ohne.slice(0,i).trim()||ohne, rest:ohne.slice(i+t.length).trim() };
 }
 window.nameZerlegen = nameZerlegen;
+
+/* Ein Dateiname ohne Trennzeichen: „Bienentanz Alt 1.pdf". Wo hoert das Stueck
+   auf und wo faengt die Stimme an?
+
+   Gesucht wird die STELLE, an der die Stimme beginnt — nicht bloss, ob eine
+   drinsteht. Dafuer wird von hinten geprueft: Der letzte Wortanfang, ab dem
+   der Rest noch eine Stimme enthaelt, ist ihr Anfang. Alles davor ist der
+   Titel.
+
+   Gebraucht wird das auf dem iPad. Safari kann dort keine Ordner waehlen, und
+   ohne Ordner gaebe es keinen Titel — aus 460 Blaettern wuerden 460 Stuecke.
+   Am Mac bleibt der Ordner der bessere Weg, weil er nicht raten muss. */
+/* Faengt an DIESER Stelle eine Stimme an? Geprueft wird nur das erste Wort —
+   „enthaelt irgendwo eine Stimme" waere zu wenig, denn dann bliebe bei
+   „St. Thomas Drum Perc." das Wort „Drum" im Titel haengen, weil auch „Perc."
+   noch eine Stimme ist. */
+function stimmeAmAnfang(text){
+  const b=wortfolgen(text).filter(x=>x.i===0);
+  if(!b.length) return false;
+  for(const a of BLATTARTEN) if(b.some(x=>a.w.includes(x.s))) return true;
+  for(const inst of INSTRUMENTE){
+    const kand=[inst.name, inst.en].concat(inst.kurz||[]).filter(Boolean).map(instrNorm);
+    if(b.some(x=>kand.includes(x.s))) return true;
+  }
+  return false;
+}
+function titelVorStimme(dateiname){
+  const ohne=String(dateiname||'').replace(ENDUNG,'').trim();
+  const woerter=[]; const re=/[0-9A-Za-zÄÖÜäöüß]+/g; let m;
+  while((m=re.exec(ohne))) woerter.push({w:m[0], von:m.index});
+  if(woerter.length<2) return null;
+  /* Vorwaerts: die FRUEHESTE Stelle, an der eine Stimme beginnt. Alles davor
+     ist der Titel, alles danach gehoert zur Stimme. */
+  for(let k=1; k<woerter.length; k++){
+    if(!stimmeAmAnfang(ohne.slice(woerter[k].von))) continue;
+    const titel=ohne.slice(0,woerter[k].von).replace(/[\s_\-–—:.,]+$/,'').trim();
+    return titel ? { titel, rest:ohne.slice(woerter[k].von).trim() } : null;
+  }
+  return null;
+}
+window.titelVorStimme = titelVorStimme;
+window.stimmeAmAnfang = stimmeAmAnfang;
 
 /* Die Reihenfolge der Stimmen. Tonarten stehen fest; Bandstimmen folgen der
    Voice-Liste — also der Ordnung, die Jens im Setup durch Ziehen setzt. */
@@ -3699,7 +3747,7 @@ function openDataSheet(){
     const r1=document.createElement('div'); r1.className='row';
     r1.innerHTML='<button class="btn" id="exp" style="flex:1">⬇︎ Daten exportieren</button>'
       +'<button class="btn ghost" id="imp" style="flex:1">⬆︎ Daten importieren</button>'
-      +'<input type="file" id="impFile" accept="application/json,.json" style="display:none">';
+      +'<input type="file" id="impFile" accept="application/json,.json" class="dateifeld">';
     card.append(r1);
     card.insertAdjacentHTML('beforeend','<div class="muted" style="margin:2px 2px 14px">Import wird <b>zusammengeführt</b> (nichts wird gelöscht; bei Konflikten gewinnt der neuere Stand).</div>');
     // Baustein 2: einzeln sichern & teilen
@@ -3712,7 +3760,7 @@ function openDataSheet(){
       +'<button class="btn ghost" data-part="practice" style="flex:1 1 46%">⬇︎ Üben-Liste</button>'
       +'</div>'
       +'<button class="btn ghost" id="impPart" style="width:100%">⬆︎ Einzelne Datei einlesen</button>'
-      +'<input type="file" id="impPartFile" accept="application/json,.json" style="display:none">'
+      +'<input type="file" id="impPartFile" accept="application/json,.json" class="dateifeld">'
       +'<div class="muted" style="margin-top:6px">Jede Datei trägt eine Kennung – beim Einlesen wird automatisch erkannt, worum es sich handelt, und sauber zusammengeführt.</div>';
     card.append(rp);
     rp.querySelectorAll('[data-part]').forEach(btn=>btn.onclick=()=>exportPart(btn.dataset.part));
@@ -3807,7 +3855,12 @@ async function importBandbuch(bid, saetze, fortschritt){
   const nachStueck=new Map();
   for(const s of gueltig){
     const schl = s.gruppe || ('t:'+titelSchluessel(s.titel||'Stück'));
-    if(!nachStueck.has(schl)) nachStueck.set(schl, {titel:{titel:s.titel||'Stück'}, elemente:[]});
+    if(!nachStueck.has(schl)) nachStueck.set(schl,
+      { titel:{titel:s.titel||'Stück'}, elemente:[],
+        /* Steht hier eine Kennung, dockt das Stueck an ein vorhandenes an,
+           statt ein zweites gleichen Namens anzulegen. Gesetzt wird sie in
+           der Vorschau und nur dort — hier wird nie nach Namen gesucht. */
+        titelId: s.andockAn || null });
     const g=nachStueck.get(schl);
     g.elemente.push({ art:'blatt', etikett:'', instrument:s.voice || '',
                       dateiname:s.file.name, blob:s.file, np:1, _rest:s.rest||'' });
@@ -3833,9 +3886,14 @@ async function importBandbuch(bid, saetze, fortschritt){
       .replace(/[\s_\-–—:.,]+/g,' ')
       .replace(/\s+/g,' ').trim().slice(0,18);
   for(const g of gruppen){
-    const zahl={};
+    const zahl={}, lauf={};
+    /* Beim Andocken zaehlen die Blaetter mit, die schon am Stueck haengen.
+       Sonst hiessen ein vorhandenes und ein neues Alt-Blatt beide „Alt-Sax". */
+    if(g.titelId){
+      (BS_KATALOG.elemente||[]).filter(e=>e.titelId===g.titelId).forEach(e=>{
+        const k=e.instrument||''; zahl[k]=(zahl[k]||0)+1; lauf[k]=(lauf[k]||0)+1; });
+    }
     g.elemente.forEach(e=>{ const k=e.instrument||''; zahl[k]=(zahl[k]||0)+1; });
-    const lauf={};
     g.elemente.forEach(e=>{
       const k=e.instrument||'';
       if(zahl[k]<=1){ e.etikett=k; delete e._rest; return; }
@@ -3969,7 +4027,7 @@ function openLibrarySheet(){
         +own.length+(own.length===1?' Blatt':' Blätter')+'</span></div>'
         +'<button class="btn ghost" data-imp style="padding:6px 10px">＋ PDF</button>'
         +'<button class="btn ghost" data-del style="padding:6px 10px">🗑</button>'
-        +'<input type="file" data-file accept="application/pdf,.pdf" multiple style="display:none">';
+        +'<input type="file" data-file accept="application/pdf,.pdf" multiple class="dateifeld">';
       sec.append(head);
       const fi=head.querySelector('[data-file]');
       head.querySelector('[data-imp]').onclick=()=>fi.click();
@@ -3997,7 +4055,7 @@ function openLibrarySheet(){
       +'<div class="row" style="margin:0;gap:8px">'
       +'<button class="btn ghost" id="pkgExp" style="flex:1">⬇︎ Als Paket sichern</button>'
       +'<button class="btn ghost" id="pkgImp" style="flex:1">⬆︎ Paket einlesen</button>'
-      +'<input type="file" id="pkgFile" accept=".zip,application/zip" style="display:none"></div>'
+      +'<input type="file" id="pkgFile" accept=".zip,application/zip" class="dateifeld"></div>'
       +'<div class="muted" style="margin-top:6px">Bündelt alle eigenen Bücher samt PDFs in <b>einer</b> Datei – zum Sichern oder auf ein anderes Gerät übertragen. Einlesen führt zusammen (vorhandene Stücke werden übersprungen).</div>';
     card.append(pkg);
     pkg.querySelector('#pkgExp').onclick=()=>{ pkg.querySelector('#pkgExp').textContent='… wird erstellt'; exportPackage().finally(()=>{ const el=pkg.querySelector('#pkgExp'); if(el)el.textContent='⬇︎ Als Paket sichern'; }); };
@@ -4966,12 +5024,27 @@ const BS = (function(){
      ab, bleibt kein halbes Stueck zurueck und kein Element ohne seine Bytes.
      `gruppen` = [{titel:{...}, elemente:[{art,etikett,...,blob}]}]
 
+     Traegt eine Gruppe stattdessen `titelId`, wird KEIN neues Stueck angelegt:
+     die Blaetter haengen sich an das vorhandene an. Das ist der Weg, auf dem
+     eine spaeter nachgeladene Ausgabe eines Real Books andockt, statt das
+     Stueck zu verdoppeln. Entschieden wird das vorher in der Vorschau, nie
+     hier und nie von selbst.
+
      Gemessen: 0,10 ms je Blatt gegenueber 1,65 ms auf dem alten Weg, weil die
      alte Fassung je Blatt eine eigene Verbindung und Transaktion aufbaute.   */
   const BLOCK_ELEMENTE=500;   /* am echten Bestand vermessen */
   async function stueckeSchreiben(buchId, gruppen, fortschritt){
     if(!buchId) throw new Error('Ohne Buch kann nichts geschrieben werden.');
-    const bericht={stuecke:0, elemente:0, bytes:0, uebergangen:[]};
+    /* Fuer das Andocken: die hoechste bisherige Reihung je Stueck, damit die
+       neuen Blaetter hinten anschliessen und nicht auf Platz 0 landen. */
+    const andock=(gruppen||[]).some(g=>g && g.titelId);
+    let maxReihung={};
+    if(andock){
+      const k=await katalog();
+      k.elemente.forEach(e=>{ const r=(e.reihung||0)+1;
+        if(!(e.titelId in maxReihung) || r>maxReihung[e.titelId]) maxReihung[e.titelId]=r; });
+    }
+    const bericht={stuecke:0, angedockt:0, elemente:0, bytes:0, uebergangen:[]};
     /* Die Gesamtzahl zaehlt nur, was auch geschrieben werden kann. Zaehlte sie
        die uebergangenen Elemente mit, bliebe der Fortschritt kurz vor dem Ende
        stehen und kaeme nie an. */
@@ -4991,24 +5064,32 @@ const BS = (function(){
       if(!stapel.length) return;
       const jetztStapel=stapel; stapel=[]; stapelEl=0;
       await tx([S_TITEL,S_EL,S_BYTE],'readwrite',(t,el,by)=>{
-        jetztStapel.forEach(s=>{ t.put(s.tRec); s.eRecs.forEach(r=>el.put(r)); s.bRecs.forEach(r=>by.put(r)); });
+        /* Beim Andocken wird der Titel NICHT geschrieben: Er steht schon da,
+           und ein `put` wuerde seinen Komponisten und seinen Zeitstempel mit
+           dem ueberschreiben, was der Import gerade zu wissen glaubt. */
+        jetztStapel.forEach(s=>{ if(s.tRec) t.put(s.tRec);
+          s.eRecs.forEach(r=>el.put(r)); s.bRecs.forEach(r=>by.put(r)); });
       });
-      jetztStapel.forEach(s=>{ bericht.stuecke++; bericht.elemente+=s.eRecs.length;
+      jetztStapel.forEach(s=>{ if(s.tRec) bericht.stuecke++; else bericht.angedockt++;
+        bericht.elemente+=s.eRecs.length;
         bericht.bytes+=s.eRecs.reduce((a,r)=>a+r.groesse,0); getan+=s.eRecs.length; });
       if(fortschritt) fortschritt(getan, gesamt, letzterTitel);
     }
 
     for(const g of gruppen){
-      const tRec={ id:kennung('ti'), buchId, titel:((g.titel&&g.titel.titel)||'Stück').trim()||'Stück',
-                   komponist:((g.titel&&g.titel.komponist)||'').trim(),
-                   angelegt:jetzt(), geaendert:jetzt() };
+      const anhaengen = !!g.titelId;
+      const tRec = anhaengen ? null
+        : { id:kennung('ti'), buchId, titel:((g.titel&&g.titel.titel)||'Stück').trim()||'Stück',
+            komponist:((g.titel&&g.titel.komponist)||'').trim(),
+            angelegt:jetzt(), geaendert:jetzt() };
+      const tid = anhaengen ? g.titelId : tRec.id;
       const eRecs=[], bRecs=[];
-      let reihung=0;
+      let reihung = anhaengen ? (maxReihung[tid]||0) : 0;
       for(const e of (g.elemente||[])){
         if(!artOk(e.art)){ bericht.uebergangen.push({grund:'unbekannte Art', art:e.art, name:e.dateiname||''}); continue; }
         const id=kennung('el');
         const groesse=(e.blob&&e.blob.size)||0;
-        eRecs.push({ id, titelId:tRec.id, art:e.art,
+        eRecs.push({ id, titelId:tid, art:e.art,
                      etikett:(e.etikett||'').trim(), instrument:e.instrument||'',
                      reihung:reihung++, np:e.np||1,
                      dateiname:e.dateiname||'', groesse, ziel:e.ziel||'',
@@ -5016,7 +5097,8 @@ const BS = (function(){
         if(ARTEN[e.art].bytes && e.blob) bRecs.push({id, blob:e.blob});
       }
       if(!eRecs.length){ continue; }
-      stapel.push({tRec, eRecs, bRecs}); stapelEl+=eRecs.length; letzterTitel=tRec.titel;
+      stapel.push({tRec, eRecs, bRecs}); stapelEl+=eRecs.length;
+      letzterTitel = anhaengen ? ((g.titel&&g.titel.titel)||'Stück') : tRec.titel;
       if(stapelEl>=BLOCK_ELEMENTE) await stapelSchreiben();
     }
     await stapelSchreiben();
@@ -5519,7 +5601,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Stufe 1b+1c — Bestand aus der neuen Ablage';
+const APP_BUILD='2026-07-30 · Stufe 3 + Dateiwahl auf dem iPad';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -6213,7 +6295,7 @@ loadLibrary().then(render).catch(()=>{});
       +(p.kind==='pdf'?'<button class="pdetach" title="Vom Stück lösen → Sonstiges Material"><i class="i ic-external-link"></i></button>':'')
       +'<button class="pdel" title="Ganz entfernen (Datei löschen)"><i class="i ic-trash-2"></i></button></div>').join('')+'</div>'; }
     html+='<button class="btn" id="pAdd" style="width:100%;margin-top:10px">＋ Datei(en) hochladen</button>'
-      +'<input type="file" id="pFile" accept="application/pdf,audio/*,.pdf,.mp3,.m4a,.wav" multiple style="display:none">';
+      +'<input type="file" id="pFile" accept="application/pdf,audio/*,.pdf,.mp3,.m4a,.wav" multiple class="dateifeld">';
     sec.innerHTML=html;
     // Rolle je Zeile ändern
     sec.querySelectorAll('.prole-sel').forEach(sel=>{ sel.onchange=()=>{
@@ -7791,9 +7873,21 @@ loadLibrary().then(render).catch(()=>{});
      (Ordnerauswahl) oder aus dem Durchlaufen der hineingezogenen Ordner.
      Ohne Pfad steht dort nur der Dateiname. */
   let bandBid='', bandTrenner=' - ', bandDateien=[], bandHand={}, bandTitelHand={};
+  /* Die Ausgabe des Durchgangs — leer heisst „je Datei erkennen". Und die
+     Handentscheidung je Stueck, ob es an ein vorhandenes andockt. */
+  let bandAusgabe='', bandAndockHand={};
+  /* Die Ausgaben eines Buchs sind Stimmen, keine eigenen Buecher. Die Namen
+     stimmen mit STIMM_ORDNUNG ueberein, damit die Reihenfolge in der Zeile
+     dieselbe ist wie bei den frueher mitgelieferten Real Books. */
+  const AUSGABEN=[{wert:'',text:'Je Datei erkennen',ton:'aus dem Dateinamen'},
+                  {wert:'C',text:'C-Ausgabe',ton:'Klavier, Gitarre, Flöte'},
+                  {wert:'B♭',text:'B♭-Ausgabe',ton:'Tenor-Sax, Trompete, Klarinette'},
+                  {wert:'E♭',text:'E♭-Ausgabe',ton:'Alt-Sax, Bariton-Sax'},
+                  {wert:'Bass',text:'Bass-Ausgabe',ton:'Bassschlüssel'}];
   /* Welche Stuecke ihre Saetze zeigen. Voreingestellt keines. */
   const bandOffen=new Set();
   function bandZustand(){ bandDateien=[]; bandHand={}; bandTitelHand={}; bandTrenner=' - ';
+    bandAusgabe=''; bandAndockHand={};
     bandOffen.clear(); bandLetzte=null;
     /* Offene Fenster zeigen sonst Blaetter, die es nicht mehr gibt. */
     if(window.PDFW) PDFW.alleZu();
@@ -7916,7 +8010,23 @@ loadLibrary().then(render).catch(()=>{});
          darunter weitere Ordner liegen. Sonst gilt der alte Weg ueber das
          Trennzeichen im Dateinamen. */
       const ausOrdner = teile.length>1;
-      const roh = ausOrdner ? teile[0] : nameZerlegen(name, bandTrenner).titel;
+      /* Ohne Ordner zuerst das Trennzeichen versuchen; traegt der Name keines,
+         die Stelle suchen, an der die Stimme anfaengt. Das ist der Weg auf dem
+         iPad, wo es keine Ordnerwahl gibt. */
+      let zerlegt=null;
+      if(!ausOrdner){
+        zerlegt=nameZerlegen(name, bandTrenner);
+        if(zerlegt.rest){
+          /* Manche Saetze tragen die Stimme VORN: „Alto 1 - Blue Trane
+             Konzert". Dann sind Titel und Rest vertauscht — erkennbar daran,
+             dass der vordere Teil eine Stimme ist und der hintere keine. */
+          if(stimmeAmAnfang(zerlegt.titel) && !stimmeAmAnfang(zerlegt.rest))
+            zerlegt={ titel:zerlegt.rest, rest:zerlegt.titel };
+        } else {
+          const t=titelVorStimme(name); if(t) zerlegt=t;
+        }
+      }
+      const roh = ausOrdner ? teile[0] : zerlegt.titel;
       const schl = titelSchluessel(roh);
       if(!stuecke.has(schl)) stuecke.set(schl,
         { schl, roh, titel:titelSaeubern(roh), ausOrdner, saetze:[], toene:[] });
@@ -7930,7 +8040,7 @@ loadLibrary().then(render).catch(()=>{});
         uebergangen.push({file:e.file, pfad:e.pfad, name, grund:'weder PDF noch Ton'}); return; }
 
       const kennung = e.pfad || name;
-      const rest = ausOrdner ? restNachTitel(name, roh) : nameZerlegen(name, bandTrenner).rest;
+      const rest = ausOrdner ? restNachTitel(name, roh) : zerlegt.rest;
       /* Erst das Blatt, dann das Instrument — die Reihenfolge ist die gleiche
          wie in blattArt begruendet.
 
@@ -7939,12 +8049,18 @@ loadLibrary().then(render).catch(()=>{});
          sagen, worauf „Automatisch erkennen" hinausliefe. */
       const auto = blattArt(rest) || ((voiceAusText(rest)||{}).name) || '';
       const hand = bandHand[kennung] || '';
+      /* Ist eine Ausgabe angesagt, gilt sie fuer den ganzen Durchgang und
+         schlaegt die Erkennung aus dem Dateinamen. Ein Real Book traegt seine
+         Ausgabe nicht im Dateinamen — sie steht auf dem Umschlag, und der
+         kommt beim Import nicht mit. Deshalb wird sie gesagt und nicht
+         geraten. Eine Handwahl am einzelnen Blatt geht trotzdem vor. */
+      const ausg = bandAusgabe || '';
       /* `gruppe` ist die Kennung des Stuecks aus dieser Vorschau. Der Import
          buendelt danach — nicht nach dem Titeltext. Zwei Ordner desselben
          Namens bleiben dadurch zwei Stuecke und verschmelzen nicht. */
       const eintrag={file:e.file, pfad:e.pfad, name, kennung, titel, rest, auto, hand,
-                     gruppe: schl,
-                     voice: hand && hand!=='-' ? hand : auto};
+                     gruppe: schl, ausgabe: ausg,
+                     voice: hand && hand!=='-' ? hand : (ausg || auto)};
       if(hand==='-'){ ausgelassen.push(eintrag); return; }
       if(!eintrag.voice){ offen.push(eintrag); return; }
       saetze.push(eintrag);
@@ -7952,7 +8068,41 @@ loadLibrary().then(render).catch(()=>{});
     });
     const liste=[...stuecke.values()].filter(x=>x.saetze.length || x.toene.length);
     liste.forEach(x=>x.saetze.sort((a,b)=>stimmenRang(a.voice)-stimmenRang(b.voice)));
-    return { saetze, offen, toene, uebergangen, ausgelassen, stuecke:liste,
+
+    /* ---- Was im Zielbuch schon steht -----------------------------------
+       Gesucht wird nur im gewaehlten Buch und nur nach dem eingedampften
+       Titel. Gefunden heisst NICHT zusammengefuehrt: Es heisst, dass die
+       Vorschau danach fragt. Entschieden wird oben, nicht hier. */
+    let treffer=0;
+    if(bandBid){
+      const imBuch={};
+      (BS_KATALOG.titel||[]).filter(t=>t.buchId===bandBid).forEach(t=>{
+        const k=titelSchluessel(t.titel||'');
+        if(!(k in imBuch)) imBuch[k]={id:t.id, titel:t.titel,
+          blaetter:(BS_KATALOG.elemente||[]).filter(e=>e.titelId===t.id).length};
+      });
+      liste.forEach(st=>{
+        const k=titelSchluessel(st.titel||'');
+        st.vorhanden = imBuch[k] || null;
+        if(st.vorhanden) treffer++;
+        /* Andocken ist die Vorgabe, wenn eine Ausgabe angesagt ist — genau
+           dann laedt jemand eine zweite Fassung desselben Buchs nach. Sonst
+           ist die Vorgabe „eigenes Stueck". Beides je Stueck ueberschreibbar. */
+        const vorgabe = !!bandAusgabe;
+        st.andocken = st.vorhanden
+          ? (bandAndockHand[st.schl]!==undefined ? bandAndockHand[st.schl] : vorgabe)
+          : false;
+        if(st.andocken && st.vorhanden){
+          st.saetze.forEach(s=>{ s.andockAn=st.vorhanden.id; });
+        } else {
+          st.saetze.forEach(s=>{ delete s.andockAn; });
+        }
+      });
+    } else {
+      liste.forEach(st=>{ st.vorhanden=null; st.andocken=false;
+        st.saetze.forEach(s=>{ delete s.andockAn; }); });
+    }
+    return { saetze, offen, toene, uebergangen, ausgelassen, stuecke:liste, treffer,
              ordnerWeg: bandDateien.some(e=>String(e.pfad||'').includes('/')) };
   }
 
@@ -7979,7 +8129,19 @@ loadLibrary().then(render).catch(()=>{});
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
     const z_neu=zeile('Neues Buch','Bündelt die Sätze dieses Bandbuchs');
     z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
-    w.append(karte('Wohin',[z_buch, z_neu]));
+
+    /* Die Ausgabe. Ein Real Book traegt sie auf dem Umschlag und nicht im
+       Dateinamen — sie wird deshalb gesagt und nicht geraten. Gilt sie, ist
+       sie die Stimme aller Blaetter dieses Durchgangs. */
+    const jetztAus=AUSGABEN.find(a=>a.wert===bandAusgabe)||AUSGABEN[0];
+    const z_ausg=zeile('Ausgabe', bandAusgabe
+      ? 'Alle Blätter dieses Durchgangs werden die <b>'+esc(bandAusgabe)+'</b>-Stimme'
+      : 'Für Bandnoten richtig. Bei einem Real Book sag, welche Ausgabe der Stapel ist');
+    z_ausg._ctl.append(AWAHL.knopf(
+      ()=>({ wert:bandAusgabe, eintraege:AUSGABEN, text:jetztAus.text, ton:'' }),
+      neu=>{ bandAusgabe=neu; bandAndockHand={}; zeichne(); }, 'Ausgabe wählen'));
+
+    w.append(karte('Wohin',[z_buch, z_neu, z_ausg]));
 
     /* 2 — die Dateien. Der Ordner ist der Hauptweg: sein Name ist der Titel,
        und der ist verlaesslich. Am Bestand gemessen weicht der DATEIname in
@@ -7987,12 +8149,18 @@ loadLibrary().then(render).catch(()=>{});
        Dateinamen liest, macht aus einem Stueck drei. */
     const z_dat=zeile('Noten',
       bandDateien.length ? ('<b>'+bandDateien.length+'</b> Datei'+(bandDateien.length===1?'':'en')+' gelesen')
-                         : 'Ein Ordner je Stück — sein Name ist der Titel. Oder einzelne Dateien.');
-    z_dat._ctl.append(
-      knopf(bandDateien.length?'Anderen Ordner':'Ordner wählen', ()=>ordnerWaehlen()),
-      knopf('Dateien wählen',
+      : IST_IOS ? 'Auf dem iPad geht nur <b>Dateien wählen</b> — Safari kann hier keine Ordner auswählen. '
+                 +'Der Titel wird dann aus dem Dateinamen gelesen.'
+                : 'Ein Ordner je Stück — sein Name ist der Titel. Oder einzelne Dateien.');
+    /* Auf dem iPad steht die Dateiwahl vorn: Sie ist dort der einzige Weg, der
+       traegt. Der Ordner-Knopf bleibt trotzdem stehen — er sagt, wenn nichts
+       zurueckkam, statt zu schweigen. */
+    const kOrdner=knopf(bandDateien.length?'Anderen Ordner':'Ordner wählen', ()=>ordnerWaehlen());
+    const kDatei=knopf('Dateien wählen',
         ()=>dateiWaehlen(fs=>bandUebernehmen([...fs].map(f=>({file:f, pfad:f.name}))),
-                         'application/pdf,.pdf,audio/*', true)));
+                         'application/pdf,.pdf,audio/*', true));
+    if(IST_IOS) z_dat._ctl.append(kDatei, kOrdner);
+    else        z_dat._ctl.append(kOrdner, kDatei);
     const z_zieh=zeile('Hineinziehen','Ordner oder Dateien auf diese Seite ziehen — auch ganze Ordnerbäume');
     w.append(karte('Was',[z_dat, z_zieh]));
 
@@ -8014,12 +8182,55 @@ loadLibrary().then(render).catch(()=>{});
   /* Der Ordnerdialog ist eine Sache der Schreibtisch-Browser. Kann Safari auf
      dem iPad ihn nicht, bleibt der Weg ueber einzelne Dateien — deshalb steht
      der Knopf nur da, wo er auch etwas tut. */
-  function ordnerWaehlen(){
+  /* Ein Datei-Eingabefeld muss IM DOKUMENT haengen, bevor es angeklickt wird.
+     Safari auf dem iPad oeffnet den Dialog fuer ein losgeloestes Feld nicht —
+     ohne Fehler, ohne Meldung. Am Mac faellt das nicht auf, weil Safari und
+     Chrome dort grosszuegiger sind. Das war Jens' „eingefrorener" Knopf am
+     30. Juli: Der erste Griff ging noch, danach passierte gar nichts mehr.
+
+     Das Feld wird nach der Wahl wieder entfernt, damit sich keine Halde
+     unsichtbarer Felder ansammelt. */
+  function dateiFeld(bau, fertig){
     const i=document.createElement('input'); i.type='file';
-    i.webkitdirectory=true; i.multiple=true;
-    i.onchange=()=>{ if(!i.files.length) return;
-      bandUebernehmen([...i.files].map(f=>({file:f, pfad:f.webkitRelativePath||f.name}))); };
+    i.style.cssText='position:fixed;left:-9999px;width:1px;height:1px;opacity:0';
+    bau(i);
+    document.body.append(i);
+    const weg=()=>{ setTimeout(()=>{ try{ i.remove(); }catch(e){} }, 0); };
+    i.onchange=()=>{ const fs=[...i.files]; weg(); fertig(fs); };
+    /* Bricht der Nutzer ab, kommt kein `change`. Das Feld faellt dann beim
+       naechsten Blick auf das Fenster weg. */
+    window.addEventListener('focus', function nachher(){
+      window.removeEventListener('focus', nachher); setTimeout(weg, 1500); });
     i.click();
+  }
+
+  /* Auf iPhone und iPad gibt es keine Ordnerwahl: `webkitdirectory` ist dort
+     ohne Wirkung, obwohl die Eigenschaft existiert — eine Merkmalspruefung
+     hilft also nicht, es bleibt die Kennung des Geraets. Sie entscheidet nur
+     ueber den HINWEIS; der Knopf bleibt da, und wenn nichts zurueckkommt,
+     sagt die App es in jedem Fall. */
+  const IST_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+
+  function ordnerWaehlen(){
+    dateiFeld(i=>{ i.webkitdirectory=true; i.multiple=true; }, fs=>{
+      if(fs.length){
+        bandUebernehmen(fs.map(f=>({file:f, pfad:f.webkitRelativePath||f.name})));
+        return;
+      }
+      /* Nie stillschweigend nichts tun. Genau daran hat Jens am 30. Juli eine
+         halbe Stunde verloren. */
+      alert(IST_IOS
+        ? 'Aus diesem Dialog kam kein einziger Ordner zurück.\n\n'
+          +'Safari auf iPad und iPhone kann keine ORDNER auswählen — nur Dateien. '
+          +'Nimm „Dateien wählen" und markiere dort alle PDFs des Bandbuchs '
+          +'(im Dateien-Dialog oben rechts „Auswählen", dann „Alle auswählen").\n\n'
+          +'Der Titel wird dann aus dem Dateinamen gelesen statt aus dem Ordner. '
+          +'Am Mac steht der Ordner-Weg weiterhin zur Verfügung.'
+        : 'Aus diesem Dialog kam keine Datei zurück.\n\n'
+          +'Entweder wurde abgebrochen, oder der gewählte Ordner enthält keine Dateien. '
+          +'Liegen die Noten in einer Cloud, müssen sie vorher heruntergeladen sein.');
+    });
   }
   function bandUebernehmen(eintraege){
     /* Verstecktes von macOS und Windows faellt weg, sonst stuende „.DS_Store"
@@ -8028,10 +8239,26 @@ loadLibrary().then(render).catch(()=>{});
       const n=String(e.pfad||e.file.name);
       return !n.split('/').some(t=>t.startsWith('.'));
     });
-    bandHand={}; bandTitelHand={}; bandOffen.clear(); bandLetzte=null;
+    /* Auch die Ausgabe faellt zurueck auf „je Datei erkennen". Bliebe sie
+       stehen, bekaeme der naechste Stapel still die Stimme des vorigen — bei
+       vierhundert Blaettern faellt das erst auf, wenn es zu spaet ist. */
+    bandHand={}; bandTitelHand={}; bandAndockHand={}; bandAusgabe='';
+    bandOffen.clear(); bandLetzte=null;
     PDFW.alleZu();
     zeichne();
   }
+
+  /* Prueflatte fuer die Konsole — dieselbe Absicht wie `gruppenBericht` und
+     `blattArt`: Der Import laesst sich damit ohne Dateiwaehler durchspielen und
+     in Zahlen nachweisen. Er ruft nur, was der Knopf auch ruft. */
+  window.bandPruef = {
+    uebernehmen: e => bandUebernehmen(e),
+    lesen:       () => bandLesen(),
+    ausgabe:     v => { bandAusgabe = v||''; bandAndockHand={}; zeichne(); },
+    buch:        b => { bandBid = b; zeichne(); },
+    andocken:    (schl, an) => { bandAndockHand[schl]=an; zeichne(); },
+    zustand:     () => ({ bandBid, bandAusgabe, dateien:bandDateien.length, bandAndockHand }),
+  };
 
   /* Ordner hineinziehen. Der Browser gibt Verzeichnisse nur ueber
      `webkitGetAsEntry` heraus; ohne das Durchlaufen kaeme nur die oberste
@@ -8106,7 +8333,37 @@ loadLibrary().then(render).catch(()=>{});
     const z_woher=zeile('Woher der Titel kommt', v.ordnerWeg
       ? 'Aus dem <b>Ordnernamen</b> — der ist verlässlicher als der Dateiname'
       : 'Aus dem <b>Dateinamen</b>, weil keine Ordner dabei sind');
-    halter.append(karte('Vorschau',[z_zahl, z_woher]));
+    const vorschauZeilen=[z_zahl, z_woher];
+    if(bandAusgabe) vorschauZeilen.push(zeile('Ausgabe',
+      'Alle Sätze bekommen die Stimme <b>'+esc(bandAusgabe)+'</b>'));
+    halter.append(karte('Vorschau',vorschauZeilen));
+
+    /* ---- Was es im Buch schon gibt --------------------------------------
+       Nichts davon geschieht von selbst. Die Karte sagt, was gefunden wurde,
+       und stellt die Frage; geschrieben wird erst auf „Jetzt importieren". */
+    if(v.treffer){
+      const andockZahl=v.stuecke.filter(s=>s.andocken).length;
+      const kopf=zeile('Gefunden',
+        '<b>'+v.treffer+'</b> der gelesenen Stücke '+(v.treffer===1?'steht':'stehen')
+        +' schon in „'+esc((userBook(bandBid)||{}).name||'')+'"'
+        +(bandAusgabe ? ' — beim Nachladen einer Ausgabe ist Andocken das Übliche' : ''));
+      const alle=zeile('Für alle', andockZahl+' von '+v.treffer+' docken an');
+      alle._ctl.append(
+        knopf('Alle andocken', ()=>{ v.stuecke.forEach(s=>{ if(s.vorhanden) bandAndockHand[s.schl]=true; }); zeichneVorschau(); }),
+        knopf('Alle einzeln', ()=>{ v.stuecke.forEach(s=>{ if(s.vorhanden) bandAndockHand[s.schl]=false; }); zeichneVorschau(); }));
+      const zeilen=[kopf, alle];
+      v.stuecke.filter(s=>s.vorhanden).slice(0,14).forEach(s=>{
+        const z=zeile('', s.andocken
+          ? 'wird die '+ (s.saetze.length===1?'Stimme':'Stimmen') +' des vorhandenen Stücks ('
+            + s.vorhanden.blaetter + (s.vorhanden.blaetter===1?' Blatt':' Blätter') + ')'
+          : 'wird ein zweites Stück gleichen Namens');
+        z.querySelector('.lb').innerHTML='<b>'+esc(s.titel)+'</b>';
+        z._ctl.append(schalter(!!s.andocken, an=>{ bandAndockHand[s.schl]=an; zeichneVorschau(); }));
+        zeilen.push(z);
+      });
+      if(v.treffer>14) zeilen.push(zeile('…','und '+(v.treffer-14)+' weitere, alle nach der Vorgabe oben'));
+      halter.append(karte('Schon im Buch ('+v.treffer+')', zeilen));
+    }
 
     /* Was sich nicht zuordnen liess, steht einzeln da. Es verschwindet nicht
        stillschweigend und wird auch nicht geraten. */
@@ -8206,15 +8463,27 @@ loadLibrary().then(render).catch(()=>{});
     }
 
     const bereit = bandBid && v.saetze.length && !v.offen.length;
+    const andockZahl=v.stuecke.filter(s=>s.andocken).length;
+    const neuZahl=v.stuecke.length-andockZahl;
     const z_go=zeile('Importieren',
       !bandBid ? 'Wähle oben ein Buch'
       : !v.saetze.length ? 'Es ist nichts zuzuordnen'
       : v.offen.length ? 'Erst die nicht zugeordneten Dateien klären — zuweisen oder auslassen'
-      : '<b>'+v.saetze.length+'</b> Sätze in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben');
+      : '<b>'+v.saetze.length+'</b> Sätze in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
+        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : ''));
     const b=knopf('Jetzt importieren', async ()=>{
-      b.disabled=true; b.textContent='Importiere…';
-      const n=await importBandbuch(bandBid, v.saetze);
-      alert(n+' '+(n===1?'Satz':'Sätze')+' importiert.');
+      b.disabled=true;
+      /* Bei 400 Blaettern dauert das spuerbar. Der Knopf sagt, wo es steht,
+         statt still zu warten. */
+      const ber=await importBandbuch(bandBid, v.saetze, (was,a,g)=>{
+        b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
+      });
+      const z=window._letzterImport||{};
+      alert('Import fertig.\n'
+        + (ber||0)+' '+((ber===1)?'Satz':'Sätze')+' geschrieben.\n'
+        + (z.stuecke||0)+' neue Stücke'
+        + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
+        + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
       unter='noten'; bandZustand(); zeichne();
     });
     b.disabled=!bereit;
@@ -8326,12 +8595,11 @@ loadLibrary().then(render).catch(()=>{});
     };
   })();
 
+  /* Dieselbe Falle wie bei der Ordnerwahl: Das Feld muss im Dokument haengen,
+     sonst oeffnet Safari auf dem iPad den Dialog nicht. */
   function dateiWaehlen(tu, arten, mehrere){
-    const i=document.createElement('input'); i.type='file';
-    i.accept=arten||'application/json,.json';
-    if(mehrere) i.multiple=true;
-    i.onchange=()=>{ if(!i.files.length) return; tu(mehrere ? [...i.files] : i.files[0]); };
-    i.click();
+    dateiFeld(i=>{ i.accept=arten||'application/json,.json'; if(mehrere) i.multiple=true; },
+      fs=>{ if(!fs.length) return; tu(mehrere ? fs : fs[0]); });
   }
   function alleNotizenLoeschen(){
     const notizen=USER.filter(t=>t.isEdit);
