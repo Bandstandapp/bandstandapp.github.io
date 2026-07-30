@@ -465,6 +465,11 @@
     background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--r-16);
     box-shadow:var(--shadow-dlg);padding:12px 14px 13px;display:none;flex-direction:column;gap:10px}
   .selbar.open{display:flex}
+  /* Die Auswahl-Leiste gehoert der Hauptliste. Steht Setup offen, verdeckte
+     sie dessen Werkzeugleiste — und seit „Im Content zeigen" ist genau das
+     der uebliche Weg. Die Auswahl bleibt stehen und kommt beim Schliessen
+     zurueck; nur die Leiste tritt beiseite. */
+  body[data-page="setup"] .selbar.open{display:none}
   .selbar-head{display:flex;align-items:center;gap:12px}
   .selbar-head .cnt{font:700 13.5px/1.3 var(--font-sans);color:var(--text)}
   .selbar-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -1349,7 +1354,7 @@
     <button class="btn ghost" id="vFitBtn" title="Vollbild – ganze Seite, ohne Menüs">⛶ Vollbild</button>
     <button class="btn ghost" id="vEditBtn" title="Handschriftliche Notiz">✏️ Notiz</button>
     <button class="btn ghost" id="vMetaBtn" title="Titel &amp; Komponist korrigieren" style="display:none">✎ Titel</button>
-    <button class="btn ghost" id="vShare" title="Teilen (Apple Share)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Teilen</button>
+    <button class="btn ghost" id="vShare" title="Weitergeben — die Datei über das Teilen-Blatt des Geräts"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Weitergeben</button>
     <button class="btn ghost" id="vPrint" title="Drucken">🖨 Drucken</button>
     <button class="btn ghost" id="vTab">↗</button>
     <button class="btn" id="vClose">Schließen</button>
@@ -1368,7 +1373,7 @@
       <button class="gb" data-a="set"   title="Zu Setlist"><i class="i ic-list-plus"></i></button>
       <span class="gsep"></span>
       <button class="gb" data-a="note"  title="Handschriftliche Notiz"><i class="i ic-pencil"></i></button>
-      <button class="gb" data-a="share" title="Teilen — auch Drucken"><i class="i ic-share"></i></button>
+      <button class="gb" data-a="share" title="Weitergeben — auch Drucken"><i class="i ic-share"></i></button>
       <button class="gb" data-a="full"  title="Vollbild"><i class="i ic-maximize"></i></button>
     </div>
   </div>
@@ -2614,10 +2619,21 @@ function renderSelBar(){
   mk('★ ＋', ()=>bulkSet(S.fav,true));
   mk('★ −', ()=>bulkSet(S.fav,false));
   mk('🏷 Tags', bulkTagsFlow);
-  mk('⤴ Teilen', bulkShare);
+  /* „Weitergeben" reicht die Dateien an das Teilen-Blatt des Geraets — lose
+     PDFs an irgendein Programm. Das ist etwas anderes als „Als Paket teilen"
+     in Content, wo ein BandStand-Paket fuer ein anderes BandStand entsteht.
+     Bis zum 30. Juli hiessen beide „Teilen". */
+  mk('⤴ Weitergeben', bulkShare);
   mk('🖨 Drucken', bulkPrint);
   if(S.view==='set' && S.openSet) mk('Aus Setlist entfernen', bulkRemoveFromSet);
   if(hasSelectedNotes()) mk('🗑 Notiz löschen', bulkDeleteNotes);
+  /* Die Bruecke nach Content. Die Hauptliste fasst den Bestand nicht an;
+     Umbenennen, Verschieben und Entfernen stehen dort. Am 30. Juli mit Jens
+     so festgelegt: eine Regel, zwei Tueren. */
+  const titelIds=[...new Set([...S.selection].map(k=>byKey[k])
+                   .filter(t=>t&&t.titelId).map(t=>t.titelId))];
+  if(titelIds.length && window.contentZeigen)
+    mk('Im Content zeigen', ()=>window.contentZeigen(titelIds));
   bar.classList.add('open'); a11y(bar);
 }
 document.getElementById('selClear').onclick=()=>{ S.selection.clear(); refreshSelUI(); };
@@ -2686,7 +2702,7 @@ async function bulkShare(){
     if(navigator.share){ await navigator.share({title:items.length+' Titel', text:items.map(t=>t.t).join(', ')}); return; }
   }catch(e){ if(e&&e.name==='AbortError')return; }
   finally{ urlFreigebenViele(items); }
-  alert('Teilen ist hier nicht verfügbar (nur über localhost/Netlify bzw. die installierte App). Ich öffne stattdessen den Druck-Dialog.');
+  alert('Weitergeben ist hier nicht verfügbar (nur über localhost oder die veröffentlichte Adresse bzw. die installierte App). Ich öffne stattdessen den Druck-Dialog.');
   bulkPrint();
 }
 /* Das Fenster wird VOR dem Warten geoeffnet. Nach einem `await` gilt der Klick
@@ -3355,7 +3371,7 @@ async function shareTune(t){
        if(navigator.share){ await navigator.share({title, text:title}); return; } }
   catch(e){ if(e && e.name==='AbortError') return; }
   // 3) Web Share nicht verfügbar (z. B. Doppelklick/file://)
-  alert('Teilen ist hier nicht verfügbar – es funktioniert in der installierten App bzw. über die gehostete Adresse (Netlify) oder localhost. Ich öffne stattdessen den Druck-Dialog.');
+  alert('Weitergeben ist hier nicht verfügbar – es funktioniert in der installierten App bzw. über die veröffentlichte Adresse oder localhost. Ich öffne stattdessen den Druck-Dialog.');
   printCurrent(t);
 }
 function printCurrent(t){
@@ -3604,7 +3620,7 @@ function renderOneSet(main){
     <h2 style="margin:4px 2px;font-size:20px">${esc(st.name)} <span class="muted">(${st.items.length})</span></h2>
     <div class="row">
       <button class="btn" id="playAll" ${st.items.length?'':'disabled'}>▶ Durchblättern</button>
-      <button class="btn ghost" id="shareAll" ${st.items.length?'':'disabled'}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Teilen</button>
+      <button class="btn ghost" id="shareAll" ${st.items.length?'':'disabled'}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Weitergeben</button>
       <button class="btn ghost" id="printAll" ${st.items.length?'':'disabled'}>🖨 Drucken</button>
       <span class="danger" id="del" style="margin-left:auto">Löschen</span>
     </div><div class="muted" style="padding:0 2px">Zum Sortieren am Griff ⣿ ziehen.</div>`;
@@ -5749,7 +5765,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Komponist zurück, alter Dialog weg';
+const APP_BUILD='2026-07-30 · Weitergeben und Als Paket teilen';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -7858,6 +7874,15 @@ loadLibrary().then(render).catch(()=>{});
         zeichne();
       }, 'Stimme festlegen'));
       if(BS.ARTEN[r.el.art].bytes) z._ctl.append(knopf('Vorschau', ()=>cVorschau(r.el)));
+      /* Der Weg zurueck auf die Buehne. Die Vorschau schwebt ueber Content und
+         dient dem Pruefen; „Aufschlagen" verlaesst Content und legt das Blatt
+         auf die Buehne — genau die Zeile, die hier steht, und nicht die, die
+         die Voice-Wahl von selbst waehlen wuerde. Deshalb der Stimmwunsch. */
+      if(BS.ARTEN[r.el.art].oeffnen==='buehne'){
+        const t=LIBTUNES.find(x=>x.libId===r.el.id);
+        if(t) z._ctl.append(knopf('Aufschlagen', ()=>{
+          zu(); window.stimmWunsch(t.stimme||''); window.openViewer(t); }));
+      }
     }
     return z;
   }
@@ -7910,7 +7935,11 @@ loadLibrary().then(render).catch(()=>{});
         knopf('Verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
         knopf('Kopieren',    ()=>{ cAktion={art:'kopieren',    ebene:eb, ids}; zeichne(); }));
     }
-    if(eb==='titel') z._ctl.append(knopf('Teilen', ()=>cTeilen(ids)));
+    /* „Als Paket teilen" und nicht „Teilen": Hier entsteht ein BandStand-Paket
+       fuer ein anderes BandStand. Die Hauptliste reicht mit „Weitergeben" lose
+       PDFs an das Teilen-Blatt des Geraets — zwei verschiedene Dinge, die bis
+       zum 30. Juli beide „Teilen" hiessen. */
+    if(eb==='titel') z._ctl.append(knopf('Als Paket teilen', ()=>cTeilen(ids)));
     z._ctl.append(knopf('Entfernen', ()=>cEntfernen(eb, ids), 'warn'));
     return z;
   }
@@ -8002,8 +8031,9 @@ loadLibrary().then(render).catch(()=>{});
     cAktion=null;
     let arten=cArtenVorgabe();
     openSheet(card=>{
-      card.innerHTML='<h2>Teilen</h2><div class="muted" style="margin:-6px 0 14px">'
-        +titelIds.length+' Titel als Paket weitergeben. Welche Arten von Elementen sollen mit?</div>';
+      card.innerHTML='<h2>Als Paket teilen</h2><div class="muted" style="margin:-6px 0 14px">'
+        +titelIds.length+' Titel als Paket für ein anderes BandStand. '
+        +'Welche Arten von Elementen sollen mit?</div>';
       const liste=document.createElement('div');
       Object.keys(BS.ARTEN).forEach(k=>{
         const a=BS.ARTEN[k];
@@ -8093,7 +8123,7 @@ loadLibrary().then(render).catch(()=>{});
         'Viele PDFs auf einmal — Titel und Stimme werden aus dem Namen gelesen, und Du siehst vorher, was erkannt wurde');
       z_add._ctl.append(knopf('Öffnen', ()=>{ unter='bandbuch'; bandZustand(); zeichne(); }));
       const z_alle=zeile('Alle Titel',
-        'Quer über alle Bücher — zum Zusammenstellen und Weitergeben');
+        'Quer über alle Bücher — zum Zusammenstellen und als Paket teilen');
       z_alle._ctl.append(knopf('Öffnen ›', ()=>{ cFlach=true; cZuruecksetzen(); zeichne(); }));
       const z_korb=zeile('Papierkorb','Entferntes zurückholen oder endgültig löschen');
       z_korb._ctl.append(knopf('Öffnen ›', ()=>{ cKorb=true; zeichne(); }));
@@ -8216,6 +8246,38 @@ loadLibrary().then(render).catch(()=>{});
       precacheZeichnen();
     }
   }
+  /* ================================================================
+     Die Bruecke von der Hauptliste nach Content.
+
+     Am 30. Juli mit Jens festgelegt (Frage 1, Weg A): Die Hauptliste ist zum
+     Spielen und aendert am Bestand nichts; Content ist zum Ordnen. Wer aus
+     der Liste heraus umbenennen, verschieben oder entfernen will, kommt
+     hierher — mit seiner Auswahl.
+
+     Uebergeben werden TITEL-Kennungen, nicht die Schluessel der Hauptliste.
+     Die Hauptliste zeigt je Stueck genau eine Zeile, naemlich die Stimme, die
+     zur Voice passt; welche der vier Ausgaben das ist, darf die Ordnung nicht
+     bestimmen. Der Titel ist die gemeinsame Sache.
+
+     Liegen alle gewaehlten Titel in EINEM Buch, geht Content dort auf. Sonst
+     auf der flachen Ebene „Alle Titel" — nur dort stehen Titel aus
+     verschiedenen Buechern nebeneinander, und nur dort bleibt eine Auswahl
+     ueber Buchgrenzen sichtbar.
+     ================================================================ */
+  window.contentZeigen = function(titelIds){
+    const K=BS_KATALOG;
+    const bekannt=new Set((K.titel||[]).map(t=>t.id));
+    const ids=[...new Set([].concat(titelIds||[]).filter(id=>bekannt.has(id)))];
+    if(!ids.length){ alert('Zu dieser Auswahl gibt es keinen Titel im Bestand.'); return; }
+    const buecher=[...new Set(ids.map(id=>(K.titel||[]).find(t=>t.id===id).buchId))];
+    thema='content'; unter=null; cKorb=false; cAktion=null;
+    cSuche=''; cBuchst='';
+    if(buecher.length===1){ cFlach=false; cPfad=[buecher[0]]; }
+    else                  { cFlach=true;  cPfad=[]; }
+    cWahl=new Set(ids);
+    auf();
+  };
+
   /* Prueflatte fuer die Konsole, wie `bandPruef` und `gruppenBericht`. Sie
      ruft nur, was die Oberflaeche auch ruft. */
   window.cPruef = {
@@ -8229,6 +8291,7 @@ loadLibrary().then(render).catch(()=>{});
     ziel:     (art, ebene, ids, zielId) => cZielAusfuehren(art, ebene, ids, zielId),
     entfernen:(ebene, ids) => cEntfernen(ebene, [].concat(ids)),
     teilen:   ids => cTeilen([].concat(ids)),
+    zeigen:   ids => window.contentZeigen([].concat(ids)),
     krumen:   () => document.querySelector('.suphead h2').innerText.replace(/\s+/g,' ').trim(),
     zustand:  () => ({ ebene:cEbene(), pfad:cPfad.slice(), flach:cFlach, korb:cKorb,
                        wahl:[...cWahl], aktion:cAktion, reihen:cReihen().length }),
