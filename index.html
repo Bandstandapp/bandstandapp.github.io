@@ -5765,7 +5765,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Weitergeben und Als Paket teilen';
+const APP_BUILD='2026-07-30 · Der Papierkorb nennt das Blatt';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -7948,10 +7948,22 @@ loadLibrary().then(render).catch(()=>{});
     const was = eb==='buch' ? (ids.length===1?'dieses Buch':ids.length+' Bücher')
               : eb==='titel'? (ids.length===1?'diesen Titel':ids.length+' Titel')
               :               (ids.length===1?'dieses Element':ids.length+' Elemente');
-    if(!confirm(was+' entfernen?\n\n'
-      + (eb==='buch' ? 'Die Titel und Elemente darin gehen mit.\n\n' : '')
-      + 'Es wandert in den Papierkorb; die Dateien bleiben liegen. '
-      + 'Endgültig gelöscht wird erst dort.')) return;
+    /* Auf der Element-Ebene heisst Entfernen genau das, was Jens am 30. Juli
+       mit „Löschen" gemeint hat: die Verbindung zwischen Blatt und Titel wird
+       geloest, die Datei bleibt liegen. Das steht jetzt da, statt dass man es
+       aus „wandert in den Papierkorb" erschliessen muss. Und wer bloss den
+       falschen Titel erwischt hat, wird auf Verschieben gestossen — dort
+       entsteht kein Zwischenzustand, in dem das Blatt nirgends haengt. */
+    const text = eb==='element'
+      ? was+' entfernen?\n\n'
+        + 'Die Verbindung zum Titel wird gelöst. Die Datei bleibt liegen und '
+        + 'lässt sich aus dem Papierkorb zurückholen.\n\n'
+        + 'Hängt sie nur am falschen Titel, ist Verschieben der kürzere Weg.'
+      : was+' entfernen?\n\n'
+        + (eb==='buch' ? 'Die Titel und Elemente darin gehen mit.\n\n' : '')
+        + 'Es wandert in den Papierkorb; die Dateien bleiben liegen. '
+        + 'Endgültig gelöscht wird erst dort.';
+    if(!confirm(text)) return;
     try{ await BS.loeschen(eb, ids, 'aus Content entfernt'); }
     catch(e){ alert('Entfernen fehlgeschlagen: '+(e&&e.message||e)); return; }
     /* Verweise in Favoriten, Übungsliste, Tags und Setlists mitnehmen. */
@@ -8088,22 +8100,63 @@ loadLibrary().then(render).catch(()=>{});
         if(!confirm('Papierkorb endgültig leeren?\n\nDanach sind die Dateien weg.')) return;
         const r=await BS.korbLeeren();
         await loadLibrary(); render(); zeichne();
-        alert('Geleert: '+r.eintraege+' Einträge, '+(r.bytes/1048576).toFixed(1)+' MB freigegeben.');
+        alert('Geleert: '+zahlwort(r.eintraege,'Eintrag','Einträge')+', '
+              +(r.bytes/1048576).toFixed(1)+' MB freigegeben.');
       },'warn'));
       const zeilen=[kopf];
+      /* „1 Element" und nicht „1 Elemente". Derselbe Fehler stand am 30. Juli
+         schon einmal als „1 Sätze" da. */
+      const zahlwort=(n,eins,viele)=>n+' '+(n===1?eins:viele);
+      /* Ein Eintrag, der NUR Elemente enthaelt, hatte bis zum 30. Juli keinen
+         Namen: Der Name wurde allein aus Buechern und Titeln gebaut, und so
+         stand dort bloss „1 Elemente · 30.7.2026 · aus Content entfernt".
+         Welches Blatt gemeint war, liess sich nicht erkennen — als Rueckweg
+         gerade noch brauchbar, als Ablageort nicht.
+
+         Den Titel liefert entweder der Eintrag selbst (wenn der Titel
+         mitgeloescht wurde) oder der Katalog (wenn nur das Blatt geloest
+         wurde). Findet sich keiner, tut es der Dateiname. */
+      const titelName=(id, eintrag)=>{
+        const t=(eintrag.titel||[]).find(y=>y.id===id)
+             || (BS_KATALOG.titel||[]).find(y=>y.id===id);
+        return t ? t.titel : '';
+      };
+      const etikett=el=> el.etikett || el.instrument || el.dateiname
+                      || (BS.ARTEN[el.art]||{}).name || 'Element';
+      const elementName=(el, eintrag)=>
+        [titelName(el.titelId, eintrag), etikett(el)].filter(Boolean).join(' · ');
+      /* Mehrere Stimmen EINES Titels sind der haeufigste Fall. Dann gehoert
+         der Titel einmal genannt und nicht vor jede Stimme — sonst steht da
+         „Autumn Leaves · Trompete, Autumn Leaves · Posaune, Autumn Leaves ·
+         Bass …", wo „Autumn Leaves · Trompete, Posaune, Bass …" gemeint ist. */
+      const elementNamen=(eintrag)=>{
+        const els=eintrag.elemente||[]; if(!els.length) return [];
+        const einer=els.every(el=>el.titelId===els[0].titelId)
+                 && titelName(els[0].titelId, eintrag);
+        return einer
+          ? [einer+' · '+els.map(etikett).slice(0,4).join(', ')+(els.length>4?' …':'')]
+          : els.map(el=>elementName(el,eintrag)).filter(Boolean);
+      };
       e.slice(0,40).forEach(x=>{
         const teile=[];
-        if(x.zahl.buecher) teile.push(x.zahl.buecher+' Bücher');
-        if(x.zahl.titel)   teile.push(x.zahl.titel+' Titel');
-        if(x.zahl.elemente)teile.push(x.zahl.elemente+' Elemente');
+        if(x.zahl.buecher) teile.push(zahlwort(x.zahl.buecher,'Buch','Bücher'));
+        if(x.zahl.titel)   teile.push(zahlwort(x.zahl.titel,'Titel','Titel'));
+        if(x.zahl.elemente)teile.push(zahlwort(x.zahl.elemente,'Element','Elemente'));
         const wann=new Date(x.geloescht).toLocaleString('de-DE');
-        const namen=[].concat(x.buecher||[],x.titel||[]).map(o=>o.name||o.titel).filter(Boolean).slice(0,3);
-        const r=zeile(namen.length?namen.join(', '):teile.join(', '),
+        const oben=[].concat(x.buecher||[],x.titel||[]).map(o=>o.name||o.titel).filter(Boolean);
+        const quelle = oben.length ? oben : elementNamen(x);
+        const namen = quelle.slice(0,3).join(', ') + (quelle.length>3 ? ' …' : '');
+        const r=zeile(namen || teile.join(', '),
           teile.join(' · ')+' · '+esc(wann)+(x.anlass?' · '+esc(x.anlass):''));
         r._ctl.append(knopf('Zurückholen', async()=>{
           try{ const z=await BS.wiederherstellen(x.id);
             await loadLibrary(); render(); zeichne();
-            alert('Zurückgeholt: '+(z.buecher||0)+' Bücher, '+(z.titel||0)+' Titel, '+(z.elemente||0)+' Elemente.');
+            /* Nur nennen, was tatsaechlich zurueckkam — „0 Bücher, 0 Titel,
+               1 Elemente" war weder richtig noch lesbar. */
+            const w=[]; if(z.buecher) w.push(zahlwort(z.buecher,'Buch','Bücher'));
+            if(z.titel) w.push(zahlwort(z.titel,'Titel','Titel'));
+            if(z.elemente) w.push(zahlwort(z.elemente,'Element','Elemente'));
+            alert('Zurückgeholt: '+(w.join(', ')||'nichts')+'.');
           }catch(err){ alert('Fehlgeschlagen: '+(err&&err.message||err)); }
         }));
         zeilen.push(r);
