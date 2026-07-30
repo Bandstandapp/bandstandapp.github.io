@@ -1261,6 +1261,23 @@
      angeklickt wie jedes andere. */
   .dateifeld{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
 
+  /* Der Brotkrumenpfad in der Kopfzeile des Setups. Er sagt, wo man ist; die
+     anklickbaren Teile führen zurück. */
+  /* Die Zeilen im Content tragen mehr Steuerung als eine normale Setup-Zeile:
+     Haken, Namensfeld, Stimmen-Wahl, Vorschau. Wird die Flaeche schmal, muessen
+     sie umbrechen duerfen — sonst quetscht `.ctl` das Namensfeld auf null, und
+     der Untertitel bricht Wort fuer Wort. Auf dem iPad im Querformat passt
+     alles in eine Zeile; auf dem iPhone nicht. */
+  .srow.crow{flex-wrap:wrap;gap:10px 12px}
+  .srow.crow>:first-child{flex:1 1 240px;min-width:0}
+  .srow.crow .ctl{flex-wrap:wrap;margin-left:auto}
+  .srow.crow .txt{min-width:120px}
+
+  .krume{white-space:nowrap}
+  .krumeTr{opacity:.45;margin:0 .45em;font-weight:400}
+  .krume.klick{cursor:pointer;color:var(--text-muted)}
+  @media (hover:hover){ .krume.klick:hover{color:var(--accent-bright)} }
+
   /* Die Zeile traegt seit Schritt 7 in beiden Ausrichtungen dieselben Masse —
      sie sind fuer die schmale Spalte des Querformats entworfen. Nur die
      Auswahl-Box wird dort kleiner. */
@@ -1823,6 +1840,51 @@ function titelVorStimme(dateiname){
 window.titelVorStimme = titelVorStimme;
 window.stimmeAmAnfang = stimmeAmAnfang;
 
+/* ---- Das Etikett: was auf dem Schalter steht ---------------------------
+   In der Regel ist es der Instrumentenname; „Alt-Sax" ist genau richtig. Nur
+   wenn ZWEI Blaetter desselben Stuecks auf dasselbe Instrument fallen, sagt
+   der Name nichts mehr — dann stand bei `Bienentanz` zweimal „Alt-Sax" und man
+   musste raten. Erst dort wird der Rest des Dateinamens herangezogen, also
+   Jens' eigene Schreibweise: „Alt 1", „Alt 2". Reicht der Rest nicht, wird
+   durchgezaehlt.
+
+   Diese Rechnung stand bis zum 30. Juli nur im Import. Die Vorschau zeigte
+   deshalb „Alt-Sax · Alt-Sax", geschrieben wurde aber „Alt 1" und „Alt 2" —
+   die Vorschau zeigte etwas anderes als das Ergebnis. Jetzt rechnen beide mit
+   dieser einen Funktion.
+
+   `saetze` = [{instrument, rest}] und bekommt `.etikett` gesetzt.
+   `vorhandene` = Instrumente der Blaetter, die am Stueck schon haengen. */
+const ETIKETT_ZUSATZ=/(^|[\s_\-–—]+)(neu|new|kopie|copy|final)\s*\d*(?=$|[\s_\-–—])/gi;
+function etikettSauber(r){
+  return String(r||'')
+    .replace(ETIKETT_ZUSATZ,' ')
+    .replace(/[\s_\-–—:.,]+/g,' ')
+    .replace(/\s+/g,' ').trim().slice(0,18);
+}
+function etikettenBerechnen(saetze, vorhandene){
+  const zahl={}, lauf={};
+  (vorhandene||[]).forEach(i=>{ const k=i||''; zahl[k]=(zahl[k]||0)+1; lauf[k]=(lauf[k]||0)+1; });
+  (saetze||[]).forEach(s=>{ const k=s.instrument||''; zahl[k]=(zahl[k]||0)+1; });
+  (saetze||[]).forEach(s=>{
+    const k=s.instrument||'';
+    if(zahl[k]<=1){ s.etikett=k; return; }
+    const r=etikettSauber(s.rest);
+    lauf[k]=(lauf[k]||0)+1;
+    s.etikett = (r && r.length<=18) ? r : (k+' '+lauf[k]);
+  });
+  return saetze;
+}
+/* Ordnen: erst nach dem Instrument, dann nach dem Etikett. Ohne den zweiten
+   Schluessel stehen „Alt 2" und „Alt 1" in der Reihenfolge, in der die
+   Dateien hereinkamen. */
+function nachStimmeOrdnen(a, b){
+  return (stimmenRang(a.instrument||a.voice||'') - stimmenRang(b.instrument||b.voice||''))
+      || String(a.etikett||'').localeCompare(String(b.etikett||''),'de',{numeric:true});
+}
+window.etikettenBerechnen = etikettenBerechnen;
+window.nachStimmeOrdnen = nachStimmeOrdnen;
+
 /* Die Reihenfolge der Stimmen. Tonarten stehen fest; Bandstimmen folgen der
    Voice-Liste — also der Ordnung, die Jens im Setup durch Ziehen setzt. */
 function stimmenRang(s){
@@ -2115,7 +2177,7 @@ function markeZahlen(){
   el.innerHTML = '<div class="buecher">'+kopf
                + namen.map(n=>'<div class="buch" title="'+esc(n)+'">'+esc(n)+'</div>').join('')
                + '</div>'
-               + '<div class="summe">'+stk.toLocaleString('de-DE')+' Stücke'+extra+'</div>';
+               + '<div class="summe">'+stk.toLocaleString('de-DE')+' Titel'+extra+'</div>';
 }
 (function(){
   markeZahlen();
@@ -2525,7 +2587,7 @@ function selectAllRow(keys){
   const sync=()=>{
     const n=S.selection.size;
     b.classList.toggle('on', n>0); b.innerHTML = n>0 ? '✓' : '';
-    t.textContent = n>0 ? ('Ausgewählt: '+n+' '+(n===1?'Stück':'Stücke'))
+    t.textContent = n>0 ? ('Ausgewählt: '+n+' '+(n===1?'Titel':'Titel'))
                         : ('Alle auswählen ('+keys.length+')');
   };
   row.append(b,t); sync(); row.addEventListener('rf',sync);
@@ -2620,8 +2682,8 @@ async function bulkShare(){
   try{ const files=[];
     for(const t of items){ if(t.isEdit) continue; if(!t.f) continue;
       const bl=await (await fetch(encodeURI(t.f))).blob(); files.push(new File([bl],safeName(t.t)+'.pdf',{type:'application/pdf'})); }
-    if(files.length && navigator.canShare && navigator.canShare({files})){ await navigator.share({files, title:items.length+' Stücke'}); return; }
-    if(navigator.share){ await navigator.share({title:items.length+' Stücke', text:items.map(t=>t.t).join(', ')}); return; }
+    if(files.length && navigator.canShare && navigator.canShare({files})){ await navigator.share({files, title:items.length+' Titel'}); return; }
+    if(navigator.share){ await navigator.share({title:items.length+' Titel', text:items.map(t=>t.t).join(', ')}); return; }
   }catch(e){ if(e&&e.name==='AbortError')return; }
   finally{ urlFreigebenViele(items); }
   alert('Teilen ist hier nicht verfügbar (nur über localhost/Netlify bzw. die installierte App). Ich öffne stattdessen den Druck-Dialog.');
@@ -2630,7 +2692,7 @@ async function bulkShare(){
 /* Das Fenster wird VOR dem Warten geoeffnet. Nach einem `await` gilt der Klick
    nicht mehr als Nutzerhandlung, und der Pop-up-Blocker haelt es zurueck. */
 async function bulkPrint(){
-  const items=[...S.selection].map(k=>byKey[k]).filter(t=>t&&!t.isEdit); if(!items.length){ alert('Keine druckbaren Stücke ausgewählt.'); return; }
+  const items=[...S.selection].map(k=>byKey[k]).filter(t=>t&&!t.isEdit); if(!items.length){ alert('Keine druckbaren Titel ausgewählt.'); return; }
   const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
   w.document.write('<html><head><title>Auswahl ('+items.length+')</title></head><body style="margin:0;font:14px system-ui;color:#222"><p style="padding:16px">Blätter werden geholt…</p></body></html>');
   await urlSichernViele(items);
@@ -3309,7 +3371,7 @@ function printCurrent(t){
     return; }
   const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
   urlSichern(t).then(url=>{
-    if(!url){ try{ w.close(); }catch(e){} alert('Für dieses Stück ist keine Datei hinterlegt.'); return; }
+    if(!url){ try{ w.close(); }catch(e){} alert('Für diesen Titel ist keine Datei hinterlegt.'); return; }
     w.location.href=encodeURI(url);
     try{ w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
   });
@@ -3511,7 +3573,7 @@ function renderRecent(main){
   main.append(head);
   head.querySelector('#sName').onclick=()=>setRecentSort('name');
   head.querySelector('#sDate').onclick=()=>setRecentSort('date');
-  if(!entries.length){ main.insertAdjacentHTML('beforeend','<div class="empty">Noch keine Stücke gespielt.<br>Öffne ein Stück – danach erscheint es hier.</div>'); return; }
+  if(!entries.length){ main.insertAdjacentHTML('beforeend','<div class="empty">Noch keine Titel gespielt.<br>Öffne einen Titel – danach erscheint er hier.</div>'); return; }
   LISTNAV=entries.map(x=>x.t.key);
   listFix(entries.map(x=>x.t.key));
   const ul=document.createElement('ul'); ul.className='list'; main.append(ul);
@@ -3524,7 +3586,7 @@ function renderSets(main){
   main.append(bar);
   bar.querySelector('#mkS').onclick=()=>{const v=bar.querySelector('#nS').value.trim();if(!v)return;
     S.sets.push({id:uid('s'),name:v,items:[],updatedAt:Date.now()});save();render();};
-  if(!S.sets.length){main.insertAdjacentHTML('beforeend','<div class="empty">Noch keine Setlists.<br>Tippe bei einem Stück auf ＋.</div>');return;}
+  if(!S.sets.length){main.insertAdjacentHTML('beforeend','<div class="empty">Noch keine Setlists.<br>Tippe bei einem Titel auf ＋.</div>');return;}
   const ul=document.createElement('ul'); ul.className='list'; main.append(ul);
   S.sets.forEach(st=>{
     const li=document.createElement('li'); li.className='tune';
@@ -3552,7 +3614,7 @@ function renderOneSet(main){
   head.querySelector('#playAll').onclick=()=>playSequence(st);
   head.querySelector('#shareAll').onclick=()=>shareSetlist(st);
   head.querySelector('#printAll').onclick=()=>printSetlist(st);
-  if(!st.items.length){main.insertAdjacentHTML('beforeend','<div class="empty">Leer. Füge Stücke über ＋ hinzu.</div>');LISTNAV=[];return;}
+  if(!st.items.length){main.insertAdjacentHTML('beforeend','<div class="empty">Leer. Füge Titel über ＋ hinzu.</div>');LISTNAV=[];return;}
   LISTNAV=st.items.filter(k=>byKey[k]);
   listFix(st.items.filter(k=>byKey[k]));
   const ul=document.createElement('ul'); ul.className='list'; ul.id='setUL'; main.append(ul);
@@ -3775,7 +3837,7 @@ function openDataSheet(){
     const rs=document.createElement('div'); rs.style.cssText='border-top:1px solid var(--line);padding-top:14px;margin-top:14px';
     rs.innerHTML='<div class="lbl" style="margin:0 0 8px">Kategorie „Sonstiges Material"</div>'
       +'<div class="row" style="margin:0"><div class="chip'+(S.sonstOn?' active':'')+'" id="sonstTog">'+(S.sonstOn?'✓ ':'')+'In Listen anzeigen</div></div>'
-      +'<div class="muted" style="margin-top:6px">Enthält deine bearbeiteten (und künftig hochgeladenen) Stücke. Als eigenes „Buch" auswählbar. Standardmäßig eingeschaltet.</div>';
+      +'<div class="muted" style="margin-top:6px">Enthält deine bearbeiteten (und künftig hochgeladenen) Titel. Als eigenes „Buch" auswählbar. Standardmäßig eingeschaltet.</div>';
     card.append(rs);
     rs.querySelector('#sonstTog').onclick=()=>{ S.sonstOn=!S.sonstOn; localStorage.setItem('rb_sonston',S.sonstOn?'1':'0'); openDataSheet(); render(); };
     const r2=document.createElement('div'); r2.style.cssText='border-top:1px solid var(--line);padding-top:14px;margin-top:14px';
@@ -3847,10 +3909,10 @@ async function importPdfs(bid, files){
   const treffer=[...new Set(saetze.map(s=>titelSchluessel(s.titel)).filter(k=>imBuch[k]))];
   if(treffer.length){
     const andocken=confirm(
-      treffer.length+' der Blätter '+(treffer.length===1?'gehört':'gehören')+' zu einem Stück, '
+      treffer.length+' der Blätter '+(treffer.length===1?'gehört':'gehören')+' zu einem Titel, '
       +'das in diesem Buch schon steht.\n\n'
-      +'OK: als weitere Stimme zum vorhandenen Stück legen\n'
-      +'Abbrechen: als eigenes Stück anlegen');
+      +'OK: als weitere Stimme zum vorhandenen Titel legen\n'
+      +'Abbrechen: als eigenen Titel anlegen');
     if(andocken) saetze.forEach(s=>{ const id=imBuch[titelSchluessel(s.titel)]; if(id) s.andockAn=id; });
   }
 
@@ -3894,40 +3956,19 @@ async function importBandbuch(bid, saetze, fortschritt){
   const gruppen=[...nachStueck.values()];
 
   /* ---- Das Etikett ----------------------------------------------------
-     In der Regel ist das Etikett der Instrumentenname: „Alt-Sax" ist genau,
-     was auf dem Schalter stehen soll. Nur wenn ZWEI Blaetter desselben
-     Stuecks auf dasselbe Instrument fallen, sagt der Name nichts mehr — dann
-     stand bei `Bienentanz` zweimal „Alt-Sax", und man musste raten.
-
-     Erst dort wird der Rest des Dateinamens herangezogen, also Jens'
-     eigene Schreibweise: „Alt 1", „Alt 2". Nur dort, denn ein Rest wie
-     „Sheet in Eb" waere auf dem Schalter schlechter als „B♭". Reicht der Rest
-     nicht, wird durchgezaehlt. */
-  /* Derselbe Zusatz, den die Titelsaeuberung entfernt, gehoert auch nicht auf
-     den Schalter: „Alt 1 NEU" beschreibt die Fassung des Ordners, nicht die
-     Stimme. Er faellt am Ende UND vor der Endung weg. */
-  const ETIKETT_ZUSATZ=/(^|[\s_\-–—]+)(neu|new|kopie|copy|final)\s*\d*(?=$|[\s_\-–—])/gi;
-  const restSauber = r => (r||'')
-      .replace(ETIKETT_ZUSATZ,' ')
-      .replace(/[\s_\-–—:.,]+/g,' ')
-      .replace(/\s+/g,' ').trim().slice(0,18);
+     Gerechnet wird mit `etikettenBerechnen` — derselben Funktion, mit der die
+     Vorschau anzeigt. Beim Andocken zaehlen die Blaetter mit, die am Stueck
+     schon haengen; sonst hiessen ein vorhandenes und ein neues Alt-Blatt beide
+     „Alt-Sax". Dieselben Eingaben, dasselbe Ergebnis: Was die Vorschau zeigt,
+     wird auch geschrieben. */
   for(const g of gruppen){
-    const zahl={}, lauf={};
-    /* Beim Andocken zaehlen die Blaetter mit, die schon am Stueck haengen.
-       Sonst hiessen ein vorhandenes und ein neues Alt-Blatt beide „Alt-Sax". */
-    if(g.titelId){
-      (BS_KATALOG.elemente||[]).filter(e=>e.titelId===g.titelId).forEach(e=>{
-        const k=e.instrument||''; zahl[k]=(zahl[k]||0)+1; lauf[k]=(lauf[k]||0)+1; });
-    }
-    g.elemente.forEach(e=>{ const k=e.instrument||''; zahl[k]=(zahl[k]||0)+1; });
-    g.elemente.forEach(e=>{
-      const k=e.instrument||'';
-      if(zahl[k]<=1){ e.etikett=k; delete e._rest; return; }
-      const r=restSauber(e._rest);
-      lauf[k]=(lauf[k]||0)+1;
-      e.etikett = (r && r.length<=18) ? r : (k+' '+lauf[k]);
-      delete e._rest;
-    });
+    const vorhandene = g.titelId
+      ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===g.titelId).map(e=>e.instrument||'')
+      : [];
+    const paare=g.elemente.map(e=>({instrument:e.instrument||'', rest:e._rest||''}));
+    etikettenBerechnen(paare, vorhandene);
+    g.elemente.forEach((e,i)=>{ e.etikett=paare[i].etikett; delete e._rest; });
+    g.elemente.sort(nachStimmeOrdnen);
   }
   /* Seitenzahl aus den Bytes, mit PDF.js als Rueckfallweg. */
   let gelesen=0;
@@ -4022,7 +4063,7 @@ async function exportLibTune(id){ const r=await libGet(id); if(!r||!r.blob) retu
 function openLibrarySheet(){
   openSheet(card=>{
     card.innerHTML='<h2>Eigene Noten</h2><div class="muted" style="margin:-6px 0 14px">'
-      +'Lege eigene „Bücher" an und importiere PDF-Dateien (ein PDF = ein Stück). Sie erscheinen in der normalen Liste und lassen sich nach Buch filtern. Alles bleibt lokal auf dem Gerät.</div>';
+      +'Lege eigene „Bücher" an und importiere PDF-Dateien (ein PDF = ein Titel). Sie erscheinen in der normalen Liste und lassen sich nach Buch filtern. Alles bleibt lokal auf dem Gerät.</div>';
     // Neues Buch anlegen
     const nb=document.createElement('div'); nb.className='newrow'; nb.style.cssText='display:flex;gap:8px;margin-bottom:6px';
     nb.innerHTML='<input class="txt" id="nbName" placeholder="Name des neuen Buchs, z. B. Meine Standards" style="flex:1">'
@@ -5168,6 +5209,73 @@ const BS = (function(){
     })).then(p=>p);
   }
 
+  /* ---- Verschieben ------------------------------------------------------
+     Ein Titel wandert in ein anderes Buch, ein Element an einen anderen Titel.
+     Die Kennung bleibt, die Bytes bleiben liegen, nur der Verweis nach oben
+     aendert sich. Genau dafuer ist der Titel eine eigene Sache: Das ist EIN
+     Schreibvorgang und kein Umkopieren.                                     */
+  async function verschieben(art, ids, zielId){
+    ids=[].concat(ids||[]); if(!ids.length || !zielId) return 0;
+    const k=await katalog();
+    if(art==='titel'){
+      if(!k.buecher.some(b=>b.id===zielId)) throw new Error('Das Zielbuch gibt es nicht.');
+      const betroffen=k.titel.filter(t=>ids.includes(t.id) && t.buchId!==zielId);
+      if(!betroffen.length) return 0;
+      await tx(S_TITEL,'readwrite',st=>{ betroffen.forEach(t=>{
+        st.put({...t, buchId:zielId, geaendert:jetzt()}); }); });
+      return betroffen.length;
+    }
+    if(art==='element'){
+      if(!k.titel.some(t=>t.id===zielId)) throw new Error('Den Ziel-Titel gibt es nicht.');
+      const betroffen=k.elemente.filter(e=>ids.includes(e.id) && e.titelId!==zielId);
+      if(!betroffen.length) return 0;
+      let r=k.elemente.filter(e=>e.titelId===zielId).reduce((a,e)=>Math.max(a,(e.reihung||0)+1),0);
+      await tx(S_EL,'readwrite',st=>{ betroffen.forEach(e=>{
+        st.put({...e, titelId:zielId, reihung:r++, geaendert:jetzt()}); }); });
+      return betroffen.length;
+    }
+    throw new Error('Verschieben gibt es nur für Titel und Elemente.');
+  }
+
+  /* ---- Kopieren ---------------------------------------------------------
+     Anders als das Verschieben entstehen hier NEUE Kennungen und die Bytes
+     werden ein zweites Mal abgelegt. Eine Kopie ist ein eigenes Ding; sonst
+     wuerde eine Notiz am Original auch an der Kopie haengen.               */
+  async function kopieren(art, ids, zielId){
+    ids=[].concat(ids||[]); if(!ids.length || !zielId) return 0;
+    const k=await katalog();
+    let zahl=0;
+    if(art==='titel'){
+      if(!k.buecher.some(b=>b.id===zielId)) throw new Error('Das Zielbuch gibt es nicht.');
+      for(const t of k.titel.filter(x=>ids.includes(x.id))){
+        const neuT={ ...t, id:kennung('ti'), buchId:zielId, angelegt:jetzt(), geaendert:jetzt() };
+        const el=k.elemente.filter(e=>e.titelId===t.id).sort((a,b)=>(a.reihung||0)-(b.reihung||0));
+        const paare=[];
+        for(const e of el){ const b=await bytes(e.id);
+          paare.push({rec:{...e, id:kennung('el'), titelId:neuT.id, angelegt:jetzt(), geaendert:jetzt()}, blob:b}); }
+        await tx([S_TITEL,S_EL,S_BYTE],'readwrite',(t2,e2,b2)=>{
+          t2.put(neuT);
+          paare.forEach(p=>{ e2.put(p.rec); if(p.blob) b2.put({id:p.rec.id, blob:p.blob}); });
+        });
+        zahl++;
+      }
+      return zahl;
+    }
+    if(art==='element'){
+      const ziel=k.titel.find(t=>t.id===zielId);
+      if(!ziel) throw new Error('Den Ziel-Titel gibt es nicht.');
+      let r=k.elemente.filter(e=>e.titelId===zielId).reduce((a,e)=>Math.max(a,(e.reihung||0)+1),0);
+      for(const e of k.elemente.filter(x=>ids.includes(x.id))){
+        const b=await bytes(e.id);
+        const rec={...e, id:kennung('el'), titelId:zielId, reihung:r++, angelegt:jetzt(), geaendert:jetzt()};
+        await tx([S_EL,S_BYTE],'readwrite',(e2,b2)=>{ e2.put(rec); if(b) b2.put({id:rec.id, blob:b}); });
+        zahl++;
+      }
+      return zahl;
+    }
+    throw new Error('Kopieren gibt es nur für Titel und Elemente.');
+  }
+
   /* ---- Bytes auf Zuruf --------------------------------------------------
      Eine Object-URL entsteht beim Aufschlagen und wird beim Schliessen wieder
      eingezogen. Ein kleiner Vorrat bleibt offen, damit Blaettern nicht jedes
@@ -5324,14 +5432,22 @@ const BS = (function(){
      Wiedereinlesen haelt sich an den Katalog. Ohne Kompression, weil PDFs
      schon komprimiert sind.                                                 */
   function _sauber(s){ return (s||'').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,' ').trim().slice(0,80) || 'ohne Namen'; }
-  async function exportieren({arten, fortschritt}={}){
+  /* `titelIds` schraenkt den Export auf eine Auswahl ein — der Weg, auf dem
+     man eine Sammlung ueber Buchgrenzen hinweg weitergibt. Ohne die Angabe
+     geht der ganze Bestand hinaus. */
+  async function exportieren({arten, titelIds, fortschritt}={}){
     if(typeof JSZip==='undefined') throw new Error('JSZip fehlt.');
-    const k=await katalog();
-    if(!k.elemente.length && !k.buecher.length) throw new Error('Der Bestand ist leer.');
+    const kAlles=await katalog();
+    const nurDiese = titelIds && titelIds.length ? new Set(titelIds) : null;
+    const k = nurDiese
+      ? { titel: kAlles.titel.filter(t=>nurDiese.has(t.id)),
+          elemente: kAlles.elemente.filter(e=>nurDiese.has(e.titelId)),
+          buecher: kAlles.buecher.filter(b=>kAlles.titel.some(t=>nurDiese.has(t.id) && t.buchId===b.id)) }
+      : kAlles;
+    if(!k.elemente.length && !k.buecher.length) throw new Error('Es ist nichts zum Exportieren gewählt.');
     const erlaubt = arten || Object.keys(ARTEN).filter(a=>ARTEN[a].austausch==='immer');
     const zip=new JSZip();
     const buchById=Object.fromEntries(k.buecher.map(b=>[b.id,b]));
-    const titelById=Object.fromEntries(k.titel.map(t=>[t.id,t]));
     const nachTitel={}; k.elemente.forEach(e=>(nachTitel[e.titelId]=nachTitel[e.titelId]||[]).push(e));
     const kandidaten=k.elemente.filter(e=>erlaubt.includes(e.art) && ARTEN[e.art].bytes);
     /* Der Zaehler heisst nicht `bytes`: Das wuerde die Funktion `bytes()`
@@ -5400,6 +5516,7 @@ const BS = (function(){
   return { DB, VER, ARTEN, oeffnen, schliessen, geraet, kennung,
            seitenzahlAusBytes, seitenzahl,
            katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
+           verschieben, kopieren,
            bytes, urlLeihen, urlZurueck, leiheLeeren,
            loeschen, korb, wiederherstellen, korbLeeren,
            sicherung, sicherungen, sicherungAlsDatei,
@@ -5449,7 +5566,7 @@ async function openEditor(t){
   let doc;
   try{
     await urlSichern(t);
-    if(!t.f) throw new Error('Für dieses Stück ist keine Datei hinterlegt.');
+    if(!t.f) throw new Error('Für diesen Titel ist keine Datei hinterlegt.');
     doc=await loadPdf(t.f);
   }catch(err){
     stage.innerHTML='<div style="color:#e6eef6;margin:auto;text-align:center;padding:24px;max-width:34em">'
@@ -5627,7 +5744,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Dateiwahl behoben';
+const APP_BUILD='2026-07-30 · Content — ein Fenster, drei Ebenen';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -7225,7 +7342,7 @@ loadLibrary().then(render).catch(()=>{});
   function listenHTML(){
     let html='';
     html+='<div class="ntitle">Setlists</div>';
-    if(!S.sets.length) html+='<div class="muted" style="padding:6px 10px 10px">Noch keine Setlist. Tippe bei einem Stück auf ＋.</div>';
+    if(!S.sets.length) html+='<div class="muted" style="padding:6px 10px 10px">Noch keine Setlist. Tippe bei einem Titel auf ＋.</div>';
     else S.sets.forEach(st=>{
       html+='<div class="dlgrow" data-set="'+esc(st.id)+'"><i class="i ic-list-music"></i>'
         +'<span class="nm">'+esc(st.name)+'</span>'
@@ -7301,7 +7418,7 @@ loadLibrary().then(render).catch(()=>{});
   document.body.dataset.tagline = G(AN.tagline) || 'book';
 
   const THEMEN = [
-    ['buecher',    'Bücher',                'book-open'],
+    ['content',    'Content',               'book-open'],
     ['instrument', 'Voice',                 'music'],
     ['darstellung','Darstellung',           'star'],
     ['werkzeug',   'Werkzeugleiste',        'grip-vertical'],
@@ -7309,12 +7426,36 @@ loadLibrary().then(render).catch(()=>{});
     ['sicherung',  'Sicherung und Abgleich','download'],
     ['ueber',      'Über',                  'settings'],
   ];
-  const UNTERTITEL = { noten:'Notenbestand verwalten',
-                       einzeln:'Einzeln sichern und teilen',
+  const UNTERTITEL = { einzeln:'Einzeln sichern und teilen',
                        offline:'Noten offline speichern',
                        instrumente:'Voices verwalten',
-                       bandbuch:'Bandbuch importieren' };
-  let thema='buecher', unter=null;
+                       bandbuch:'Noten hinzufügen' };
+  let thema='content', unter=null;
+
+  /* ================================================================
+     Content — der Bestand, in einem Fenster.
+
+     Drei Ebenen, eine Liste, eine Werkzeugleiste. Wo Du bist, sagt der
+     Brotkrumenpfad in der Kopfzeile; die Ebene folgt daraus und wird nicht
+     eigens gewaehlt. Am 30. Juli mit Jens so festgelegt.
+
+     Vorher steckte das Verwalten in einer Unterseite und der Import in einer
+     Unterseite DAVON — zwei verschachtelte „Öffnen", und die Verschachtelung
+     behauptete, Importieren sei ein Unterfall von Verwalten. Ist es nicht.
+     ================================================================ */
+  let cPfad=[];              /* [] = Bücher · [buchId] = Titel · [buchId,titelId] = Elemente */
+  let cFlach=false;          /* die Ebene „Alle Titel", quer über alle Bücher */
+  let cWahl=new Set();       /* was auf dieser Ebene angehakt ist */
+  let cSuche='', cBuchst='';
+  let cAktion=null;          /* {art:'verschieben'|'kopieren', ebene, ids} */
+  let cKorb=false;
+  const C_ARTEN_KEY='bs_teilen_arten';
+
+  function cZuruecksetzen(){ cWahl=new Set(); }
+  function cEbene(){ return cFlach ? 'titel' : (cPfad.length===0 ? 'buch' : cPfad.length===1 ? 'titel' : 'element'); }
+  const cBuch  = () => (BS_KATALOG.buecher||[]).find(b=>b.id===cPfad[0]) || null;
+  const cTitel = () => (BS_KATALOG.titel||[]).find(t=>t.id===cPfad[1]) || null;
+  const EBENE_NAME={buch:'Buch', titel:'Titel', element:'Element'};
 
   /* ---- Bausteine einer Zeile ---- */
   function zeile(lb, sb){
@@ -7368,28 +7509,60 @@ loadLibrary().then(render).catch(()=>{});
       n.append(d);
     });
   }
+  /* Der Brotkrumenpfad. Er sagt, WO man ist — nicht, was man gerade tut: Die
+     Handlung steht als Überschrift ihres Schrittes. Sonst wanderte die Ebene
+     aus dem Pfad, sobald eine Funktion läuft, und man wüsste nicht mehr,
+     worauf sie wirkt. */
+  function cKrumen(){
+    const teile=[{text:'Content', tu:()=>{ cPfad=[]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); }}];
+    if(cKorb) teile.push({text:'Papierkorb'});
+    else if(cFlach) teile.push({text:'Alle Titel'});
+    else {
+      const b=cBuch(); if(b) teile.push({text:b.name,
+        tu:()=>{ cPfad=[b.id]; cAktion=null; cZuruecksetzen(); zeichne(); }});
+      const t=cTitel(); if(t) teile.push({text:t.titel});
+    }
+    return teile;
+  }
   function kopfSetzen(){
     const h=document.querySelector('.suphead'); if(!h) return;
-    h.querySelector('h2').textContent = unter ? UNTERTITEL[unter] : 'Setup';
+    const h2=h.querySelector('h2');
+    if(thema==='content' && !unter){
+      const teile=cKrumen();
+      h2.innerHTML=teile.map((t,i)=>
+        (i?'<span class="krumeTr"> › </span>':'')
+        + '<span class="krume'+(t.tu?' klick':'')+'" data-k="'+i+'">'+esc(t.text)+'</span>').join('');
+      h2.querySelectorAll('.krume.klick').forEach(el=>{
+        const t=teile[+el.dataset.k]; el.onclick=t.tu;
+      });
+    } else {
+      h2.textContent = unter ? UNTERTITEL[unter] : 'Setup';
+    }
     let z=h.querySelector('#supBack');
-    if(!unter){ if(z) z.remove(); return; }
+    const zurueckNoetig = unter || (thema==='content' && (cPfad.length || cFlach || cKorb || cAktion));
+    if(!zurueckNoetig){ if(z) z.remove(); return; }
     if(!z){
       z=document.createElement('button'); z.className='dlgclose'; z.id='supBack';
       z.title='Zurück'; z.innerHTML='<i class="i ic-arrow-left"></i>'; z.style.marginLeft='0';
-      z.onclick=()=>{ unter=null; zeichne(); };
       h.prepend(z);
     }
+    z.onclick=()=>{
+      if(unter){ unter=null; zeichne(); return; }
+      if(cAktion){ cAktion=null; zeichne(); return; }
+      if(cKorb){ cKorb=false; zeichne(); return; }
+      if(cFlach){ cFlach=false; cZuruecksetzen(); zeichne(); return; }
+      cPfad.pop(); cZuruecksetzen(); zeichne();
+    };
   }
   function zeichne(){
     kopfSetzen(); themenZeichnen();
     const w=document.getElementById('supScroll'); if(!w) return;
     w.innerHTML='';
-    if(unter==='noten')       return zeichneNoten(w);
     if(unter==='einzeln')     return zeichneEinzeln(w);
     if(unter==='offline')     return zeichneOffline(w);
     if(unter==='instrumente') return zeichneInstrumente(w);
     if(unter==='bandbuch')    return zeichneBandbuch(w);
-    ({ buecher:themaBuecher, instrument:themaInstrument, darstellung:themaDarstellung,
+    ({ content:themaContent, instrument:themaInstrument, darstellung:themaDarstellung,
        werkzeug:themaWerkzeug, listen:themaListen, sicherung:themaSicherung,
        ueber:themaUeber }[thema])(w);
   }
@@ -7411,7 +7584,7 @@ loadLibrary().then(render).catch(()=>{});
 
     const stufe=(n,txt)=>zeile(n+'. Stufe', txt);
     w.append(karte('So wird die Stimme gewählt',[
-      stufe(1,'Eine Stimme, die so heißt wie die Voice — deutsch oder englisch. Das trifft im Bandbuch zu.'),
+      stufe(1,'Eine Stimme, die so heißt wie die Voice — deutsch oder englisch. Das trifft bei Bandnoten zu.'),
       stufe(2,'Sonst eine Stimme in der Notation der Voice — das trifft in den Real Books zu.'),
       stufe(3,'Sonst die C-Ausgabe, und gibt es die nicht, die erste vorhandene.'),
     ]));
@@ -7572,47 +7745,486 @@ loadLibrary().then(render).catch(()=>{});
   }
 
   /* ---- Thema: Bücher ---- */
-  function themaBuecher(w){
-    const gewaehlt=offlineAuswahl();
-    const z_off=zeile('Noten offline speichern',
-      gewaehlt.length ? gewaehlt.length+' von '+alleBuecher().length+' Büchern gewählt'
-                      : 'Noch keine Auswahl — es werden alle Bücher gespeichert');
-    z_off._sb.id='precacheStatus';
-    const balken=document.createElement('div'); balken.className='sbar'; balken.id='precacheBar';
-    balken.innerHTML='<i></i>'; z_off._sb.parentNode.append(balken);
-    z_off._ctl.append(knopf('Bücher wählen', ()=>{ unter='offline'; zeichne(); }));
-    const offKnopf=knopf('Starten', ()=>precacheStart(offlineUrls())); offKnopf.id='precacheBtn';
-    z_off._ctl.append(offKnopf);
-    const z_sonst=zeile('Kategorie „Sonstiges Material"',
-      'Deine bearbeiteten Stücke in den Listen zeigen');
-    z_sonst._ctl.append(schalter(S.sonstOn, an=>{
-      S.sonstOn=an; Sset('rb_sonston', an?'1':'0'); render();
-    }));
-    w.append(karte('Offline',[z_off,z_sonst]));
+  /* ---- Thema: Content — der Bestand in einem Fenster ------------------ */
+  function themaContent(w){
+    if(cKorb)   return cZeichneKorb(w);
+    if(cAktion) return cZeichneZiel(w);
+    return cZeichneEbene(w);
+  }
 
-    const z_verw=zeile('Notenbestand verwalten',
-      'Eigene Bücher anlegen, PDFs importieren, Titel und Komponist nachtragen, '
-      +'einzelne Blätter ansehen und löschen');
-    z_verw._ctl.append(knopf('Öffnen', ()=>{ unter='noten'; zeichne(); }));
-    /* Das Fenster, mit dem man ein Blatt ansieht. Beim Zuordnen von
-       hundertachtzig Blaettern ist der Unterschied zwischen einem und zwei
-       Griffen je Blatt kein Detail mehr. */
-    const z_fw=zeile('Vorschau-Fenster nach der Stimmenwahl',
-      'Beim Zuordnen vieler Blätter am Stück spart „Schließen" je Blatt einen Griff');
-    z_fw._ctl.append(wahl([['knopf','Offen lassen'],['wahl','Schließen']],
-      pdfwZuNachWahl()?'wahl':'knopf',
-      v=>pdfwZuNachWahlSetzen(v==='wahl')));
-    const z_pkg=zeile('Sammlung als Paket sichern',
-      'Bündelt alle eigenen Bücher samt PDFs in einer Datei');
-    const pkgKnopf=knopf('Sichern', ()=>{
-      pkgKnopf.textContent='… wird erstellt';
-      exportPackage().finally(()=>{ pkgKnopf.textContent='Sichern'; });
+  /* Was auf dieser Ebene in der Liste steht. Eine Zeile ist ein Ding mit
+     Kennung, Namen, einer Kennzahl und dem Weg nach unten. */
+  function cReihen(){
+    const K=BS_KATALOG;
+    if(cFlach){
+      const buchName={}; (K.buecher||[]).forEach(b=>buchName[b.id]=b.name);
+      let t=(K.titel||[]).slice();
+      if(cSuche){ const q=norm(cSuche);
+        t=t.filter(x=>norm(x.titel).includes(q) || norm(x.komponist||'').includes(q)); }
+      if(cBuchst){ t=t.filter(x=>initialOf({t:x.titel})===cBuchst); }
+      return t.sort((a,b)=>(a.titel||'').localeCompare(b.titel||'','de'))
+              .map(x=>({ id:x.id, name:x.titel,
+                unten: (x.komponist? esc(x.komponist)+' · ':'') + esc(buchName[x.buchId]||'')
+                       + ' · ' + (K.elemente||[]).filter(e=>e.titelId===x.id).length + ' Elemente',
+                zahl:'' }));
+    }
+    if(cPfad.length===0){
+      return (K.buecher||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
+        .map(b=>{ const tz=(K.titel||[]).filter(t=>t.buchId===b.id);
+          const ez=(K.elemente||[]).filter(e=>tz.some(t=>t.id===e.titelId));
+          return { id:b.id, name:b.name,
+            unten: tz.length+(tz.length===1?' Titel':' Titel')+' · '+ez.length+(ez.length===1?' Element':' Elemente'),
+            hinein:()=>{ cPfad=[b.id]; cZuruecksetzen(); zeichne(); } }; });
+    }
+    if(cPfad.length===1){
+      return (K.titel||[]).filter(t=>t.buchId===cPfad[0])
+        .sort((a,b)=>(a.titel||'').localeCompare(b.titel||'','de'))
+        .map(t=>{ const el=(K.elemente||[]).filter(e=>e.titelId===t.id)
+                    .sort((a,b)=>(a.reihung||0)-(b.reihung||0));
+          return { id:t.id, name:t.titel,
+            unten: (t.komponist? esc(t.komponist)+' · ':'')
+                   + (el.length ? esc(el.map(e=>e.etikett||e.instrument||e.art).join(' · '))
+                                : '<i>noch keine Elemente</i>'),
+            hinein:()=>{ cPfad=[cPfad[0], t.id]; cZuruecksetzen(); zeichne(); } }; });
+    }
+    return (BS_KATALOG.elemente||[]).filter(e=>e.titelId===cPfad[1])
+      .sort((a,b)=>(a.reihung||0)-(b.reihung||0))
+      .map(e=>({ id:e.id, name:e.etikett||e.instrument||BS.ARTEN[e.art].name,
+        unten: BS.ARTEN[e.art].name + ' · ' + esc(e.dateiname||'ohne Datei')
+               + (e.np>1 ? ' · '+e.np+' Seiten' : '')
+               + (e.etikett && e.instrument && e.etikett!==e.instrument ? ' · erkannt als '+esc(e.instrument) : ''),
+        el:e }));
+  }
+
+  /* Eine Listenzeile mit Haken. Die Mehrfachauswahl ist der Normalfall — auf
+     jeder Ebene dieselbe Geste. */
+  function cListenZeile(r, umbenennen){
+    const z=zeile('', r.unten||''); z.classList.add('crow');
+    const links=z.firstChild;
+    /* `flex:1 1 240px` und nicht `flex:1` — sonst schrumpft die Spalte unter
+       ihren Inhalt, und das Namensfeld wird auf null gequetscht, waehrend der
+       Untertitel Wort fuer Wort umbricht. Bei 240 px bricht die Zeile
+       stattdessen um. */
+    links.style.cssText='display:flex;align-items:center;gap:12px;flex:1 1 240px;min-width:0';
+    const box=document.createElement('div'); box.className='selbox';
+    box.style.cursor='pointer';
+    const an=cWahl.has(r.id);
+    box.classList.toggle('on',an); box.innerHTML=an?'✓':'';
+    box.onclick=e=>{ e.stopPropagation();
+      if(cWahl.has(r.id)) cWahl.delete(r.id); else cWahl.add(r.id);
+      zeichne(); };
+    const text=document.createElement('div'); text.style.cssText='flex:1;min-width:0';
+    const feld=document.createElement('input'); feld.className='txt'; feld.value=r.name||'';
+    feld.style.cssText='width:100%;min-width:0';
+    feld.onclick=e=>e.stopPropagation();
+    feld.onchange=()=>umbenennen(r, feld.value.trim());
+    text.append(feld);
+    if(r.unten){ const s=document.createElement('div'); s.className='sb'; s.innerHTML=r.unten; text.append(s); }
+    links.innerHTML=''; links.append(box, text);
+    if(r.hinein) z._ctl.append(knopf('Öffnen ›', r.hinein));
+    if(r.el){
+      /* Die Stimme lässt sich auch lange nach dem Import richtigstellen. Auf
+         dem Schalter steht das Etikett, verglichen wird das Instrument —
+         geändert wird hier also das Instrument, und das Etikett folgt, solange
+         es keines von Hand gibt. */
+      z._ctl.append(AWAHL.knopf(()=>{
+        const jetzt=(BS_KATALOG.elemente||[]).find(x=>x.id===r.el.id) || r.el;
+        const wert=jetzt.instrument||'';
+        const eintraege=stimmenAuswahlBestand();
+        const e=eintraege.find(x=>x.wert===wert)||eintraege[0];
+        return { wert, eintraege, text:e.text, ton:e.ton };
+      }, async neu=>{
+        try{ await saveLibMeta(r.el.id, {voice:neu}); }
+        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+        zeichne();
+      }, 'Stimme festlegen'));
+      if(BS.ARTEN[r.el.art].bytes) z._ctl.append(knopf('Vorschau', ()=>cVorschau(r.el)));
+    }
+    return z;
+  }
+
+  async function cVorschau(el){
+    if(el.art!=='blatt' && el.art!=='notizblatt'){ alert('Ansehen geht nur bei Blättern.'); return; }
+    let blob=null; try{ blob=await BS.bytes(el.id); }catch(e){}
+    if(!blob){ alert('Dieses Element hat keine Datei.'); return; }
+    window.pdfVorschau({ kennung:'c|'+el.id, datei:blob,
+      name: el.dateiname || ((el.etikett||'Blatt')+'.pdf'),
+      unter: (cTitel()||{}).titel + ' · ' + (el.etikett||el.instrument||''),
+      /* Auch im Fenster, mit dem Blatt vor Augen. */
+      wahl: { hole: ()=>{
+                const jetzt=(BS_KATALOG.elemente||[]).find(x=>x.id===el.id) || el;
+                const wert=jetzt.instrument||'';
+                const eintraege=stimmenAuswahlBestand();
+                const e=eintraege.find(x=>x.wert===wert)||eintraege[0];
+                return { wert, eintraege, text:e.text, ton:e.ton };
+              },
+              aufWahl: neu=>saveLibMeta(el.id,{voice:neu}).then(zeichne) } });
+  }
+
+  async function cUmbenennen(r, neu){
+    if(!neu) { zeichne(); return; }
+    const eb=cEbene();
+    try{
+      if(eb==='buch')   await BS.aendern('buch',   r.id, {name:neu, chip:neu.length>18?neu.slice(0,16)+'…':neu});
+      if(eb==='titel')  await BS.aendern('titel',  r.id, {titel:neu});
+      if(eb==='element')await BS.aendern('element',r.id, {etikett:neu});
+    }catch(e){ alert('Umbenennen fehlgeschlagen: '+(e&&e.message||e)); }
+    await loadLibrary(); render(); zeichne();
+  }
+
+  /* Die Werkzeugleiste. „Neu" solange nichts gewählt ist; sobald etwas
+     angehakt ist, nennt sie die Zahl und bietet die Werkzeuge. Jedes wirkt
+     auf die ganze Auswahl. */
+  function cWerkzeuge(){
+    const eb=cEbene(), n=cWahl.size;
+    const z=zeile(n ? (n+' gewählt') : 'Nichts gewählt',
+      n ? 'Jedes Werkzeug wirkt auf die ganze Auswahl'
+        : 'Hake an, was Du bewegen, umbenennen oder weitergeben willst');
+    const reihen=cReihen();
+    if(reihen.length) z._ctl.append(knopf(n===reihen.length?'Auswahl aufheben':'Alle auswählen', ()=>{
+      if(n===reihen.length) cWahl=new Set(); else cWahl=new Set(reihen.map(r=>r.id));
+      zeichne(); }));
+    if(!n) return z;
+    const ids=[...cWahl];
+    if(eb!=='buch'){
+      z._ctl.append(
+        knopf('Verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
+        knopf('Kopieren',    ()=>{ cAktion={art:'kopieren',    ebene:eb, ids}; zeichne(); }));
+    }
+    if(eb==='titel') z._ctl.append(knopf('Teilen', ()=>cTeilen(ids)));
+    z._ctl.append(knopf('Entfernen', ()=>cEntfernen(eb, ids), 'warn'));
+    return z;
+  }
+
+  async function cEntfernen(eb, ids){
+    const was = eb==='buch' ? (ids.length===1?'dieses Buch':ids.length+' Bücher')
+              : eb==='titel'? (ids.length===1?'diesen Titel':ids.length+' Titel')
+              :               (ids.length===1?'dieses Element':ids.length+' Elemente');
+    if(!confirm(was+' entfernen?\n\n'
+      + (eb==='buch' ? 'Die Titel und Elemente darin gehen mit.\n\n' : '')
+      + 'Es wandert in den Papierkorb; die Dateien bleiben liegen. '
+      + 'Endgültig gelöscht wird erst dort.')) return;
+    try{ await BS.loeschen(eb, ids, 'aus Content entfernt'); }
+    catch(e){ alert('Entfernen fehlgeschlagen: '+(e&&e.message||e)); return; }
+    /* Verweise in Favoriten, Übungsliste, Tags und Setlists mitnehmen. */
+    if(eb==='element') ids.forEach(id=>{ const t=LIBTUNES.find(x=>x.libId===id);
+      if(t){ urlFreigeben(t); S.fav.delete(t.key); S.prac.delete(t.key); delete S.tuneTags[t.key];
+             S.sets.forEach(st=>st.items=st.items.filter(k=>k!==t.key)); } });
+    save(); cZuruecksetzen(); await loadLibrary(); render(); zeichne();
+  }
+
+  /* ---- Verschieben und Kopieren: das Ziel wählen ---------------------- */
+  function cZeichneZiel(w){
+    const {art, ebene, ids}=cAktion;
+    const zielEbene = ebene==='titel' ? 'buch' : 'titel';
+    const kopf=zeile((art==='verschieben'?'Verschieben':'Kopieren')+' — Ziel wählen',
+      ids.length+' '+(ebene==='titel'?'Titel':'Elemente')+' '
+      +(art==='verschieben'?'wandern':'werden kopiert')+' in '
+      +(zielEbene==='buch'?'ein Buch':'einen Titel'));
+    w.append(karte(null,[kopf]));
+
+    const zeilen=[];
+    /* „Neu anlegen" steht OBEN in derselben Liste — kein zweiter Dialog.
+       Am 30. Juli mit Jens so festgelegt. */
+    const neu=zeile(zielEbene==='buch'?'＋ Neues Buch…':'＋ Neuer Titel…','Anlegen und gleich dorthin');
+    const inp=document.createElement('input'); inp.className='txt';
+    inp.placeholder=zielEbene==='buch'?'Name des Buchs':'Name des Titels';
+    inp.style.maxWidth='240px';
+    const tun=async()=>{
+      const v=inp.value.trim(); if(!v) return;
+      try{
+        let ziel;
+        if(zielEbene==='buch'){ ziel=(await BS.buchAnlegen({name:v})).id; }
+        else { const b=cPfad[0] || (BS_KATALOG.buecher[0]||{}).id;
+               if(!b){ alert('Es gibt noch kein Buch.'); return; }
+               ziel=(await BS.titelAnlegen({buchId:b, titel:v})).id; }
+        await cZielAusfuehren(art, ebene, ids, ziel);
+      }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+    };
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tun(); });
+    neu.classList.add('crow');
+    neu._ctl.append(inp, knopf('Anlegen', tun));
+    zeilen.push(neu);
+
+    const K=BS_KATALOG;
+    const ziele = zielEbene==='buch'
+      ? (K.buecher||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
+          .map(b=>({id:b.id, name:b.name,
+            unten:(K.titel||[]).filter(t=>t.buchId===b.id).length+' Titel'}))
+      : (K.titel||[]).slice().sort((a,b)=>(a.titel||'').localeCompare(b.titel||'','de'))
+          .map(t=>({id:t.id, name:t.titel,
+            unten:((K.buecher||[]).find(b=>b.id===t.buchId)||{}).name||''}));
+    ziele.forEach(z=>{
+      const r=zeile(z.name, z.unten);
+      r._ctl.append(knopf(art==='verschieben'?'Hierher':'Kopie hierher',
+        ()=>cZielAusfuehren(art, ebene, ids, z.id)));
+      zeilen.push(r);
     });
-    z_pkg._ctl.append(pkgKnopf);
-    const z_pkgi=zeile('Paket einlesen','Führt zusammen; vorhandene Stücke werden übersprungen');
-    z_pkgi._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importPackage(f), '.zip,application/zip')));
-    w.append(karte('Eigene Noten',[z_verw,z_fw,z_pkg,z_pkgi]));
-    precacheZeichnen();
+    w.append(karte('Wohin',zeilen));
+  }
+  async function cZielAusfuehren(art, ebene, ids, zielId){
+    try{
+      const n = art==='verschieben' ? await BS.verschieben(ebene, ids, zielId)
+                                    : await BS.kopieren(ebene, ids, zielId);
+      cAktion=null; cZuruecksetzen();
+      await loadLibrary(); render(); zeichne();
+      alert(n+' '+(ebene==='titel'?'Titel':'Elemente')+' '
+        +(art==='verschieben'?'verschoben':'kopiert')+'.');
+    }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+  }
+
+  /* ---- Teilen: eine Auswahl weitergeben ------------------------------- */
+  function cArtenVorgabe(){
+    try{ const a=JSON.parse(localStorage.getItem(C_ARTEN_KEY)||'null');
+      if(Array.isArray(a) && a.length) return a; }catch(e){}
+    return Object.keys(BS.ARTEN).filter(k=>BS.ARTEN[k].austausch==='immer');
+  }
+  function cTeilen(titelIds){
+    cAktion=null;
+    let arten=cArtenVorgabe();
+    openSheet(card=>{
+      card.innerHTML='<h2>Teilen</h2><div class="muted" style="margin:-6px 0 14px">'
+        +titelIds.length+' Titel als Paket weitergeben. Welche Arten von Elementen sollen mit?</div>';
+      const liste=document.createElement('div');
+      Object.keys(BS.ARTEN).forEach(k=>{
+        const a=BS.ARTEN[k];
+        const r=document.createElement('div'); r.className='srow';
+        r.innerHTML='<div style="flex:1"><div class="lb">'+esc(a.name)+'</div>'
+          +'<div class="sb">Vorgabe: '+(a.austausch==='immer'?'immer mitgeben':a.austausch==='zuruf'?'nur auf Zuruf':'nie')+'</div></div>';
+        const ctl=document.createElement('div'); ctl.className='ctl';
+        const b=document.createElement('button'); b.className='sw'; b.dataset.on=arten.includes(k);
+        b.setAttribute('role','switch');
+        b.onclick=()=>{ const an=b.dataset.on!=='true'; b.dataset.on=an;
+          arten = an ? [...new Set(arten.concat(k))] : arten.filter(x=>x!==k); };
+        ctl.append(b); r.append(ctl); liste.append(r);
+      });
+      const kasten=document.createElement('div'); kasten.className='scard'; kasten.append(liste);
+      card.append(kasten);
+      const reihe=document.createElement('div'); reihe.className='row'; reihe.style.cssText='margin-top:14px;gap:8px';
+      const merk=document.createElement('button'); merk.className='btn ghost'; merk.style.flex='1';
+      merk.textContent='★ Auswahl als Standard';
+      merk.onclick=()=>{ try{ localStorage.setItem(C_ARTEN_KEY, JSON.stringify(arten)); }catch(e){}
+        merk.textContent='Gespeichert'; };
+      const los=document.createElement('button'); los.className='btn'; los.style.flex='1';
+      los.textContent='Paket erstellen';
+      los.onclick=async()=>{
+        los.disabled=true; los.textContent='… wird erstellt';
+        try{ const z=await BS.exportAlsDatei({titelIds, arten});
+          closeSheet();
+          alert('Paket erstellt.\n'+z.titel+' Titel, '+z.elemente+' Elemente, '
+            +(z.bytes/1048576).toFixed(1)+' MB.');
+        }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); los.disabled=false; los.textContent='Paket erstellen'; }
+      };
+      reihe.append(merk, los); card.append(reihe);
+      const zu=document.createElement('div'); zu.className='row'; zu.style.marginTop='8px';
+      const b2=document.createElement('button'); b2.className='btn ghost'; b2.style.flex='1';
+      b2.textContent='Abbrechen'; b2.onclick=closeSheet; zu.append(b2); card.append(zu);
+      a11y(card);
+    });
+  }
+
+  /* ---- Der Papierkorb: die Tür, die bisher fehlte -------------------- */
+  function cZeichneKorb(w){
+    const halter=document.createElement('div'); w.append(halter);
+    BS.korb().then(e=>{
+      halter.innerHTML='';
+      if(!e.length){
+        halter.append(karte(null,[zeile('Der Papierkorb ist leer',
+          'Entferntes landet hier und lässt sich zurückholen')]));
+        return;
+      }
+      const kopf=zeile(e.length+(e.length===1?' Eintrag':' Einträge'),
+        'Zurückholen bringt alles wieder, was am Eintrag hing. Leeren gibt den Platz frei — und ist endgültig');
+      kopf._ctl.append(knopf('Papierkorb leeren', async()=>{
+        if(!confirm('Papierkorb endgültig leeren?\n\nDanach sind die Dateien weg.')) return;
+        const r=await BS.korbLeeren();
+        await loadLibrary(); render(); zeichne();
+        alert('Geleert: '+r.eintraege+' Einträge, '+(r.bytes/1048576).toFixed(1)+' MB freigegeben.');
+      },'warn'));
+      const zeilen=[kopf];
+      e.slice(0,40).forEach(x=>{
+        const teile=[];
+        if(x.zahl.buecher) teile.push(x.zahl.buecher+' Bücher');
+        if(x.zahl.titel)   teile.push(x.zahl.titel+' Titel');
+        if(x.zahl.elemente)teile.push(x.zahl.elemente+' Elemente');
+        const wann=new Date(x.geloescht).toLocaleString('de-DE');
+        const namen=[].concat(x.buecher||[],x.titel||[]).map(o=>o.name||o.titel).filter(Boolean).slice(0,3);
+        const r=zeile(namen.length?namen.join(', '):teile.join(', '),
+          teile.join(' · ')+' · '+esc(wann)+(x.anlass?' · '+esc(x.anlass):''));
+        r._ctl.append(knopf('Zurückholen', async()=>{
+          try{ const z=await BS.wiederherstellen(x.id);
+            await loadLibrary(); render(); zeichne();
+            alert('Zurückgeholt: '+(z.buecher||0)+' Bücher, '+(z.titel||0)+' Titel, '+(z.elemente||0)+' Elemente.');
+          }catch(err){ alert('Fehlgeschlagen: '+(err&&err.message||err)); }
+        }));
+        zeilen.push(r);
+      });
+      if(e.length>40) zeilen.push(zeile('…','und '+(e.length-40)+' weitere'));
+      halter.append(karte('Papierkorb',zeilen));
+    }).catch(()=>{ halter.append(karte(null,[zeile('Der Papierkorb ist nicht lesbar','')])); });
+  }
+
+  /* ---- Die Ebene selbst ---------------------------------------------- */
+  function cZeichneEbene(w){
+    const eb=cEbene(), K=BS_KATALOG;
+
+    /* Auf der obersten Ebene: was es zu tun gibt. */
+    if(eb==='buch' && !cFlach){
+      const z_add=zeile('Noten hinzufügen',
+        'Viele PDFs auf einmal — Titel und Stimme werden aus dem Namen gelesen, und Du siehst vorher, was erkannt wurde');
+      z_add._ctl.append(knopf('Öffnen', ()=>{ unter='bandbuch'; bandZustand(); zeichne(); }));
+      const z_alle=zeile('Alle Titel',
+        'Quer über alle Bücher — zum Zusammenstellen und Weitergeben');
+      z_alle._ctl.append(knopf('Öffnen ›', ()=>{ cFlach=true; cZuruecksetzen(); zeichne(); }));
+      const z_korb=zeile('Papierkorb','Entferntes zurückholen oder endgültig löschen');
+      z_korb._ctl.append(knopf('Öffnen ›', ()=>{ cKorb=true; zeichne(); }));
+      w.append(karte(null,[z_add, z_alle, z_korb]));
+    }
+
+    /* Der Suchschlitz — nur auf der flachen Ebene, wo die Liste lang wird. */
+    if(cFlach){
+      const z_s=zeile('Suchen','Titel oder Komponist');
+      const s=document.createElement('input'); s.className='txt'; s.type='search';
+      s.value=cSuche; s.placeholder='Suche'; s.style.maxWidth='220px';
+      s.oninput=()=>{ cSuche=s.value; cZeichneNurListe(); };
+      z_s._ctl.append(s);
+      const z_abc=zeile('Anfangsbuchstabe', cBuchst?('gefiltert auf „'+cBuchst+'"'):'alle');
+      const abc=document.createElement('div'); abc.className='seg2';
+      abc.style.cssText='flex-wrap:wrap;max-width:420px';
+      ['Alle','#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
+        .forEach(b=>{ const k=document.createElement('button'); k.textContent=b;
+          const wert = b==='Alle' ? '' : b;
+          k.setAttribute('aria-pressed', wert===cBuchst);
+          k.onclick=()=>{ cBuchst=wert; zeichne(); };
+          abc.append(k); });
+      z_abc._ctl.append(abc);
+      w.append(karte('Finden',[z_s, z_abc]));
+    }
+
+    /* Neu anlegen — OBEN in der Liste, nicht in einem zweiten Dialog. */
+    const zeilen=[];
+    if(!cFlach && eb!=='element'){
+      const neu=zeile(eb==='buch'?'＋ Neues Buch…':'＋ Neuer Titel…',
+        eb==='buch'?'Bündelt Titel':'Bündelt Elemente — Blätter, Ton, Verweise');
+      const inp=document.createElement('input'); inp.className='txt';
+      inp.placeholder=eb==='buch'?'z. B. Real Book Vol. 1':'z. B. Blue Bossa';
+      inp.style.maxWidth='240px';
+      const tun=async()=>{ const v=inp.value.trim(); if(!v) return;
+        try{
+          if(eb==='buch') await BS.buchAnlegen({name:v});
+          else            await BS.titelAnlegen({buchId:cPfad[0], titel:v});
+        }catch(e){ alert('Anlegen fehlgeschlagen: '+(e&&e.message||e)); return; }
+        inp.value=''; await loadLibrary(); render(); zeichne(); };
+      inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tun(); });
+      neu.classList.add('crow');
+      neu._ctl.append(inp, knopf('Anlegen', tun));
+      zeilen.push(neu);
+    }
+    if(eb==='element'){
+      const neu=zeile('＋ Blätter hinzufügen…','PDFs zu diesem Titel legen');
+      neu.classList.add('crow');
+      neu._ctl.append(knopf('Dateien wählen', ()=>dateiWaehlen(async fs=>{
+        const t=cTitel(); if(!t) return;
+        let n=0;
+        for(const f of fs){
+          try{ await BS.elementAnlegen({titelId:t.id, art:'blatt',
+                 dateiname:f.name, blob:f, np:await BS.seitenzahl(f)}); n++; }catch(e){}
+        }
+        await loadLibrary(); render(); zeichne();
+        alert(n+(n===1?' Blatt':' Blätter')+' hinzugefügt.');
+      }, 'application/pdf,.pdf', true)));
+      zeilen.push(neu);
+    }
+
+    const reihen=cReihen();
+    reihen.slice(0,300).forEach(r=>zeilen.push(cListenZeile(r, cUmbenennen)));
+    if(reihen.length>300) zeilen.push(zeile('…','und '+(reihen.length-300)+' weitere — nutze die Suche'));
+    if(!reihen.length) zeilen.push(zeile('Noch nichts hier',
+      eb==='buch' ? 'Lege oben ein Buch an oder füge Noten hinzu'
+      : eb==='titel' ? 'Lege oben einen Titel an' : 'Füge oben Blätter hinzu'));
+
+    const kopf = cFlach ? 'Alle Titel ('+reihen.length+')'
+               : eb==='buch' ? 'Bücher ('+reihen.length+')'
+               : eb==='titel' ? 'Titel ('+reihen.length+')'
+               : 'Elemente ('+reihen.length+')';
+    w.append(karte(kopf, zeilen));
+    w.append(karte(null,[cWerkzeuge()]));
+
+    /* Sichern und Exportieren — hier, weil es den ganzen Content betrifft. */
+    if(eb==='buch' && !cFlach){
+      const z_ex=zeile('Alles exportieren',
+        'Ordner und Dateien mit sprechenden Namen, dazu der Katalog — auch ohne BandStand lesbar');
+      const exK=knopf('Exportieren', async()=>{
+        exK.textContent='… wird erstellt';
+        try{ await exportPackage(); }finally{ exK.textContent='Exportieren'; }
+      });
+      z_ex._ctl.append(exK);
+      const z_im=zeile('Paket einlesen','Führt zusammen; Vorhandenes wird nicht verdoppelt');
+      z_im._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importPackage(f), '.zip,application/zip')));
+      const z_si=zeile('Katalog sichern','Ein Abzug ohne die Noten — klein, für den Fall eines Umbaus');
+      z_si._ctl.append(knopf('Sichern', async()=>{
+        try{ const z=await BS.sicherungAlsDatei('von Hand');
+          alert('Gesichert: '+z.buecher+' Bücher, '+z.titel+' Titel, '+z.elemente+' Elemente.');
+        }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+      }));
+      w.append(karte('Sichern und weitergeben',[z_ex, z_im, z_si]));
+
+      /* Der Offline-Vorrat des Service Workers. Er betrifft die ausgelieferte
+         Sammlung, und die ist leer, seit BandStand ohne Noten kommt — die
+         Zeile bleibt trotzdem stehen, damit die Funktion nicht verschwindet.
+         Die Offline-Marken je Titel kommen mit dem Hub, Stufe 5. */
+      const gewaehlt=offlineAuswahl();
+      const z_off=zeile('Noten offline vorhalten',
+        gewaehlt.length ? gewaehlt.length+' von '+alleBuecher().length+' Büchern gewählt'
+                        : 'Noch keine Auswahl — es werden alle Bücher gespeichert');
+      z_off._sb.id='precacheStatus';
+      const balken=document.createElement('div'); balken.className='sbar'; balken.id='precacheBar';
+      balken.innerHTML='<i></i>'; z_off._sb.parentNode.append(balken);
+      z_off._ctl.append(knopf('Bücher wählen', ()=>{ unter='offline'; zeichne(); }));
+      const offKnopf=knopf('Starten', ()=>precacheStart(offlineUrls())); offKnopf.id='precacheBtn';
+      z_off._ctl.append(offKnopf);
+      const z_sonst=zeile('Kategorie „Sonstiges Material"',
+        'Deine bearbeiteten Titel in den Listen zeigen');
+      z_sonst._ctl.append(schalter(S.sonstOn, an=>{
+        S.sonstOn=an; Sset('rb_sonston', an?'1':'0'); render();
+      }));
+      const z_fw=zeile('Vorschau-Fenster nach der Stimmenwahl',
+        'Beim Zuordnen vieler Blätter am Stück spart „Schließen" je Blatt einen Griff');
+      z_fw._ctl.append(wahl([['knopf','Offen lassen'],['wahl','Schließen']],
+        pdfwZuNachWahl()?'wahl':'knopf',
+        v=>pdfwZuNachWahlSetzen(v==='wahl')));
+      w.append(karte('Offline und Anzeige',[z_off, z_sonst, z_fw]));
+      precacheZeichnen();
+    }
+  }
+  /* Prueflatte fuer die Konsole, wie `bandPruef` und `gruppenBericht`. Sie
+     ruft nur, was die Oberflaeche auch ruft. */
+  window.cPruef = {
+    gehe:     p => { thema='content'; unter=null; cPfad=p||[]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); },
+    flach:    () => { thema='content'; unter=null; cFlach=true; cPfad=[]; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); },
+    korb:     () => { thema='content'; unter=null; cKorb=true; cAktion=null; zeichne(); },
+    suche:    q => { cSuche=q||''; zeichne(); },
+    buchstabe:b => { cBuchst=b||''; zeichne(); },
+    wahl:     ids => { cWahl=new Set([].concat(ids||[])); zeichne(); },
+    aktion:   (art, ebene, ids) => { cAktion={art, ebene, ids:[].concat(ids)}; zeichne(); },
+    ziel:     (art, ebene, ids, zielId) => cZielAusfuehren(art, ebene, ids, zielId),
+    entfernen:(ebene, ids) => cEntfernen(ebene, [].concat(ids)),
+    teilen:   ids => cTeilen([].concat(ids)),
+    krumen:   () => document.querySelector('.suphead h2').innerText.replace(/\s+/g,' ').trim(),
+    zustand:  () => ({ ebene:cEbene(), pfad:cPfad.slice(), flach:cFlach, korb:cKorb,
+                       wahl:[...cWahl], aktion:cAktion, reihen:cReihen().length }),
+    zeichne:  () => zeichne(),
+  };
+
+  /* Nur die Liste neu zeichnen — beim Tippen im Suchschlitz darf die ganze
+     Seite nicht wegspringen, sonst verliert das Feld den Fokus. */
+  function cZeichneNurListe(){
+    const w=document.getElementById('supScroll'); if(!w) return;
+    const alt=w.scrollTop;
+    zeichne();
+    const s=w.querySelector('input[type=search]');
+    if(s){ s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    w.scrollTop=alt;
   }
 
   /* ---- Thema: Darstellung ---- */
@@ -7705,27 +8317,11 @@ loadLibrary().then(render).catch(()=>{});
     w.append(karte(null,[z_ver,z_dreh,z_best,z_inst]));
   }
 
-  /* ---- Unterseite: Bücher und PDFs verwalten ---- */
-  function zeichneNoten(w){
-    const z_band=zeile('Bandbuch importieren',
-      'Viele PDFs auf einmal: Titel und Stimme werden aus dem Dateinamen gelesen, '
-      +'vor dem Schreiben siehst Du, was erkannt wurde');
-    z_band._ctl.append(knopf('Öffnen', ()=>{ unter='bandbuch'; bandZustand(); zeichne(); }));
-    w.append(karte('Bandbuch',[z_band]));
-
-    const z_neu=zeile('Neues Buch anlegen','Ein „Buch" bündelt Deine importierten PDFs; ein PDF ist ein Stück');
-    const inp=document.createElement('input'); inp.className='txt'; inp.placeholder='z. B. Meine Standards';
-    const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
-      await createBook(v); inp.value=''; render(); zeichne(); };
-    inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
-    z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
-    w.append(karte('Eigene Bücher',[z_neu]));
-
-    if(!USERBOOKS.length){
-      w.append(karte('Bücher',[zeile('Noch keine eigenen Bücher','Lege oben eines an, dann kannst Du PDFs hineinlegen')]));
-    }
-    USERBOOKS.forEach(ub=>w.append(karte(ub.name, buchZeilen(ub))));
-  }
+  /* Die frühere Unterseite „Notenbestand verwalten" ist am 30. Juli im
+     Thema „Content" aufgegangen. Sie war eine Seite tief unter dem Setup, und
+     der Import steckte in einer Seite darunter — zwei verschachtelte
+     „Öffnen". Ihre Fähigkeiten stehen jetzt auf den drei Ebenen von Content:
+     umbenennen, Stimme richtigstellen, Blatt ansehen, entfernen. */
 
   /* ================================================================
      Der Notenbestand — je Stueck eine Zeile
@@ -7758,7 +8354,13 @@ loadLibrary().then(render).catch(()=>{});
     });
     const aus=[...nach.values()];
     aus.forEach(s=>{
-      s.blaetter.sort((a,b)=>stimmenRang(a.stimme)-stimmenRang(b.stimme));
+      /* Nach dem INSTRUMENT ordnen, nicht nach dem Etikett: „Alt 1" steht in
+         keiner Instrumentenliste und landete deshalb mit Rang 998 hinter
+         allem anderen — in Jens' Bestand stand „Alt 2 · Alt 1" am Ende der
+         Zeile statt bei den Blaesern. Bei gleichem Instrument entscheidet das
+         Etikett. */
+      s.blaetter.sort((a,b)=>(stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
+        || String(a.stimme||'').localeCompare(String(b.stimme||''),'de',{numeric:true}));
       /* Tragen die Blaetter verschiedene Komponisten, ist das Feld des
          Stuecks nicht eindeutig — dann bleibt es leer und sagt es. */
       const k=[...new Set(s.blaetter.map(b=>b.c||''))];
@@ -7801,7 +8403,7 @@ loadLibrary().then(render).catch(()=>{});
     const zeilen=[kopf];
 
     if(!stuecke.length){
-      zeilen.push(zeile('Noch nichts drin','Lege PDFs hinein oder importiere ein Bandbuch'));
+      zeilen.push(zeile('Noch nichts drin','Lege Blätter hinein oder füge Noten hinzu'));
       return zeilen;
     }
 
@@ -8093,7 +8695,6 @@ loadLibrary().then(render).catch(()=>{});
       st.saetze.push(eintrag);
     });
     const liste=[...stuecke.values()].filter(x=>x.saetze.length || x.toene.length);
-    liste.forEach(x=>x.saetze.sort((a,b)=>stimmenRang(a.voice)-stimmenRang(b.voice)));
 
     /* ---- Was im Zielbuch schon steht -----------------------------------
        Gesucht wird nur im gewaehlten Buch und nur nach dem eingedampften
@@ -8128,6 +8729,22 @@ loadLibrary().then(render).catch(()=>{});
       liste.forEach(st=>{ st.vorhanden=null; st.andocken=false;
         st.saetze.forEach(s=>{ delete s.andockAn; }); });
     }
+
+    /* ---- Die Etiketten, jetzt und nicht erst beim Schreiben -------------
+       Erst hier, weil die Rechnung wissen muss, ob angedockt wird: Beim
+       Andocken zaehlen die Blaetter mit, die am Stueck schon haengen. Danach
+       wird geordnet — nach Instrument, dann nach Etikett, sonst stehen
+       „Alt 2" und „Alt 1" in der Reihenfolge der Dateien. */
+    liste.forEach(st=>{
+      const vorhandene = (st.andocken && st.vorhanden)
+        ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===st.vorhanden.id).map(e=>e.instrument||'')
+        : [];
+      const paare=st.saetze.map(s=>({instrument:s.voice||'', rest:s.rest||''}));
+      etikettenBerechnen(paare, vorhandene);
+      st.saetze.forEach((s,i)=>{ s.etikett=paare[i].etikett; s.instrument=s.voice||''; });
+      st.saetze.sort(nachStimmeOrdnen);
+    });
+
     return { saetze, offen, toene, uebergangen, ausgelassen, stuecke:liste, treffer,
              ordnerWeg: bandDateien.some(e=>String(e.pfad||'').includes('/')) };
   }
@@ -8153,7 +8770,7 @@ loadLibrary().then(render).catch(()=>{});
     const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
       bandBid=await createBook(v); inp.value=''; render(); zeichne(); };
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
-    const z_neu=zeile('Neues Buch','Bündelt die Sätze dieses Bandbuchs');
+    const z_neu=zeile('Neues Buch','Bündelt die Blätter dieses Stapels');
     z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
 
     /* Die Ausgabe. Ein Real Book traegt sie auf dem Umschlag und nicht im
@@ -8181,7 +8798,11 @@ loadLibrary().then(render).catch(()=>{});
     /* Auf dem iPad steht die Dateiwahl vorn: Sie ist dort der einzige Weg, der
        traegt. Der Ordner-Knopf bleibt trotzdem stehen — er sagt, wenn nichts
        zurueckkam, statt zu schweigen. */
-    const kOrdner=knopf(bandDateien.length?'Anderen Ordner':'Ordner wählen', ()=>ordnerWaehlen());
+    /* Auf dem iPad heisst der Knopf weiter „Ordner wählen": „Anderen Ordner"
+       hätte behauptet, es wäre schon einer im Spiel. Dort ist aber die
+       Dateiwahl der Weg, und die trägt ihren eigenen Namen. */
+    const kOrdner=knopf((bandDateien.length && !IST_IOS) ? 'Anderen Ordner' : 'Ordner wählen',
+                        ()=>ordnerWaehlen());
     const kDatei=knopf('Dateien wählen',
         ()=>dateiWaehlen(fs=>bandUebernehmen([...fs].map(f=>({file:f, pfad:f.name}))),
                          'application/pdf,.pdf,audio/*', true));
@@ -8260,7 +8881,7 @@ loadLibrary().then(render).catch(()=>{});
       alert(IST_IOS
         ? 'Aus diesem Dialog kam kein einziger Ordner zurück.\n\n'
           +'Safari auf iPad und iPhone kann keine ORDNER auswählen — nur Dateien. '
-          +'Nimm „Dateien wählen" und markiere dort alle PDFs des Bandbuchs '
+          +'Nimm „Dateien wählen" und markiere dort alle PDFs des Stapels '
           +'(im Dateien-Dialog oben rechts „Auswählen", dann „Alle auswählen").\n\n'
           +'Der Titel wird dann aus dem Dateinamen gelesen statt aus dem Ordner. '
           +'Am Mac steht der Ordner-Weg weiterhin zur Verfügung.'
@@ -8342,7 +8963,7 @@ loadLibrary().then(render).catch(()=>{});
     const trK=document.getElementById('bandTrennKasten'); if(trK) trK.innerHTML='';
     if(!bandDateien.length){
       halter.append(karte('Vorschau',[zeile('Noch nichts gelesen',
-        'Wähle oben den Ordner Deines Bandbuchs — oder zieh ihn auf diese Seite')]));
+        'Wähle oben die Noten — oder zieh sie auf diese Seite')]));
       return;
     }
     const v=bandLesen();
@@ -8353,8 +8974,11 @@ loadLibrary().then(render).catch(()=>{});
     /* Das Trennzeichen zaehlt nur ohne Ordner. Steht es sichtbar da, obwohl es
        nichts tut, sucht man den Fehler an der falschen Stelle. */
     if(trK && !v.ordnerWeg){
+      /* Der Text stimmte nicht mehr: Seit dem 30. Juli wird der Titel zuerst
+         an der Stelle gesucht, an der die Stimme anfaengt. Das Trennzeichen
+         ist der zweite Weg und zaehlt nur, wenn der Dateiname eines traegt. */
       const z_tr=zeile('Trennzeichen',
-        'Ohne Ordner muss der Dateiname den Titel tragen. Geteilt wird an der letzten Fundstelle');
+        'Steht eines im Dateinamen, wird dort geteilt — sonst am Anfang der erkannten Stimme');
       const tin=document.createElement('input'); tin.className='txt'; tin.value=bandTrenner;
       tin.style.maxWidth='120px';
       tin.oninput=()=>{ bandTrenner=tin.value||' - '; zeichneVorschau(); };
@@ -8363,7 +8987,8 @@ loadLibrary().then(render).catch(()=>{});
     }
 
     const z_zahl=zeile('Gelesen',
-      '<b>'+v.stuecke.length+'</b> Stück'+(v.stuecke.length===1?'':'e')+' aus <b>'+v.saetze.length+'</b> Sätzen'
+      '<b>'+v.stuecke.length+'</b> Stück'+(v.stuecke.length===1?'':'e')
+      +' aus <b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Satz':'Sätzen')
       + (v.offen.length ? ' · <b>'+v.offen.length+'</b> nicht zugeordnet' : '')
       + (v.toene.length ? ' · '+v.toene.length+' Ton' : '')
       + (v.ausgelassen.length ? ' · '+v.ausgelassen.length+' ausgelassen' : ''));
@@ -8391,7 +9016,8 @@ loadLibrary().then(render).catch(()=>{});
       !buchDa ? 'Wähle oben ein Buch'
       : !v.saetze.length ? 'Es ist nichts zuzuordnen'
       : v.offen.length ? 'Erst die <b>'+v.offen.length+'</b> nicht zugeordneten Dateien klären — weiter unten'
-      : '<b>'+v.saetze.length+'</b> Sätze in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
+      : '<b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Satz':'Sätze')
+        +' in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
         + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : ''));
     const b=knopf('Jetzt importieren', async ()=>{
       b.disabled=true;
@@ -8401,12 +9027,18 @@ loadLibrary().then(render).catch(()=>{});
         b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
       });
       const z=window._letzterImport||{};
+      const ziel=bandBid;
       alert('Import fertig.\n'
-        + (ber||0)+' '+((ber===1)?'Satz':'Sätze')+' geschrieben.\n'
-        + (z.stuecke||0)+' neue Stücke'
+        + (ber||0)+' '+((ber===1)?'Blatt':'Blätter')+' geschrieben.\n'
+        + (z.stuecke||0)+' neue Titel'
         + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
         + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
-      unter='noten'; bandZustand(); zeichne();
+      /* Zurueck in den Content, und zwar IN das Buch, das gerade gefuellt
+         wurde — nicht auf die oberste Ebene. Man will sehen, was angekommen
+         ist. */
+      bandZustand(); unter=null; thema='content';
+      cPfad=[ziel]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen();
+      zeichne();
     });
     b.disabled=!bereit;
     z_go._ctl.append(b);
@@ -8474,7 +9106,10 @@ loadLibrary().then(render).catch(()=>{});
       const zeigen=v.stuecke.slice(0,60);
       const zeilen=[];
       zeigen.forEach(st=>{
-        const z=zeile('', (st.saetze.length ? esc(st.saetze.map(x=>x.voice).join(' · ')) : '<i>keine Stimme erkannt</i>')
+        /* Gezeigt wird das ETIKETT, nicht das Instrument — genau das, was
+           nachher auf dem Schalter steht. Vorher stand hier „Alt-Sax ·
+           Alt-Sax", geschrieben wurde „Alt 1" und „Alt 2". */
+        const z=zeile('', (st.saetze.length ? esc(st.saetze.map(x=>x.etikett||x.voice).join(' · ')) : '<i>keine Stimme erkannt</i>')
                         + (st.toene.length ? ' · '+st.toene.length+' Ton' : ''));
         const lb=z.querySelector('.lb'); lb.innerHTML='';
         /* Ohne dieses `flex` richtet sich die linke Spalte nach ihrem
@@ -8501,7 +9136,11 @@ loadLibrary().then(render).catch(()=>{});
         zeilen.push(z);
         if(!auf) return;
         st.saetze.forEach(s=>{
-          const u=zeile(s.voice, esc(s.name));
+          /* Links das Etikett, und wo es vom erkannten Instrument abweicht,
+             steht dieses dahinter — sonst waere nicht zu sehen, worauf die
+             Zuordnung beruht. */
+          const u=zeile(s.etikett||s.voice, esc(s.name)
+            + (s.etikett && s.etikett!==s.voice ? ' · erkannt als '+esc(s.voice) : ''));
           u.style.paddingLeft='34px';
           /* Auch ein erkannter Satz laesst sich hier richtigstellen — ohne
              dafuer erst das Fenster aufmachen zu muessen. */
