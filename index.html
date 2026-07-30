@@ -1789,6 +1789,16 @@ function stimmenRang(s){
 }
 window.stimmenRang = stimmenRang;
 
+/* Etikett und Instrument sind zweierlei — Schritt 3 des Import-Konzepts.
+   Auf dem Schalter steht Jens' Schreibweise („Alt 1", „Alt 2"), verglichen
+   wird aber das erkannte Instrument („Alt-Sax"). Ohne diese Trennung fiele
+   die Zuordnung aus, sobald zwei Stimmen desselben Instruments eigene
+   Etiketten tragen: „Alt 1" steht in keiner Instrumentenliste.
+   Blaetter der Grossammlung tragen kein Instrument; dort ist `stimme` die
+   Notation und zugleich der Vergleichswert. */
+const stimmWert = t => (t && (t.instrument || t.stimme)) || '';
+window.stimmWert = stimmWert;
+
 function waehleStimme(stimmen){
   if(!stimmen || !stimmen.length) return null;
   const ich=meinInstrument();
@@ -1796,10 +1806,10 @@ function waehleStimme(stimmen){
     /* Stufe 1 kennt beide Namen. Eine Bandstimme kann „Gitarre" heissen oder
        „Guitar" — fuer den Spieler ist es dasselbe. */
     const namen=[ich.name, ich.en].filter(Boolean).map(instrNorm);
-    const nachName = stimmen.find(t=>namen.includes(instrNorm(t.stimme)));
+    const nachName = stimmen.find(t=>namen.includes(instrNorm(stimmWert(t))));
     if(nachName) return nachName;
     if(ich.notation){
-      const nachNotation = stimmen.find(t=>t.stimme===ich.notation);
+      const nachNotation = stimmen.find(t=>stimmWert(t)===ich.notation);
       if(nachNotation) return nachNotation;
     }
   }
@@ -1807,8 +1817,8 @@ function waehleStimme(stimmen){
      wenn die gewaehlte Voice keine eigene Stimme hat. „Lyrics" und „Ablauf"
      bleiben neutral und gehen nie von selbst auf — sie stehen deshalb hier
      nicht, obwohl sie derselben Art angehoeren. */
-  return stimmen.find(t=>t.stimme==='C')
-      || stimmen.find(t=>t.stimme==='Leadsheet')
+  return stimmen.find(t=>stimmWert(t)==='C')
+      || stimmen.find(t=>stimmWert(t)==='Leadsheet')
       || stimmen[0];
 }
 window.waehleStimme = waehleStimme;
@@ -1844,39 +1854,131 @@ function ALL(){ return TUNES.concat(USER).concat(LIBTUNES); }
 function rebuildByKey(){ byKey={}; ALL().forEach(t=>byKey[t.key]=t); }
 rebuildByKey();
 function saveUser(){ localStorage.setItem('rb_usertunes', JSON.stringify(USER)); rebuildByKey(); }
-function saveUserBooks(){ localStorage.setItem('rb_userbooks', JSON.stringify(USERBOOKS)); }
+/* Die Buecher liegen seit Schritt 1c in BS, nicht mehr im localStorage.
+   `USERBOOKS` ist nur noch ihre synchron lesbare Spiegelung; gespeichert wird
+   in der Datenbank. Der alte Schluessel `rb_userbooks` bleibt unangetastet
+   liegen — er gehoert zum Rueckweg. */
+function saveUserBooks(){ /* absichtlich leer: siehe loadLibrary */ }
 function userBook(bid){ return USERBOOKS.find(b=>b.bid===bid); }
 function newId(pfx){ return (pfx||'id')+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-function libRecToTune(r){
-  const t = { key:'lib|'+r.id, libId:r.id, isLib:true, t:r.title||'(ohne Titel)', c:r.composer||'',
-    pg:r.pg||'1', b:(userBook(r.bid)||{}).name||'Eigene Noten', bid:r.bid, np:r.np||1,
-    addedAt:r.addedAt||0, f:r._url||'' };
-  /* Ein Bandbuch-Satz traegt seine Stimme mit. Dann gehoert er zu einer
-     Gruppe, und seine Zeile bekommt die Stimmen-Schalter wie ein Real Book.
-     Die Familie ist das eigene Buch: Ueber Buchgrenzen hinweg wird bewusst
-     nicht gebuendelt. */
-  if(r.voice){ t.stimme=r.voice; t.fam='ub|'+r.bid; t.gid=t.fam+'|'+titelSchluessel(r.title||''); }
-  else { t.stimme=''; t.fam=''; t.gid=t.key; }
+/* ============================================================================
+   Schritt 1c: Die Oberflaeche liest aus der neuen Ablage.
+
+   Getauscht wird die Adapterschicht, nicht die Oberflaeche. Ein Eintrag aus
+   BS bekommt genau die Form, die die Liste, die Buehne und der Druck schon
+   kennen — mit einem Unterschied: `f` bleibt LEER. Die Bytes kommen erst beim
+   Aufschlagen, ueber `urlSichern`. Damit haengen keine 294 MB mehr dauerhaft
+   am Speicher.
+
+   `libId` ist ab jetzt die Element-Kennung aus BS. Deshalb arbeiten `libGet`,
+   `libDelete` und `saveLibMeta` unveraendert weiter — sie sind unten zu
+   Adaptern auf BS umgebaut, und ihre fuenfzehn Aufrufstellen bleiben, wie sie
+   waren.
+   ============================================================================ */
+function bsZuTune(el, ti, bu){
+  const t = { key:'bs|'+el.id, libId:el.id, isLib:true, bsId:el.id, titelId:el.titelId,
+    art:el.art, t:ti.titel||'(ohne Titel)', c:ti.komponist||'',
+    pg:'1', b:(bu&&bu.name)||'Eigene Noten', bid:ti.buchId, np:el.np||1,
+    addedAt:el.angelegt||0, groesse:el.groesse||0, dateiname:el.dateiname||'',
+    ziel:el.ziel||'', f:'' };
+  /* Traegt ein Satz eine Stimme, gehoert er zu einer Gruppe, und seine Zeile
+     bekommt die Stimmen-Schalter wie ein Real Book. Die Gruppe ist jetzt der
+     TITEL selbst und nicht mehr ein aus dem Namen gerechneter Schluessel —
+     deshalb verschmelzen zwei gleichnamige Stuecke nicht mehr. */
+  const hatStimme = !!(el.instrument || el.etikett);
+  if(hatStimme){
+    t.instrument = el.instrument||'';
+    t.stimme = el.etikett || el.instrument || '';
+    t.fam='ub|'+ti.buchId; t.gid='bs|'+el.titelId;
+  } else { t.instrument=''; t.stimme=''; t.fam=''; t.gid=t.key; }
   return t;
 }
-/* GRUPPEN wird beim Start aus TUNES gerechnet; importierte Saetze kommen
-   erst mit loadLibrary dazu und muessen nachgetragen werden — und bei jedem
+/* GRUPPEN wird beim Start aus TUNES gerechnet; die eigenen Saetze kommen erst
+   mit loadLibrary dazu und muessen nachgetragen werden — und bei jedem
    Neuladen zuerst wieder heraus, sonst stuenden sie doppelt darin. */
 function gruppenLibNachtragen(){
-  Object.keys(GRUPPEN).forEach(g=>{ if(g.startsWith('ub|')) delete GRUPPEN[g]; });
+  Object.keys(GRUPPEN).forEach(g=>{ if(g.startsWith('bs|')) delete GRUPPEN[g]; });
   LIBTUNES.forEach(t=>{ if(!t.fam) return; (GRUPPEN[t.gid]=GRUPPEN[t.gid]||[]).push(t); });
-  Object.keys(GRUPPEN).forEach(g=>{ if(g.startsWith('ub|'))
-    GRUPPEN[g].sort((x,y)=>stimmenRang(x.stimme)-stimmenRang(y.stimme)); });
+  Object.keys(GRUPPEN).forEach(g=>{ if(g.startsWith('bs|'))
+    GRUPPEN[g].sort((x,y)=>(stimmenRang(stimmWert(x))-stimmenRang(stimmWert(y)))
+      || (x.stimme||'').localeCompare(y.stimme||'','de',{numeric:true})); });
 }
+/* Der Katalog des eigenen Bestands. Gemessen an 6.231 Blaettern: 275 ms, und
+   ohne eine einzige Object-URL. Der alte Weg las alle Blobs mit und legte je
+   Blatt eine URL an — 709 ms, bei jedem Start und nach jeder Aenderung. */
+let BS_KATALOG={buecher:[],titel:[],elemente:[]};
 async function loadLibrary(){
-  let recs=[]; try{ recs=await libAll(); }catch(e){ recs=[]; }
-  // alte Object-URLs freigeben
-  LIBTUNES.forEach(t=>{ if(t.f && t.f.startsWith('blob:')) try{ URL.revokeObjectURL(t.f); }catch(_){}; });
-  LIBTUNES = recs.map(r=>{ try{ r._url=URL.createObjectURL(r.blob); }catch(_){ r._url=''; } return libRecToTune(r); })
-                 .sort((a,b)=> (a.t||'').localeCompare(b.t||'','de'));
+  let k={buecher:[],titel:[],elemente:[]};
+  try{ k=await BS.katalog(); }catch(e){ k={buecher:[],titel:[],elemente:[]}; }
+  BS_KATALOG=k;
+  /* Die Buecher-Liste der Oberflaeche spiegelt die Buecher aus BS. Sie bleibt
+     synchron lesbar, weil sehr viele Stellen sie ohne `await` brauchen. */
+  USERBOOKS = k.buecher
+    .slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
+    .map(b=>({bid:b.id, name:b.name, chip:b.chip||b.name, createdAt:b.angelegt||0, hubId:b.hubId||null}));
+  const buchById=Object.fromEntries(k.buecher.map(b=>[b.id,b]));
+  const titelById=Object.fromEntries(k.titel.map(t=>[t.id,t]));
+  /* Frueher geliehene URLs zurueckgeben, damit nichts angeheftet bleibt. */
+  LIBTUNES.forEach(t=>{ if(t.bsId && t.f) urlFreigeben(t); });
+  LIBTUNES = k.elemente
+    .map(el=>{ const ti=titelById[el.titelId]; if(!ti) return null;
+               return bsZuTune(el, ti, buchById[ti.buchId]); })
+    .filter(Boolean)
+    .sort((a,b)=> (a.t||'').localeCompare(b.t||'','de')
+               || (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b))));
   if(typeof gruppenLibNachtragen==='function') gruppenLibNachtragen();
   rebuildByKey();
 }
+
+/* ---- Bytes auf Zuruf: ein Verweis wird geliehen, nicht gehalten ----------
+   Die Oberflaeche liest an 21 Stellen `t.f`. Statt alle einundzwanzig
+   umzuschreiben, wird `t.f` unmittelbar vor Gebrauch gefuellt. Der Vorrat ist
+   begrenzt; laeuft er ueber, gibt der aelteste Eintrag seinen Verweis zurueck
+   und sein `t.f` wird wieder leer. So bleibt nie mehr als eine Handvoll
+   Blaetter angeheftet.
+
+   Diese eine Stelle ersetzt die dauerhafte Object-URL des alten Modells. Der
+   Safari-Betrachter selbst wird nicht angefasst — er bekommt nur seinen
+   Verweis von hier. */
+const URL_VORRAT=8;
+const _urlHalter=new Map();   // bsId -> tune
+function urlFreigeben(t){
+  if(!t || !t.bsId) return;
+  if(_urlHalter.has(t.bsId)){ _urlHalter.delete(t.bsId); BS.urlZurueck(t.bsId); }
+  t.f='';
+}
+async function urlSichern(t){
+  if(!t) return '';
+  if(!t.bsId) return t.f||'';            // Grossammlung: echter Pfad
+  if(t.f && _urlHalter.has(t.bsId)){     // schon geliehen: nach vorn holen
+    _urlHalter.delete(t.bsId); _urlHalter.set(t.bsId,t); return t.f;
+  }
+  let url=''; try{ url=await BS.urlLeihen(t.bsId)||''; }catch(e){ url=''; }
+  if(!url) return '';
+  t.f=url; _urlHalter.set(t.bsId,t);
+  while(_urlHalter.size>URL_VORRAT){
+    const alt=_urlHalter.values().next().value;
+    if(!alt || alt===t) break;
+    urlFreigeben(alt);
+  }
+  return url;
+}
+/* Mehrere auf einmal — fuer Drucken, Teilen und die Setlist. Der Vorrat wird
+   dafuer kurz geweitet, sonst zieht das Fuellen dem Anfang der Liste den
+   Verweis wieder weg. */
+async function urlSichernViele(items){
+  const liste=(items||[]).filter(x=>x && x.bsId);
+  for(const t of liste){
+    if(t.f) continue;
+    try{ const u=await BS.urlLeihen(t.bsId); if(u){ t.f=u; _urlHalter.set(t.bsId,t); } }catch(e){}
+  }
+  return items;
+}
+/* Nach Drucken oder Teilen wieder einziehen. Ohne das blieben bei einer
+   Setlist mit dreissig Stuecken dreissig Verweise haengen. */
+function urlFreigebenViele(items){ (items||[]).forEach(t=>{ if(t&&t.bsId) urlFreigeben(t); }); }
+window.urlSichern=urlSichern; window.urlSichernViele=urlSichernViele;
+window.urlFreigebenViele=urlFreigebenViele;
 /* ---- book display names + grouping (by bid; data.js unchanged) ---- */
 const BOOKMETA={
   realbook1:{name:'Real Book - Vol. 1',chip:'Vol. 1'},
@@ -2466,18 +2568,26 @@ function bulkTagsFlow(){
 }
 async function bulkShare(){
   const items=[...S.selection].map(k=>byKey[k]).filter(Boolean); if(!items.length)return;
+  await urlSichernViele(items);
   try{ const files=[];
-    for(const t of items){ if(t.isEdit) continue; const bl=await (await fetch(encodeURI(t.f))).blob(); files.push(new File([bl],safeName(t.t)+'.pdf',{type:'application/pdf'})); }
+    for(const t of items){ if(t.isEdit) continue; if(!t.f) continue;
+      const bl=await (await fetch(encodeURI(t.f))).blob(); files.push(new File([bl],safeName(t.t)+'.pdf',{type:'application/pdf'})); }
     if(files.length && navigator.canShare && navigator.canShare({files})){ await navigator.share({files, title:items.length+' Stücke'}); return; }
     if(navigator.share){ await navigator.share({title:items.length+' Stücke', text:items.map(t=>t.t).join(', ')}); return; }
   }catch(e){ if(e&&e.name==='AbortError')return; }
+  finally{ urlFreigebenViele(items); }
   alert('Teilen ist hier nicht verfügbar (nur über localhost/Netlify bzw. die installierte App). Ich öffne stattdessen den Druck-Dialog.');
   bulkPrint();
 }
-function bulkPrint(){
+/* Das Fenster wird VOR dem Warten geoeffnet. Nach einem `await` gilt der Klick
+   nicht mehr als Nutzerhandlung, und der Pop-up-Blocker haelt es zurueck. */
+async function bulkPrint(){
   const items=[...S.selection].map(k=>byKey[k]).filter(t=>t&&!t.isEdit); if(!items.length){ alert('Keine druckbaren Stücke ausgewählt.'); return; }
-  const embeds=items.map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
   const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
+  w.document.write('<html><head><title>Auswahl ('+items.length+')</title></head><body style="margin:0;font:14px system-ui;color:#222"><p style="padding:16px">Blätter werden geholt…</p></body></html>');
+  await urlSichernViele(items);
+  const embeds=items.filter(t=>t.f).map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
+  w.document.open();
   w.document.write(`<html><head><title>Auswahl (${items.length})</title></head><body style="margin:0">${embeds}<script>setTimeout(()=>window.print(),900)<\/script></body></html>`); w.document.close();
 }
 
@@ -2861,7 +2971,11 @@ function zuZeilen(blaetter){
     z.stimmen.push(t);
   });
   zeilen.forEach(z=>{
-    if(z.stimmen.length>1) z.stimmen.sort((a,b)=>stimmenRang(a.stimme)-stimmenRang(b.stimme));
+    /* Nach dem Instrument ordnen, bei gleichem Instrument nach dem Etikett —
+       sonst stehen „Alt 2" und „Alt 1" in zufaelliger Reihenfolge. */
+    if(z.stimmen.length>1) z.stimmen.sort((a,b)=>
+      (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
+      || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}));
     z.zeige=waehleStimme(z.stimmen);
   });
   return zeilen;
@@ -2951,7 +3065,7 @@ function openViewer(t, keepNav){
        Tab, wo Safaris Betrachter das Zoomen mit zwei Fingern anbietet. */
     const tab=document.getElementById('vTab');
     tab.style.display = (document.body.dataset.o==='land') ? 'none':'flex';
-    tab.onclick=()=>window.open(encodeURI(t.f),'_blank');
+    tab.onclick=async()=>{ const u=await urlSichern(t); if(u) window.open(encodeURI(u),'_blank'); };
     fitOn=true; renderPdfFit(t);
   }
   updateNavUI();
@@ -3111,17 +3225,24 @@ function safeName(s){ return (s||'Stück').replace(/[\/\\:*?"<>|]+/g,' ').replac
 async function fetchAsFile(t){
   if(t.isEdit){ const pages=await idbGetPages(t.key); if(!pages.length) return null;
     const bl=await (await fetch(pages[0])).blob(); return new File([bl], safeName(t.t)+'.png',{type:'image/png'}); }
+  /* Aus der neuen Ablage direkt die Bytes nehmen, ohne Umweg ueber eine URL. */
+  if(t.bsId){ const bl=await BS.bytes(t.bsId); if(!bl) return null;
+    return new File([bl], safeName(t.t)+'.pdf',{type:'application/pdf'}); }
   const bl=await (await fetch(encodeURI(t.f))).blob(); return new File([bl], safeName(t.t)+'.pdf',{type:'application/pdf'});
 }
 async function shareTune(t){
   if(!t) return;
-  const title=t.t, url=new URL(encodeURI(t.f), location.href).href;
+  await urlSichern(t);
+  /* Ein Blatt aus der eigenen Ablage hat keine teilbare Adresse — sein Verweis
+     gilt nur in dieser Sitzung. Geteilt wird dann die Datei, nicht die URL. */
+  const title=t.t, url=t.bsId ? '' : new URL(encodeURI(t.f), location.href).href;
   // 1) Datei teilen (iPad/iPhone + neuere macOS): öffnet den Apple-Share-Dialog inkl. Drucken
   try{ const f=await fetchAsFile(t);
     if(f && navigator.canShare && navigator.canShare({files:[f]})){ await navigator.share({files:[f], title}); return; } }
   catch(e){ if(e && e.name==='AbortError') return; }
   // 2) URL teilen (öffnet auch auf dem Mac den Apple-Share-Dialog)
-  try{ if(navigator.share){ await navigator.share({title, url}); return; } }
+  try{ if(navigator.share && url){ await navigator.share({title, url}); return; }
+       if(navigator.share){ await navigator.share({title, text:title}); return; } }
   catch(e){ if(e && e.name==='AbortError') return; }
   // 3) Web Share nicht verfügbar (z. B. Doppelklick/file://)
   alert('Teilen ist hier nicht verfügbar – es funktioniert in der installierten App bzw. über die gehostete Adresse (Netlify) oder localhost. Ich öffne stattdessen den Druck-Dialog.');
@@ -3132,14 +3253,25 @@ function printCurrent(t){
   if(t.isEdit){ printImages(t); return; }
   const frame=document.getElementById('vFrame');
   try{ if(frame && frame.style.display!=='none' && frame.contentWindow){ frame.contentWindow.focus(); frame.contentWindow.print(); return; } }catch(e){}
-  const w=window.open(encodeURI(t.f),'_blank'); try{ w&&w.addEventListener&&w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
+  /* Liegt das Blatt auf der Buehne, ist sein Verweis schon geliehen und der
+     Klick bleibt eine Nutzerhandlung. Nur wenn nicht, muss gewartet werden —
+     dafuer wird das Fenster vorher geoeffnet, sonst greift der Pop-up-Blocker. */
+  if(t.f){ const w=window.open(encodeURI(t.f),'_blank');
+    try{ w&&w.addEventListener&&w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
+    return; }
+  const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
+  urlSichern(t).then(url=>{
+    if(!url){ try{ w.close(); }catch(e){} alert('Für dieses Stück ist keine Datei hinterlegt.'); return; }
+    w.location.href=encodeURI(url);
+    try{ w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
+  });
 }
 async function shareSetlist(st){
   const items=st.items.map(k=>byKey[k]).filter(Boolean); if(!items.length) return;
   try{
     const files=[];
-    for(const t of items){ if(t.isEdit) continue; const bl=await (await fetch(encodeURI(t.f))).blob();
-      files.push(new File([bl], safeName(t.t)+'.pdf',{type:'application/pdf'})); }
+    for(const t of items){ if(t.isEdit) continue;
+      const f=await fetchAsFile(t); if(f) files.push(f); }
     if(files.length && navigator.canShare && navigator.canShare({files})){ await navigator.share({files, title:st.name}); return; }
     if(navigator.share){ await navigator.share({title:st.name, text:st.name}); return; }
   }catch(e){ if(e && e.name==='AbortError') return; }
@@ -3410,11 +3542,14 @@ function playSequence(st){
   const items=st.items.filter(k=>byKey[k]); if(!items.length)return;
   LISTNAV=items.slice(); openViewer(byKey[items[0]]);
 }
-function printSetlist(st){
+async function printSetlist(st){
   const items=st.items.map(k=>byKey[k]).filter(Boolean);
+  const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
+  w.document.write('<html><head><title>'+esc(st.name)+'</title></head><body style="font:14px system-ui;color:#222"><p style="padding:16px">Blätter werden geholt…</p></body></html>');
+  await urlSichernViele(items);
   const list=items.map((t,i)=>`<div style="padding:4px 0"><b>${i+1}. ${esc(t.t)}</b> — ${t.c?esc(t.c)+', ':''}${esc(t.b)}, S. ${esc(t.pg)}</div>`).join('');
-  const embeds=items.map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
-  const w=window.open('','_blank');
+  const embeds=items.filter(t=>t.f).map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
+  w.document.open();
   w.document.write(`<html><head><title>${esc(st.name)}</title></head><body style="font-family:sans-serif"><h2>${esc(st.name)}</h2>${list}<hr>${embeds}<script>setTimeout(()=>window.print(),900)<\/script></body></html>`);
   w.document.close();
 }
@@ -3615,66 +3750,152 @@ function openDataSheet(){
 }
 document.getElementById('settingsBtn').onclick=openDataSheet;
 
-/* ---------- Eigene Noten: Bücher anlegen, PDFs importieren, verwalten ---------- */
-function createBook(name){ name=(name||'').trim(); if(!name) return null;
-  const bid=newId('ub'); const chip=name.length>18?name.slice(0,16)+'…':name;
-  USERBOOKS.push({bid,name,chip,createdAt:Date.now()}); saveUserBooks(); return bid; }
+/* ---------- Eigene Noten: Bücher anlegen, PDFs importieren, verwalten ----------
+   Alles unten schreibt in die neue Ablage. Die alte `libtunes` wird nicht mehr
+   beschrieben und bleibt als Rueckweg unberuehrt liegen. */
+async function createBook(name){ name=(name||'').trim(); if(!name) return null;
+  try{ const b=await BS.buchAnlegen({name}); await loadLibrary(); return b.id; }
+  catch(e){ alert('Das Buch konnte nicht angelegt werden: '+(e&&e.message||e)); return null; }
+}
 async function deleteBook(bid){ const ub=userBook(bid); if(!ub) return;
   const own=LIBTUNES.filter(t=>t.bid===bid);
-  if(!confirm('Buch „'+ub.name+'" löschen'+(own.length?' – samt '+own.length+' Stück'+(own.length>1?'en':'')+'?':'?'))) return;
-  for(const t of own){ try{ await libDelete(t.libId); }catch(e){} }
-  USERBOOKS=USERBOOKS.filter(b=>b.bid!==bid); saveUserBooks(); S.books.delete(bid);
+  if(!confirm('Buch „'+ub.name+'" löschen'+(own.length?' – samt '+own.length+' Stück'+(own.length>1?'en':'')+'?':'?')
+      +'\n\nDas Gelöschte liegt danach im Papierkorb.')) return;
+  own.forEach(t=>urlFreigeben(t));
+  try{ await BS.loeschen('buch',[bid],'Buch löschen'); }
+  catch(e){ alert('Löschen fehlgeschlagen: '+(e&&e.message||e)); return; }
+  S.books.delete(bid);
   await loadLibrary(); render(); openLibrarySheet(); }
+/* Einzelne PDFs ohne Bandbuch-Erkennung: je Datei ein Stueck mit einem Blatt.
+   Die Seitenzahl kommt aus den Bytes — gemessen 0,2 statt 82 ms je Blatt, und
+   PDF.js bleibt der Rueckfallweg fuer den Einzelfall, den sie nicht liest. */
 async function importPdfs(bid, files){
-  let ok=0;
-  for(const file of files){
-    if(!/pdf$/i.test(file.type||'') && !/\.pdf$/i.test(file.name||'')) continue;
-    let np=1; try{ const buf=await file.arrayBuffer(); const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise; np=doc.numPages; }catch(e){}
-    const id=newId('lt'); const title=(file.name||'Stück').replace(/\.pdf$/i,'').trim()||'Stück';
-    try{ await libPut({id,bid,title,composer:'',addedAt:Date.now(),np,fileName:file.name,blob:file}); ok++; }catch(e){ alert('Import fehlgeschlagen: '+e.message); }
+  const liste=[...files].filter(f=>/pdf$/i.test(f.type||'') || /\.pdf$/i.test(f.name||''));
+  if(!liste.length) return 0;
+  const gruppen=[];
+  for(const file of liste){
+    const np=await BS.seitenzahl(file);
+    gruppen.push({ titel:{titel:(file.name||'Stück').replace(/\.pdf$/i,'').trim()||'Stück'},
+                   elemente:[{art:'blatt', dateiname:file.name, blob:file, np}] });
   }
+  let ber;
+  try{ ber=await BS.stueckeSchreiben(bid, gruppen); }
+  catch(e){ alert('Import fehlgeschlagen: '+(e&&e.message||e)); return 0; }
   await loadLibrary(); render(); openLibrarySheet();
-  return ok;
+  return ber.elemente;
 }
 /* Ein Bandbuch schreiben. Erst hier, nach der Vorschau — vorher wird nichts
-   angelegt und nichts geraten. */
-async function importBandbuch(bid, saetze){
-  let ok=0;
-  for(const s of saetze){
-    const file=s.file;
-    if(!/pdf$/i.test(file.type||'') && !/\.pdf$/i.test(file.name||'')) continue;
-    let np=1; try{ const buf=await file.arrayBuffer();
-      const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise; np=doc.numPages; }catch(e){}
-    const id=newId('lt');
-    try{ await libPut({ id, bid, title:s.titel||'Stück', composer:'', addedAt:Date.now(), np,
-                        fileName:file.name, voice:s.voice||'', blob:file }); ok++; }
-    catch(e){ alert('Import fehlgeschlagen: '+e.message); }
+   angelegt und nichts geraten.
+
+   Schritt 1b: Die Saetze werden nach ihrem Stueck gebuendelt und als Stuecke
+   geschrieben, nicht mehr als einzelne Blaetter. Damit entsteht der Titel als
+   eigene Sache, und die Blaetter eines Stuecks haengen an ihm. Zwei Stuecke
+   desselben Namens bleiben zwei, weil die Vorschau sie getrennt fuehrt.
+
+   Das Etikett ist Jens' Schreibweise, das Instrument das Erkannte. Beide
+   werden getrennt mitgeschrieben — damit ist Schritt 3 des Import-Konzepts
+   erledigt, und auf dem Schalter steht „Alt 1" statt zweimal „Alt-Sax". */
+async function importBandbuch(bid, saetze, fortschritt){
+  const gueltig=(saetze||[]).filter(s=>s && s.file &&
+    (/pdf$/i.test(s.file.type||'') || /\.pdf$/i.test(s.file.name||'')));
+  if(!gueltig.length) return 0;
+
+  /* Buendeln. Die Vorschau liefert je Satz seinen Titel; gleiche Titel in
+     derselben Reihenfolge gehoeren zum selben Stueck. Ein zweites Stueck mit
+     demselben Namen entsteht nur, wenn die Vorschau es getrennt fuehrt —
+     dafuer traegt jeder Satz seine Gruppenkennung `gruppe`, sofern gesetzt. */
+  const nachStueck=new Map();
+  for(const s of gueltig){
+    const schl = s.gruppe || ('t:'+titelSchluessel(s.titel||'Stück'));
+    if(!nachStueck.has(schl)) nachStueck.set(schl, {titel:{titel:s.titel||'Stück'}, elemente:[]});
+    const g=nachStueck.get(schl);
+    g.elemente.push({ art:'blatt', etikett:'', instrument:s.voice || '',
+                      dateiname:s.file.name, blob:s.file, np:1, _rest:s.rest||'' });
   }
+  const gruppen=[...nachStueck.values()];
+
+  /* ---- Das Etikett ----------------------------------------------------
+     In der Regel ist das Etikett der Instrumentenname: „Alt-Sax" ist genau,
+     was auf dem Schalter stehen soll. Nur wenn ZWEI Blaetter desselben
+     Stuecks auf dasselbe Instrument fallen, sagt der Name nichts mehr — dann
+     stand bei `Bienentanz` zweimal „Alt-Sax", und man musste raten.
+
+     Erst dort wird der Rest des Dateinamens herangezogen, also Jens'
+     eigene Schreibweise: „Alt 1", „Alt 2". Nur dort, denn ein Rest wie
+     „Sheet in Eb" waere auf dem Schalter schlechter als „B♭". Reicht der Rest
+     nicht, wird durchgezaehlt. */
+  /* Derselbe Zusatz, den die Titelsaeuberung entfernt, gehoert auch nicht auf
+     den Schalter: „Alt 1 NEU" beschreibt die Fassung des Ordners, nicht die
+     Stimme. Er faellt am Ende UND vor der Endung weg. */
+  const ETIKETT_ZUSATZ=/(^|[\s_\-–—]+)(neu|new|kopie|copy|final)\s*\d*(?=$|[\s_\-–—])/gi;
+  const restSauber = r => (r||'')
+      .replace(ETIKETT_ZUSATZ,' ')
+      .replace(/[\s_\-–—:.,]+/g,' ')
+      .replace(/\s+/g,' ').trim().slice(0,18);
+  for(const g of gruppen){
+    const zahl={};
+    g.elemente.forEach(e=>{ const k=e.instrument||''; zahl[k]=(zahl[k]||0)+1; });
+    const lauf={};
+    g.elemente.forEach(e=>{
+      const k=e.instrument||'';
+      if(zahl[k]<=1){ e.etikett=k; delete e._rest; return; }
+      const r=restSauber(e._rest);
+      lauf[k]=(lauf[k]||0)+1;
+      e.etikett = (r && r.length<=18) ? r : (k+' '+lauf[k]);
+      delete e._rest;
+    });
+  }
+  /* Seitenzahl aus den Bytes, mit PDF.js als Rueckfallweg. */
+  let gelesen=0;
+  const gesamtDateien=gueltig.length;
+  for(const g of gruppen) for(const e of g.elemente){
+    e.np=await BS.seitenzahl(e.blob);
+    if(fortschritt) fortschritt('lesen', ++gelesen, gesamtDateien);
+  }
+  let ber;
+  try{ ber=await BS.stueckeSchreiben(bid, gruppen, (n,g,t)=>{ if(fortschritt) fortschritt('schreiben',n,g,t); }); }
+  catch(e){ alert('Import fehlgeschlagen: '+(e&&e.message||e)); return 0; }
   await loadLibrary(); render();
-  return ok;
+  window._letzterImport = ber;
+  return ber.elemente;
 }
 window.importBandbuch = importBandbuch;
 
-async function saveLibMeta(id, patch){
-  // Atomares Lesen+Schreiben in EINER Transaktion: verhindert, dass ein verzögertes
-  // Speichern (z. B. beim Verlassen des Feldes) ein gerade gelöschtes Stück wieder aufleben lässt.
-  const db=await idb();
-  await new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readwrite'), st=tx.objectStore(IDB_LIB);
-    const g=st.get(id); g.onsuccess=()=>{ const r=g.result; if(r){ Object.assign(r,patch); st.put(r); } };
-    tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
-  await loadLibrary(); render();
-}
-/* Dasselbe fuer mehrere Blaetter auf einmal — in EINER Transaktion und mit
-   EINEM Neuladen. Ein Stueck hat leicht acht Blaetter; achtmal die ganze
-   Bibliothek neu zu lesen dauert laenger als das Schreiben selbst. */
+/* ---- Adapter auf die neue Ablage ----------------------------------------
+   Die Oberflaeche ruft weiter `saveLibMeta(libId, patch)`. Nur wandern die
+   Felder jetzt an die richtige Ebene: Titel und Komponist gehoeren dem STUECK,
+   die Stimme dem BLATT. Genau das ist der Gewinn des eigenen Titels — ein
+   Stueck umzubenennen kostet einen Schreibvorgang statt acht. */
+async function saveLibMeta(id, patch){ return saveLibMetaMehrere([id], patch); }
 async function saveLibMetaMehrere(ids, patch){
-  if(!ids.length) return;
-  const db=await idb();
-  await new Promise((res,rej)=>{
-    const tx=db.transaction(IDB_LIB,'readwrite'), st=tx.objectStore(IDB_LIB);
-    ids.forEach(id=>{ const g=st.get(id);
-      g.onsuccess=()=>{ const r=g.result; if(r){ Object.assign(r,patch); st.put(r); } }; });
-    tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
+  ids=(ids||[]).filter(Boolean); if(!ids.length) return;
+  const tunes=ids.map(id=>LIBTUNES.find(x=>x.libId===id)).filter(Boolean);
+  if(!tunes.length) return;
+  try{
+    /* Titel und Komponist: je betroffenes Stueck EIN Schreibvorgang. */
+    if('title' in patch || 'composer' in patch){
+      const stueck={};
+      tunes.forEach(t=>{ stueck[t.titelId]=true; });
+      const p={};
+      if('title' in patch) p.titel=(patch.title||'').trim()||'Stück';
+      if('composer' in patch) p.komponist=(patch.composer||'').trim();
+      for(const tid of Object.keys(stueck)) await BS.aendern('titel', tid, p);
+    }
+    /* Die Stimme: je Blatt. Das Etikett folgt der Stimme, solange der Nutzer
+       kein eigenes gesetzt hat — sonst hiesse ein richtiggestelltes Blatt
+       weiter wie zuvor. */
+    if('voice' in patch){
+      for(const t of tunes){
+        const el=BS_KATALOG.elemente.find(e=>e.id===t.libId); if(!el) continue;
+        const neu={instrument:patch.voice||''};
+        if(!el.etikett || el.etikett===el.instrument) neu.etikett=patch.voice||'';
+        await BS.aendern('element', t.libId, neu);
+      }
+    }
+    if('etikett' in patch){
+      for(const t of tunes) await BS.aendern('element', t.libId, {etikett:(patch.etikett||'').trim()});
+    }
+  }catch(e){ alert('Konnte die Änderung nicht speichern: '+(e&&e.message||e)); }
   await loadLibrary(); render();
 }
 /* Mehrere Blaetter loeschen: einmal fragen, einmal aufraeumen. Die
@@ -3688,22 +3909,29 @@ async function deleteLibTunes(ids){
     ? '„'+namen[0]+'" löschen?'
     : ids.length+' Blätter löschen?\n\n'+namen.slice(0,12).join('\n')
       + (ids.length>12 ? '\n… und '+(ids.length-12)+' weitere' : '');
-  if(!confirm(frage)) return false;
-  for(const id of ids){
-    try{ await libDelete(id); }catch(e){ alert('Löschen fehlgeschlagen: '+e.message); return false; }
-    S.fav.delete('lib|'+id); S.prac.delete('lib|'+id); delete S.tuneTags['lib|'+id];
-    S.sets.forEach(st=>st.items=st.items.filter(k=>k!=='lib|'+id));
-  }
+  if(!confirm(frage+'\n\nDas Gelöschte liegt danach im Papierkorb.')) return false;
+  /* Die Verweise in Favoriten, Uebungsliste, Tags und Setlists muessen mit
+     weg, sonst zeigen sie ins Leere. Der Schluessel wird am Eintrag abgelesen
+     und nicht zusammengebaut — er hiess frueher `lib|…` und heisst jetzt
+     `bs|…`; zusammengebaut waere er beim Umstieg still falsch geworden. */
+  const schluessel=ids.map(id=>{ const t=LIBTUNES.find(x=>x.libId===id); return t&&t.key; }).filter(Boolean);
+  ids.forEach(id=>{ const t=LIBTUNES.find(x=>x.libId===id); if(t) urlFreigeben(t); });
+  try{ await BS.loeschen('element', ids, 'Blätter löschen'); }
+  catch(e){ alert('Löschen fehlgeschlagen: '+(e&&e.message||e)); return false; }
+  schluessel.forEach(k=>{ S.fav.delete(k); S.prac.delete(k); delete S.tuneTags[k];
+    S.sets.forEach(st=>st.items=st.items.filter(x=>x!==k)); });
   save(); await loadLibrary(); render();
   return true;
 }
 async function deleteLibTune(id){ const t=LIBTUNES.find(x=>x.libId===id);
-  if(!confirm('„'+((t&&t.t)||'Stück')+'" löschen?')) return;
-  try{ await libDelete(id); }catch(e){ alert('Löschen fehlgeschlagen: '+e.message); return; }
-  S.fav.delete('lib|'+id); S.prac.delete('lib|'+id); delete S.tuneTags['lib|'+id];
-  S.sets.forEach(st=>st.items=st.items.filter(k=>k!=='lib|'+id)); save();
+  if(!confirm('„'+((t&&t.t)||'Stück')+'" löschen?\n\nDas Gelöschte liegt danach im Papierkorb.')) return;
+  const k=t&&t.key; if(t) urlFreigeben(t);
+  try{ await BS.loeschen('element',[id],'Blatt löschen'); }
+  catch(e){ alert('Löschen fehlgeschlagen: '+(e&&e.message||e)); return; }
+  if(k){ S.fav.delete(k); S.prac.delete(k); delete S.tuneTags[k];
+    S.sets.forEach(st=>st.items=st.items.filter(x=>x!==k)); save(); }
   await loadLibrary(); render(); openLibrarySheet(); }
-async function exportLibTune(id){ const r=await libGet(id); if(!r) return;
+async function exportLibTune(id){ const r=await libGet(id); if(!r||!r.blob) return;
   const a=document.createElement('a'); a.href=URL.createObjectURL(r.blob); a.download=safeName(r.title)+'.pdf';
   document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1500); }
 
@@ -3716,7 +3944,8 @@ function openLibrarySheet(){
     nb.innerHTML='<input class="txt" id="nbName" placeholder="Name des neuen Buchs, z. B. Meine Standards" style="flex:1">'
       +'<button class="btn" id="nbAdd">Anlegen</button>';
     card.append(nb);
-    const doAdd=()=>{ const v=nb.querySelector('#nbName').value; if(!v.trim())return; const bid=createBook(v); nb.querySelector('#nbName').value=''; render(); openLibrarySheet(); };
+    const doAdd=async()=>{ const v=nb.querySelector('#nbName').value; if(!v.trim())return;
+      await createBook(v); nb.querySelector('#nbName').value=''; render(); openLibrarySheet(); };
     nb.querySelector('#nbAdd').onclick=doAdd;
     card.insertAdjacentHTML('beforeend','<div class="muted" style="margin:0 2px 12px">Tipp: mehrere PDFs lassen sich in einem Rutsch auswählen.</div>');
     // Bücher + Stücke
@@ -3724,10 +3953,20 @@ function openLibrarySheet(){
       card.insertAdjacentHTML('beforeend','<div class="muted" style="border-top:1px solid var(--line);padding-top:12px">Noch keine eigenen Bücher. Lege oben eines an.</div>');
     }
     USERBOOKS.forEach(ub=>{
-      const own=LIBTUNES.filter(t=>t.bid===ub.bid).sort((a,b)=>(a.t||'').localeCompare(b.t||'','de'));
+      /* Seit Schritt 1c ist eine Zeile ein BLATT und nicht ein Stueck: Ein
+         Stueck hat leicht acht davon. Diese Liste zaehlt darum Blaetter und
+         nennt hinter dem Titel die Stimme — sonst stand hier vierzehnmal
+         „Afro Blue" und man konnte die Zeilen nicht auseinanderhalten. Die
+         Ansicht je Stueck steht unter „Notenbestand verwalten". */
+      const own=LIBTUNES.filter(t=>t.bid===ub.bid).sort((a,b)=>
+        (a.t||'').localeCompare(b.t||'','de')
+        || (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b))));
+      const stueckZahl=new Set(own.map(t=>t.titelId||t.key)).size;
       const sec=document.createElement('div'); sec.style.cssText='border-top:1px solid var(--line);padding-top:12px;margin-top:12px';
       const head=document.createElement('div'); head.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px';
-      head.innerHTML='<div class="lbl" style="margin:0;flex:1">'+esc(ub.name)+' <span class="muted">· '+own.length+' Stück'+(own.length===1?'':'e')+'</span></div>'
+      head.innerHTML='<div class="lbl" style="margin:0;flex:1">'+esc(ub.name)+' <span class="muted">· '
+        +stueckZahl+' Stück'+(stueckZahl===1?'':'e')+', '
+        +own.length+(own.length===1?' Blatt':' Blätter')+'</span></div>'
         +'<button class="btn ghost" data-imp style="padding:6px 10px">＋ PDF</button>'
         +'<button class="btn ghost" data-del style="padding:6px 10px">🗑</button>'
         +'<input type="file" data-file accept="application/pdf,.pdf" multiple style="display:none">';
@@ -3739,6 +3978,8 @@ function openLibrarySheet(){
       own.forEach(t=>{
         const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;align-items:center;margin:6px 0';
         row.innerHTML='<input class="txt" data-t value="'+esc(t.t)+'" placeholder="Titel" style="flex:2;min-width:0">'
+          +'<span class="muted" style="flex:0 0 auto;max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
+          +' title="'+esc(t.stimme||'ohne Stimme')+'">'+esc(t.stimme||'—')+'</span>'
           +'<input class="txt" data-c value="'+esc(t.c||'')+'" placeholder="Komponist" style="flex:1;min-width:0">'
           +'<button class="btn ghost" data-exp title="Exportieren" style="padding:6px 9px">⬇︎</button>'
           +'<button class="btn ghost" data-x title="Löschen" style="padding:6px 9px">✕</button>';
@@ -3816,43 +4057,111 @@ function openMetaSheet(t){
 }
 
 /* ---------- Baustein 3b: Sammlungspaket (eigene Noten als eine Datei) ---------- */
+/* Der Export des ganzen Bestands. Er liegt jetzt in BS: sprechende Namen im
+   Ordner, die Kennungen im Katalog daneben, dazu eine LIESMICH — lesbar auch
+   ohne BandStand. Gemessen an 6.231 Blaettern: 23,7 s, 298,8 MB. */
 async function exportPackage(){
-  if(!LIBTUNES.length){ alert('Es sind keine eigenen Noten zum Sichern vorhanden.'); return; }
-  const zip=new JSZip(); const tunes=[];
-  for(const t of LIBTUNES){ const r=await libGet(t.libId); if(!r||!r.blob) continue;
-    const file='pieces/'+r.id+'.pdf'; zip.file(file, r.blob);
-    tunes.push({id:r.id,bid:r.bid,title:r.title,composer:r.composer||'',addedAt:r.addedAt||0,np:r.np||1,fileName:r.fileName||'',file}); }
-  const manifest={schema:1, app:'realbook', kind:'collection', exportedAt:new Date().toISOString(),
-    books:USERBOOKS.map(b=>({bid:b.bid,name:b.name,chip:b.chip,createdAt:b.createdAt})), tunes};
-  zip.file('manifest.json', JSON.stringify(manifest,null,1));
-  const out=await zip.generateAsync({type:'blob', compression:'STORE'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(out);
-  a.download='bandstand-sammlung-'+new Date().toISOString().slice(0,10)+'.zip';
-  document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  const z=await BS.zahlen();
+  if(!z.elemente){ alert('Es sind keine eigenen Noten zum Sichern vorhanden.'); return; }
+  const alle=confirm('Bestand exportieren.\n\n'+z.titel+' Stücke, '+z.elemente+' Elemente.\n\n'
+    +'OK: mit Tonaufnahmen (größer)\nAbbrechen: nur Noten');
+  try{
+    const zahl=await BS.exportAlsDatei(alle?{arten:Object.keys(BS.ARTEN)}:undefined);
+    alert('Export erstellt.\n'+zahl.titel+' Stücke, '+zahl.elemente+' Elemente, '
+      +(zahl.bytes/1048576).toFixed(1)+' MB.');
+  }catch(e){ alert('Export fehlgeschlagen: '+(e&&e.message||e)); }
 }
+/* Einlesen. Es kennt zwei Formen: den neuen Katalog und das alte
+   Sammlungspaket, damit frueher erzeugte Pakete nicht verloren sind.
+
+   In beiden Faellen bleiben die KENNUNGEN erhalten. Deshalb verdoppelt ein
+   zweites Einlesen desselben Pakets nichts, sondern erkennt „habe ich schon". */
 async function importPackage(file){
   let zip; try{ zip=await JSZip.loadAsync(file); }catch(e){ alert('Kein gültiges Paket.'); return; }
-  const mf=zip.file('manifest.json'); if(!mf){ alert('Paket ohne Manifest.'); return; }
-  let manifest; try{ manifest=JSON.parse(await mf.async('string')); }catch(e){ alert('Manifest nicht lesbar.'); return; }
-  if(manifest.kind!=='collection'){ alert('Das ist kein Sammlungspaket.'); return; }
-  let addedBooks=0;
-  (manifest.books||[]).forEach(b=>{ if(b&&b.bid&&!userBook(b.bid)){ USERBOOKS.push({bid:b.bid,name:b.name||'Import',chip:b.chip||b.name||'Import',createdAt:b.createdAt||Date.now()}); addedBooks++; } });
-  let fallbackBid=null;
-  const ensureBook=bid=>{ if(bid&&userBook(bid)) return bid; if(!fallbackBid) fallbackBid=createBook('Importierte Noten'); return fallbackBid; };
-  saveUserBooks();
-  const existing=new Set((await libAll()).map(r=>r.id));
-  let added=0, skipped=0;
-  for(const m of (manifest.tunes||[])){
-    if(!m||!m.id||existing.has(m.id)){ skipped++; continue; }
-    const zf=zip.file(m.file); if(!zf){ skipped++; continue; }
-    const blob=await zf.async('blob'); const bid=ensureBook(m.bid);
-    await libPut({id:m.id,bid,title:m.title||'Stück',composer:m.composer||'',addedAt:m.addedAt||Date.now(),np:m.np||1,fileName:m.fileName||'',blob});
-    existing.add(m.id); added++;
+  const neu=zip.file('katalog.json'), alt=zip.file('manifest.json');
+  if(!neu && !alt){ alert('Das Paket enthält weder katalog.json noch manifest.json.'); return; }
+  let kat;
+  try{ kat=JSON.parse(await (neu||alt).async('string')); }
+  catch(e){ alert('Der Katalog im Paket ist nicht lesbar.'); return; }
+
+  const vorhanden=new Set((BS_KATALOG.elemente||[]).map(e=>e.id));
+  const buchDa=new Set((BS_KATALOG.buecher||[]).map(b=>b.id));
+  let neueBuecher=0, dazu=0, schonDa=0, ohneDatei=0;
+
+  if(neu){
+    /* Neue Form: Buecher, Titel und Elemente mit ihren Kennungen. */
+    for(const b of (kat.buecher||[])){
+      if(!b || !b.id || buchDa.has(b.id)) continue;
+      await BS._intern.tx('buecher','readwrite',st=>st.put({
+        id:b.id, name:b.name||'Import', chip:b.chip||b.name||'Import',
+        hubId:b.hubId||null, angelegt:b.angelegt||Date.now(), geaendert:Date.now() }));
+      buchDa.add(b.id); neueBuecher++;
+    }
+    const titelDa=new Set((BS_KATALOG.titel||[]).map(t=>t.id));
+    for(const t of (kat.titel||[])){
+      if(!t || !t.id || titelDa.has(t.id)) continue;
+      const bid = buchDa.has(t.buchId) ? t.buchId : (await sammelBuch(buchDa));
+      await BS._intern.tx('titel','readwrite',st=>st.put({
+        id:t.id, buchId:bid, titel:t.titel||'Stück', komponist:t.komponist||'',
+        angelegt:t.angelegt||Date.now(), geaendert:Date.now() }));
+      titelDa.add(t.id);
+    }
+    for(const e of (kat.elemente||[])){
+      if(!e || !e.id){ continue; }
+      if(vorhanden.has(e.id)){ schonDa++; continue; }
+      if(!titelDa.has(e.titelId)){ ohneDatei++; continue; }
+      let blob=null;
+      if(e.datei){ const zf=zip.file(e.datei); if(zf) blob=await zf.async('blob'); }
+      if(!blob && (BS.ARTEN[e.art]||{}).bytes){ ohneDatei++; continue; }
+      await BS._intern.tx(['elemente','bytes'],'readwrite',(el,by)=>{
+        el.put({ id:e.id, titelId:e.titelId, art:e.art||'blatt', etikett:e.etikett||'',
+                 instrument:e.instrument||'', reihung:e.reihung||0, np:e.np||1,
+                 dateiname:e.dateiname||'', groesse:(blob&&blob.size)||0, ziel:e.ziel||'',
+                 angelegt:e.angelegt||Date.now(), geaendert:Date.now() });
+        if(blob) by.put({id:e.id, blob});
+      });
+      vorhanden.add(e.id); dazu++;
+    }
+  } else {
+    /* Alte Form: je Stueck ein Satz. Daraus wird je Satz ein Stueck mit einem
+       Blatt — die Kennung wird als Element-Kennung uebernommen. */
+    for(const b of (kat.books||[])){
+      if(!b || !b.bid || buchDa.has(b.bid)) continue;
+      await BS._intern.tx('buecher','readwrite',st=>st.put({
+        id:b.bid, name:b.name||'Import', chip:b.chip||b.name||'Import',
+        hubId:null, angelegt:b.createdAt||Date.now(), geaendert:Date.now() }));
+      buchDa.add(b.bid); neueBuecher++;
+    }
+    for(const m of (kat.tunes||[])){
+      if(!m || !m.id){ continue; }
+      if(vorhanden.has(m.id)){ schonDa++; continue; }
+      const zf=m.file && zip.file(m.file); if(!zf){ ohneDatei++; continue; }
+      const blob=await zf.async('blob');
+      const bid = buchDa.has(m.bid) ? m.bid : (await sammelBuch(buchDa));
+      const tid = BS.kennung('ti');
+      await BS._intern.tx(['titel','elemente','bytes'],'readwrite',(t,el,by)=>{
+        t.put({ id:tid, buchId:bid, titel:m.title||'Stück', komponist:m.composer||'',
+                angelegt:m.addedAt||Date.now(), geaendert:Date.now() });
+        el.put({ id:m.id, titelId:tid, art:'blatt', etikett:m.voice||'', instrument:m.voice||'',
+                 reihung:0, np:m.np||1, dateiname:m.fileName||'', groesse:blob.size, ziel:'',
+                 angelegt:m.addedAt||Date.now(), geaendert:Date.now() });
+        by.put({id:m.id, blob});
+      });
+      vorhanden.add(m.id); dazu++;
+    }
   }
-  saveUserBooks();
   await loadLibrary(); render(); openLibrarySheet();
-  alert('Sammlungspaket eingelesen.\n'+added+' Stück'+(added===1?'':'e')+' importiert'
-    +(skipped?', '+skipped+' schon vorhanden':'')+(addedBooks?'\n'+addedBooks+' Buch/Bücher angelegt':''));
+  alert('Paket eingelesen.\n'+dazu+' Element'+(dazu===1?'':'e')+' hinzugefügt'
+    +(schonDa?', '+schonDa+' schon vorhanden':'')
+    +(ohneDatei?', '+ohneDatei+' ohne Datei übergangen':'')
+    +(neueBuecher?'\n'+neueBuecher+' Buch/Bücher angelegt':''));
+}
+/* Ein Sammelbuch fuer Stuecke, deren Buch im Paket fehlt. */
+let _sammelBid=null;
+async function sammelBuch(buchDa){
+  if(_sammelBid && buchDa.has(_sammelBid)) return _sammelBid;
+  const b=await BS.buchAnlegen({name:'Importierte Noten'});
+  _sammelBid=b.id; buchDa.add(b.id); return b.id;
 }
 
 /* ============ PDF.js, sticky search, fit view, annotation ============ */
@@ -4336,6 +4645,10 @@ async function renderPdfFit(t){
      nichts da ist, erscheint der Hinweis. */
   const stehtSchon = !!fit.querySelector('.pg');
   if(!stehtSchon) fit.innerHTML='<div class="vlade">Lädt…</div>';
+  /* Die EINE Zeile, die Schritt 1c am Betrachter aendert: Sie beschafft den
+     Verweis. Wie gezeichnet und wie eingepasst wird, bleibt unberuehrt —
+     samt dem Rueckfallweg unten, der `t.f` ebenfalls schon gefuellt findet. */
+  await urlSichern(t);
   try{
     const doc=await loadPdf(t.f); const n=doc.numPages;
     const p1=await doc.getPage(1); const v1=p1.getViewport({scale:1});
@@ -4439,18 +4752,557 @@ function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_DB,3)
     if(!db.objectStoreNames.contains(IDB_LIB)) db.createObjectStore(IDB_LIB,{keyPath:'id'});
     if(!db.objectStoreNames.contains('parts')){ const ps=db.createObjectStore('parts',{keyPath:'id'}); try{ ps.createIndex('tuneKey','tuneKey',{unique:false}); }catch(e){} } };
   r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-/* Bibliothek: ein Datensatz je Stück = {id,bid,title,composer,addedAt,np,fileName,blob} */
-async function libAll(){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readonly'),st=tx.objectStore(IDB_LIB),out=[],c=st.openCursor();
+/* ---- Die alte Bibliothek `libtunes` -------------------------------------
+   Sie wird seit Schritt 1c nicht mehr gelesen und nicht mehr beschrieben. Die
+   Funktionen bleiben, weil der Rueckweg an ihnen haengt: Solange die alte
+   Datenbank liegt, laesst sich mit `libAltAlle()` nachsehen, was dort steht. */
+async function libAltAlle(){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readonly'),st=tx.objectStore(IDB_LIB),out=[],c=st.openCursor();
   c.onsuccess=e=>{ const cur=e.target.result; if(cur){ out.push(cur.value); cur.continue(); } else res(out); }; c.onerror=()=>rej(c.error); }); }
-async function libGet(id){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readonly'),g=tx.objectStore(IDB_LIB).get(id); g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); }); }
-async function libPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readwrite'); tx.objectStore(IDB_LIB).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
-async function libDelete(id){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_LIB,'readwrite'); tx.objectStore(IDB_LIB).delete(id); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+window.libAltAlle=libAltAlle;
+
+/* ---- Adapter: dieselben Namen, die neue Ablage darunter -----------------
+   `libGet` liefert weiter einen Satz in der alten Form, samt Blob. So bleiben
+   der Blatt-Export, das Sammlungspaket und die Vorschau unveraendert, obwohl
+   die Daten jetzt aus drei Speichern kommen. */
+async function libGet(id){
+  const el=(BS_KATALOG.elemente||[]).find(e=>e.id===id);
+  if(!el) return null;
+  const ti=(BS_KATALOG.titel||[]).find(t=>t.id===el.titelId)||{};
+  let blob=null; try{ blob=await BS.bytes(id); }catch(e){}
+  return { id, bid:ti.buchId||'', title:ti.titel||'Stück', composer:ti.komponist||'',
+           addedAt:el.angelegt||0, np:el.np||1, fileName:el.dateiname||'',
+           voice:el.instrument||'', etikett:el.etikett||'', art:el.art||'blatt', blob };
+}
+async function libDelete(id){ await BS.loeschen('element',[id],'einzeln gelöscht'); }
 async function idbPutPages(uk,arr){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_ST,'readwrite'),st=tx.objectStore(IDB_ST);
   arr.forEach((d,i)=>st.put({id:uk+'#'+i,userKey:uk,page:i,data:d})); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 async function idbGetPages(uk){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_ST,'readonly'),st=tx.objectStore(IDB_ST),out=[],c=st.openCursor();
   c.onsuccess=e=>{ const cur=e.target.result; if(cur){ if(cur.value.userKey===uk)out.push(cur.value); cur.continue(); } else { out.sort((a,b)=>a.page-b.page); res(out.map(x=>x.data)); } }; c.onerror=()=>rej(c.error); }); }
 async function idbDeletePages(uk){ const db=await idb(); return new Promise(res=>{ const tx=db.transaction(IDB_ST,'readwrite'),st=tx.objectStore(IDB_ST),c=st.openCursor();
   c.onsuccess=e=>{ const cur=e.target.result; if(cur){ if(cur.value.userKey===uk)cur.delete(); cur.continue(); } else res(); }; }); }
+
+/* ============================================================================
+   BS — die neue Ablage. Stufe 1, Schritt 1a des Bestands-Konzepts.
+
+   Sie liegt NEBEN der alten und nicht in ihr: eigene Datenbank `bandstand`,
+   waehrend `realbook` unberuehrt weiterbesteht. Nichts hier draussen haengt
+   heute davon ab; Liste, Verwaltung und Buehne lesen erst in Schritt 1c daraus.
+   Der Rueckweg ist damit die alte Datenbank selbst.
+
+   Drei Ebenen: Buch enthaelt Titel, Titel enthaelt Elemente. Der Titel ist eine
+   eigene Sache mit eigener Kennung — am 29. Juli 2026 so entschieden. Deshalb
+   kostet ein Umbenennen einen Schreibvorgang statt acht, und zwei gleichnamige
+   Stuecke verschmelzen nicht mehr stillschweigend zu einem.
+
+   Die Bytes liegen getrennt vom Katalog. Gemessen an 6.231 Blaettern: Katalog
+   lesen 136 ms statt 709 ms, und ein Blatt auf Zuruf 6,3 ms. Es gibt keinen
+   Grund, 294 MB dauerhaft anzuheften, um ein Blatt zu oeffnen.
+   ============================================================================ */
+const BS = (function(){
+  const DB='bandstand', VER=1;
+  const S_BUCH='buecher', S_TITEL='titel', S_EL='elemente', S_BYTE='bytes',
+        S_NOTIZ='notizen', S_KORB='papierkorb', S_SICH='sicherung', S_META='meta';
+  let _db=null;
+
+  /* ---- Die Arten als Register, nicht als Sonderfaelle im Programm ----------
+     Eine Art setzt nur zwei Dinge: ob sie Bytes mitbringt, und wie sie sich
+     beim Oeffnen verhaelt. Eine weitere Art kostet damit einen Eintrag hier
+     und keine Umschreibung. `austausch` ist die Vorgabe beim Export und beim
+     Abgleich: immer mitgeben, nur auf Zuruf, oder nie.                       */
+  const ARTEN = {
+    blatt:     { name:'Blatt',      bytes:true,  oeffnen:'buehne',  austausch:'immer',  endung:'.pdf' },
+    ton:       { name:'Ton',        bytes:true,  oeffnen:'player',  austausch:'zuruf',  endung:'' },
+    midi:      { name:'MIDI',       bytes:true,  oeffnen:'player',  austausch:'zuruf',  endung:'.mid' },
+    musicxml:  { name:'MusicXML',   bytes:true,  oeffnen:'extern',  austausch:'immer',  endung:'.musicxml' },
+    notizblatt:{ name:'Notizblatt', bytes:true,  oeffnen:'buehne',  austausch:'immer',  endung:'.pdf' },
+    verweis:   { name:'Verweis',    bytes:false, oeffnen:'extern',  austausch:'immer',  endung:'' },
+  };
+  const artOk = a => Object.prototype.hasOwnProperty.call(ARTEN,a);
+
+  /* ---- Datenbank ---------------------------------------------------------- */
+  function oeffnen(){
+    if(_db) return Promise.resolve(_db);
+    return new Promise((res,rej)=>{
+      const r=indexedDB.open(DB,VER);
+      r.onupgradeneeded=()=>{ const db=r.result;
+        if(!db.objectStoreNames.contains(S_BUCH))  db.createObjectStore(S_BUCH,{keyPath:'id'});
+        if(!db.objectStoreNames.contains(S_TITEL)){ const s=db.createObjectStore(S_TITEL,{keyPath:'id'});
+          s.createIndex('buchId','buchId',{unique:false}); }
+        if(!db.objectStoreNames.contains(S_EL)){ const s=db.createObjectStore(S_EL,{keyPath:'id'});
+          s.createIndex('titelId','titelId',{unique:false}); s.createIndex('art','art',{unique:false}); }
+        if(!db.objectStoreNames.contains(S_BYTE))  db.createObjectStore(S_BYTE,{keyPath:'id'});
+        if(!db.objectStoreNames.contains(S_NOTIZ)){ const s=db.createObjectStore(S_NOTIZ,{keyPath:'id'});
+          s.createIndex('elementId','elementId',{unique:false}); }
+        if(!db.objectStoreNames.contains(S_KORB))  db.createObjectStore(S_KORB,{keyPath:'id'});
+        if(!db.objectStoreNames.contains(S_SICH))  db.createObjectStore(S_SICH,{keyPath:'id'});
+        if(!db.objectStoreNames.contains(S_META))  db.createObjectStore(S_META,{keyPath:'k'});
+      };
+      r.onsuccess=()=>{ _db=r.result;
+        /* Zieht ein anderer Tab die Datenbank hoch oder loescht sie, wird
+           diese Verbindung geschlossen. Der Zeiger muss dann WEG, sonst gibt
+           `oeffnen` weiter eine geschlossene Verbindung zurueck und jede
+           Transaktion scheitert mit „connection is closing". */
+        _db.onversionchange=()=>{ try{ _db.close(); }catch(e){} _db=null; };
+        _db.onclose=()=>{ _db=null; };
+        res(_db); };
+      r.onerror=()=>rej(r.error);
+    });
+  }
+  /* Absichtlich schliessen — und den Zeiger mitnehmen. */
+  function schliessen(){ if(_db){ try{ _db.close(); }catch(e){} _db=null; } }
+
+  /* Eine Transaktion, ein Versprechen. `arbeit` bekommt die Stores und darf
+     synchron alles anfordern; erst `oncomplete` gilt als geschrieben.
+
+     Scheitert das Anlegen, weil die Verbindung inzwischen zu ist, wird EINMAL
+     mit einer frischen Verbindung wiederholt. Ein Schreibvorgang darf nicht an
+     einem veralteten Zeiger verlorengehen. */
+  async function tx(stores, modus, arbeit, _zweiter){
+    let db=await oeffnen();
+    let t;
+    try{ t=db.transaction(stores, modus); }
+    catch(e){
+      _db=null;
+      if(_zweiter) throw e;
+      return tx(stores, modus, arbeit, true);
+    }
+    return new Promise((res,rej)=>{
+      let ergebnis;
+      try{ ergebnis = arbeit(...[].concat(stores).map(n=>t.objectStore(n))); }
+      catch(e){ try{ t.abort(); }catch(_){} return rej(e); }
+      t.oncomplete=()=>res(ergebnis);
+      t.onerror=()=>rej(t.error);
+      t.onabort=()=>rej(t.error||new Error('Transaktion abgebrochen'));
+    });
+  }
+  const alle = st => new Promise((res,rej)=>{ const out=[],c=st.openCursor();
+    c.onsuccess=e=>{ const cu=e.target.result; if(cu){ out.push(cu.value); cu.continue(); } else res(out); };
+    c.onerror=()=>rej(c.error); });
+  const holen = (st,id) => new Promise((res,rej)=>{ const g=st.get(id);
+    g.onsuccess=()=>res(g.result); g.onerror=()=>rej(g.error); });
+
+  /* ---- Kennungen ---------------------------------------------------------
+     Weltweit eindeutig, weil eine Geraetemarke darin steckt. Deshalb darf eine
+     Kennung beim Import in einen fremden Bestand erhalten bleiben: Ein
+     erneutes Teilen desselben Stuecks aktualisiert dann, statt zu verdoppeln.
+     Die Kennung ist Identitaet, nicht Besitz. Sie wird nie geaendert und nie
+     wiederverwendet — Umbenennen und Verschieben fassen sie nicht an.        */
+  const GERAET_KEY='bs_geraet';
+  function geraet(){
+    let g=null; try{ g=localStorage.getItem(GERAET_KEY); }catch(e){}
+    if(!g){
+      const art = /iPad|iPhone/.test(navigator.userAgent) ? 'ipad'
+                : /Android/.test(navigator.userAgent)     ? 'andr'
+                : /Macintosh/.test(navigator.userAgent)   ? 'mac'
+                : /Windows/.test(navigator.userAgent)     ? 'win' : 'ger';
+      g = art+'-'+Math.random().toString(36).slice(2,7);
+      try{ localStorage.setItem(GERAET_KEY,g); }catch(e){}
+    }
+    return g;
+  }
+  let _lauf=0;
+  function kennung(praefix){
+    /* Zeit + Geraet + Zaehler + Zufall. Der Zaehler trennt zwei Kennungen
+       innerhalb derselben Millisekunde, was beim Blockschreiben vorkommt. */
+    return (praefix||'x')+'_'+geraet()+'_'+Date.now().toString(36)
+         + (_lauf=(_lauf+1)%46656).toString(36) + Math.random().toString(36).slice(2,5);
+  }
+
+  /* ---- Seitenzahl ohne PDF.js -------------------------------------------
+     Die Zahl steht in den Bytes. Gemessen an 779 Blaettern quer durch alle
+     siebzehn Buecher: 777 richtig, 0 falsch, 2 unbekannt, 2 ms statt 82 ms je
+     Blatt. Wo sie nicht gefunden wird, kommt 0 zurueck und der Aufrufer faellt
+     auf PDF.js zurueck — geraten wird nicht.                                */
+  function seitenzahlAusBytes(u8){
+    let s=''; const CH=65536;
+    for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH));
+    let best=0,m; const re=/\/Type\s*\/Pages\b[\s\S]{0,400}?\/Count\s+(\d+)/g;
+    while((m=re.exec(s))) best=Math.max(best,+m[1]);
+    if(best>0) return best;
+    const p=s.match(/\/Type\s*\/Page[^s]/g);
+    return p ? p.length : 0;
+  }
+  async function seitenzahl(blob){
+    try{ const n=seitenzahlAusBytes(new Uint8Array(await blob.arrayBuffer())); if(n>0) return n; }catch(e){}
+    try{ const buf=await blob.arrayBuffer();
+      const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+      const n=doc.numPages; try{ await doc.destroy(); }catch(_){} return n;
+    }catch(e){ return 1; }
+  }
+
+  /* ---- Katalog lesen ----------------------------------------------------
+     Bewusst OHNE die Bytes. Das ist die eigentliche Aenderung gegenueber der
+     alten Ablage, und alles andere folgt daraus.                            */
+  async function katalog(){
+    const [buecher,titel,elemente] = await tx([S_BUCH,S_TITEL,S_EL],'readonly',
+      (b,t,e)=>[alle(b),alle(t),alle(e)]).then(ps=>Promise.all(ps));
+    return {buecher,titel,elemente};
+  }
+  async function zahlen(){
+    const k=await katalog();
+    const summe=k.elemente.reduce((a,e)=>a+(e.groesse||0),0);
+    return {buecher:k.buecher.length, titel:k.titel.length, elemente:k.elemente.length, bytes:summe};
+  }
+
+  /* ---- Anlegen ----------------------------------------------------------- */
+  const jetzt = () => Date.now();
+  async function buchAnlegen({name, chip, hubId}={}){
+    const n=(name||'Buch').trim()||'Buch';
+    const rec={ id:kennung('bu'), name:n, chip:chip||(n.length>18?n.slice(0,16)+'…':n),
+                hubId:hubId||null, angelegt:jetzt(), geaendert:jetzt() };
+    await tx(S_BUCH,'readwrite',st=>st.put(rec));
+    return rec;
+  }
+  async function titelAnlegen({buchId, titel, komponist}={}){
+    if(!buchId) throw new Error('Ein Titel braucht ein Buch.');
+    const rec={ id:kennung('ti'), buchId, titel:(titel||'Stück').trim()||'Stück',
+                komponist:(komponist||'').trim(), angelegt:jetzt(), geaendert:jetzt() };
+    await tx(S_TITEL,'readwrite',st=>st.put(rec));
+    return rec;
+  }
+
+  /* ---- Schreiben in Bloecken, entlang der Stueckgrenzen -----------------
+     Ein Stueck ist danach vollstaendig da oder gar nicht. Bricht der Vorgang
+     ab, bleibt kein halbes Stueck zurueck und kein Element ohne seine Bytes.
+     `gruppen` = [{titel:{...}, elemente:[{art,etikett,...,blob}]}]
+
+     Gemessen: 0,10 ms je Blatt gegenueber 1,65 ms auf dem alten Weg, weil die
+     alte Fassung je Blatt eine eigene Verbindung und Transaktion aufbaute.   */
+  const BLOCK_ELEMENTE=500;   /* am echten Bestand vermessen */
+  async function stueckeSchreiben(buchId, gruppen, fortschritt){
+    if(!buchId) throw new Error('Ohne Buch kann nichts geschrieben werden.');
+    const bericht={stuecke:0, elemente:0, bytes:0, uebergangen:[]};
+    /* Die Gesamtzahl zaehlt nur, was auch geschrieben werden kann. Zaehlte sie
+       die uebergangenen Elemente mit, bliebe der Fortschritt kurz vor dem Ende
+       stehen und kaeme nie an. */
+    const gesamt=gruppen.reduce((a,g)=>a+(g.elemente||[]).filter(e=>artOk(e.art)).length, 0);
+    let getan=0;
+
+    /* Gesammelt wird stueckweise, geschrieben blockweise — aber ein Stueck
+       liegt immer VOLLSTAENDIG in einer Transaktion. Damit gilt weiter „ganz
+       oder gar nicht": Bricht der Vorgang ab, fehlt ein Stueck ganz, und es
+       bleibt kein Element ohne seine Bytes zurueck.
+
+       Ohne das Buendeln waere ein Real Book der langsame Fall, weil dort ein
+       Stueck ein einzelnes Blatt ist: 6.231 Stuecke sind 6.231 Transaktionen.
+       Gemessen kostet das 1,65 ms je Blatt statt 0,10 ms.                    */
+    let stapel=[], stapelEl=0, letzterTitel='';
+    async function stapelSchreiben(){
+      if(!stapel.length) return;
+      const jetztStapel=stapel; stapel=[]; stapelEl=0;
+      await tx([S_TITEL,S_EL,S_BYTE],'readwrite',(t,el,by)=>{
+        jetztStapel.forEach(s=>{ t.put(s.tRec); s.eRecs.forEach(r=>el.put(r)); s.bRecs.forEach(r=>by.put(r)); });
+      });
+      jetztStapel.forEach(s=>{ bericht.stuecke++; bericht.elemente+=s.eRecs.length;
+        bericht.bytes+=s.eRecs.reduce((a,r)=>a+r.groesse,0); getan+=s.eRecs.length; });
+      if(fortschritt) fortschritt(getan, gesamt, letzterTitel);
+    }
+
+    for(const g of gruppen){
+      const tRec={ id:kennung('ti'), buchId, titel:((g.titel&&g.titel.titel)||'Stück').trim()||'Stück',
+                   komponist:((g.titel&&g.titel.komponist)||'').trim(),
+                   angelegt:jetzt(), geaendert:jetzt() };
+      const eRecs=[], bRecs=[];
+      let reihung=0;
+      for(const e of (g.elemente||[])){
+        if(!artOk(e.art)){ bericht.uebergangen.push({grund:'unbekannte Art', art:e.art, name:e.dateiname||''}); continue; }
+        const id=kennung('el');
+        const groesse=(e.blob&&e.blob.size)||0;
+        eRecs.push({ id, titelId:tRec.id, art:e.art,
+                     etikett:(e.etikett||'').trim(), instrument:e.instrument||'',
+                     reihung:reihung++, np:e.np||1,
+                     dateiname:e.dateiname||'', groesse, ziel:e.ziel||'',
+                     angelegt:jetzt(), geaendert:jetzt() });
+        if(ARTEN[e.art].bytes && e.blob) bRecs.push({id, blob:e.blob});
+      }
+      if(!eRecs.length){ continue; }
+      stapel.push({tRec, eRecs, bRecs}); stapelEl+=eRecs.length; letzterTitel=tRec.titel;
+      if(stapelEl>=BLOCK_ELEMENTE) await stapelSchreiben();
+    }
+    await stapelSchreiben();
+    /* Nach dem Schreiben nachzaehlen. Nicht als Zierde: Wenn hier eine andere
+       Zahl steht als erwartet, ist etwas nicht angekommen, und der Aufrufer
+       soll das sagen koennen statt zu schweigen. */
+    const nachher=await zahlen();
+    bericht.gezaehlt={titel:nachher.titel, elemente:nachher.elemente};
+    return bericht;
+  }
+
+  /* ---- Ein Element einzeln anlegen -------------------------------------- */
+  async function elementAnlegen({titelId, art, etikett, instrument, np, dateiname, blob, ziel}={}){
+    if(!titelId) throw new Error('Ein Element braucht einen Titel.');
+    if(!artOk(art)) throw new Error('Unbekannte Art: '+art);
+    const vorhandene = await tx(S_EL,'readonly', st=>new Promise((res,rej)=>{
+      const out=[],c=st.index('titelId').openCursor(IDBKeyRange.only(titelId));
+      c.onsuccess=e=>{ const cu=e.target.result; if(cu){ out.push(cu.value); cu.continue(); } else res(out); };
+      c.onerror=()=>rej(c.error); })).then(p=>p);
+    const id=kennung('el');
+    const rec={ id, titelId, art, etikett:(etikett||'').trim(), instrument:instrument||'',
+                reihung:vorhandene.length, np:np||(blob?await seitenzahl(blob):1),
+                dateiname:dateiname||'', groesse:(blob&&blob.size)||0, ziel:ziel||'',
+                angelegt:jetzt(), geaendert:jetzt() };
+    await tx([S_EL,S_BYTE],'readwrite',(el,by)=>{ el.put(rec); if(ARTEN[art].bytes&&blob) by.put({id,blob}); });
+    return rec;
+  }
+
+  /* ---- Aendern ----------------------------------------------------------
+     Ein Schreibvorgang, ein Zeitstempel. Der Zeitstempel entsteht ab dem
+     ersten Tag, weil der Hub ihn spaeter braucht und er nicht nachtraeglich
+     herstellbar ist.                                                        */
+  const STORE_ZU_ART={buch:S_BUCH, titel:S_TITEL, element:S_EL};
+  async function aendern(art, id, patch){
+    const store=STORE_ZU_ART[art]; if(!store) throw new Error('Unbekannte Ebene: '+art);
+    return tx(store,'readwrite',st=>new Promise((res,rej)=>{
+      const g=st.get(id);
+      g.onsuccess=()=>{ const r=g.result; if(!r){ rej(new Error('Nicht gefunden: '+id)); return; }
+        Object.assign(r, patch, {geaendert:jetzt()}); st.put(r); res(r); };
+      g.onerror=()=>rej(g.error);
+    })).then(p=>p);
+  }
+
+  /* ---- Bytes auf Zuruf --------------------------------------------------
+     Eine Object-URL entsteht beim Aufschlagen und wird beim Schliessen wieder
+     eingezogen. Ein kleiner Vorrat bleibt offen, damit Blaettern nicht jedes
+     Mal neu holt; er ist begrenzt, damit nichts dauerhaft angeheftet bleibt. */
+  async function bytes(id){ return tx(S_BYTE,'readonly',st=>holen(st,id)).then(r=>r&&r.blob||null); }
+  const _leihe=new Map(); const LEIHE_MAX=12;
+  async function urlLeihen(id){
+    const da=_leihe.get(id);
+    if(da){ da.n++; _leihe.delete(id); _leihe.set(id,da); return da.url; }
+    const b=await bytes(id); if(!b) return null;
+    const url=URL.createObjectURL(b);
+    _leihe.set(id,{url,n:1});
+    for(const [k,v] of _leihe){ if(_leihe.size<=LEIHE_MAX) break; if(v.n<=0){ URL.revokeObjectURL(v.url); _leihe.delete(k); } }
+    return url;
+  }
+  function urlZurueck(id){
+    const da=_leihe.get(id); if(!da) return;
+    da.n--;
+    if(da.n<=0 && _leihe.size>LEIHE_MAX){ URL.revokeObjectURL(da.url); _leihe.delete(id); }
+  }
+  function leiheLeeren(){ for(const [,v] of _leihe) try{ URL.revokeObjectURL(v.url); }catch(e){}
+    _leihe.clear(); }
+
+  /* ---- Loeschen heisst umziehen ----------------------------------------
+     Gelegentlich loescht man ein Buch und meint ein Blatt. Der Papierkorb
+     merkt sich deshalb nicht nur den Satz, sondern alles, was daran hing:
+     ein Buch nimmt seine Titel mit, ein Titel seine Elemente. Sonst laesst
+     sich nur die oberste Zeile zurueckholen und nicht der Zusammenhang.
+
+     Die Bytes bleiben liegen, bis der Korb geleert wird. Ein Papierkorb, der
+     die Datei sofort wegwirft, ist keiner.                                   */
+  async function _kinder(buchIds, titelIds){
+    const k=await katalog();
+    const tids=new Set(titelIds||[]);
+    (buchIds||[]).forEach(b=>k.titel.forEach(t=>{ if(t.buchId===b) tids.add(t.id); }));
+    const titel=k.titel.filter(t=>tids.has(t.id));
+    const elemente=k.elemente.filter(e=>tids.has(e.titelId));
+    return {titel, elemente};
+  }
+  async function loeschen(art, ids, anlass){
+    ids=[].concat(ids||[]); if(!ids.length) return null;
+    const k=await katalog();
+    let buecher=[], titel=[], elemente=[];
+    if(art==='buch'){
+      buecher=k.buecher.filter(b=>ids.includes(b.id));
+      const kin=await _kinder(ids,[]); titel=kin.titel; elemente=kin.elemente;
+    } else if(art==='titel'){
+      titel=k.titel.filter(t=>ids.includes(t.id));
+      const kin=await _kinder([],ids); elemente=kin.elemente;
+    } else if(art==='element'){
+      elemente=k.elemente.filter(e=>ids.includes(e.id));
+    } else throw new Error('Unbekannte Ebene: '+art);
+    if(!buecher.length && !titel.length && !elemente.length) return null;
+    const eintrag={ id:kennung('pk'), geloescht:jetzt(), art, anlass:anlass||'',
+                    buecher, titel, elemente,
+                    zahl:{buecher:buecher.length, titel:titel.length, elemente:elemente.length} };
+    await tx([S_KORB,S_BUCH,S_TITEL,S_EL],'readwrite',(korb,b,t,e)=>{
+      korb.put(eintrag);
+      buecher.forEach(x=>b.delete(x.id));
+      titel.forEach(x=>t.delete(x.id));
+      elemente.forEach(x=>e.delete(x.id));
+    });
+    return eintrag;
+  }
+  async function korb(){ return tx(S_KORB,'readonly',st=>alle(st)).then(ps=>ps)
+    .then(a=>a.sort((x,y)=>y.geloescht-x.geloescht)); }
+  async function wiederherstellen(korbId){
+    const e=await tx(S_KORB,'readonly',st=>holen(st,korbId)).then(p=>p);
+    if(!e) throw new Error('Im Papierkorb nicht gefunden.');
+    /* Fehlt das Buch inzwischen, kommt es als „Wiederhergestellt" zurueck,
+       damit ein Titel nicht ohne Buch dasteht. */
+    const k=await katalog();
+    const daBuch=new Set(k.buecher.map(b=>b.id));
+    let ersatz=null;
+    for(const t of (e.titel||[])) if(!daBuch.has(t.buchId) && !(e.buecher||[]).some(b=>b.id===t.buchId)){
+      if(!ersatz){ ersatz=await buchAnlegen({name:'Wiederhergestellt'}); daBuch.add(ersatz.id); }
+      t.buchId=ersatz.id;
+    }
+    const daTitel=new Set(k.titel.map(t=>t.id).concat((e.titel||[]).map(t=>t.id)));
+    let ersatzTitel=null;
+    for(const el of (e.elemente||[])) if(!daTitel.has(el.titelId)){
+      if(!ersatzTitel){ if(!ersatz) ersatz=await buchAnlegen({name:'Wiederhergestellt'});
+        ersatzTitel=await titelAnlegen({buchId:ersatz.id, titel:'Wiederhergestellt'});
+        daTitel.add(ersatzTitel.id); }
+      el.titelId=ersatzTitel.id;
+    }
+    await tx([S_KORB,S_BUCH,S_TITEL,S_EL],'readwrite',(korb,b,t,el)=>{
+      (e.buecher||[]).forEach(x=>b.put(x));
+      (e.titel||[]).forEach(x=>t.put(x));
+      (e.elemente||[]).forEach(x=>el.put(x));
+      korb.delete(korbId);
+    });
+    return e.zahl;
+  }
+  /* Erst hier verschwinden die Bytes wirklich. */
+  async function korbLeeren(aelterAlsTage){
+    const grenze = aelterAlsTage ? jetzt()-aelterAlsTage*86400000 : Infinity;
+    const eintraege=(await korb()).filter(e=>e.geloescht<grenze || !aelterAlsTage);
+    if(!eintraege.length) return {eintraege:0, bytes:0};
+    /* Ein Element, das inzwischen wieder im Katalog steht, behaelt seine
+       Bytes. Sonst reisst das Leeren des Korbs ein wiederhergestelltes
+       Blatt mit. */
+    const k=await katalog(); const lebendig=new Set(k.elemente.map(e=>e.id));
+    let bytesWeg=0;
+    const byteIds=[];
+    eintraege.forEach(e=>(e.elemente||[]).forEach(el=>{
+      if(!lebendig.has(el.id)){ byteIds.push(el.id); bytesWeg+=el.groesse||0; } }));
+    await tx([S_KORB,S_BYTE,S_NOTIZ],'readwrite',(korb,by,no)=>{
+      eintraege.forEach(e=>korb.delete(e.id));
+      byteIds.forEach(id=>by.delete(id));
+      byteIds.forEach(id=>{ const c=no.index('elementId').openCursor(IDBKeyRange.only(id));
+        c.onsuccess=ev=>{ const cu=ev.target.result; if(cu){ cu.delete(); cu.continue(); } }; });
+    });
+    return {eintraege:eintraege.length, bytes:bytesWeg};
+  }
+
+  /* ---- Sicherung vor jedem Umstieg -------------------------------------
+     Ein Abzug des Katalogs, in der Datenbank und zusaetzlich als Datei. Ohne
+     die Bytes: die sind gross, und gegen ihren Verlust hilft der Export.
+     Geuebt wird das schon beim ersten Umstieg, obwohl da nichts zu verlieren
+     ist — der Ablauf soll sitzen, bevor er ernst wird.                       */
+  async function sicherung(anlass){
+    const k=await katalog();
+    const rec={ id:kennung('si'), zeit:jetzt(), anlass:anlass||'ohne Anlass',
+                geraet:geraet(), schema:VER, katalog:k,
+                zahl:{buecher:k.buecher.length, titel:k.titel.length, elemente:k.elemente.length} };
+    await tx(S_SICH,'readwrite',st=>st.put(rec));
+    return rec;
+  }
+  async function sicherungen(){ return tx(S_SICH,'readonly',st=>alle(st)).then(ps=>ps)
+    .then(a=>a.sort((x,y)=>y.zeit-x.zeit).map(({katalog,...r})=>r)); }
+  function _laden(blob, name){
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  }
+  const _stempel = () => new Date().toISOString().slice(0,16).replace('T','-').replace(':','');
+  async function sicherungAlsDatei(anlass){
+    const rec=await sicherung(anlass);
+    _laden(new Blob([JSON.stringify(rec,null,1)],{type:'application/json'}),
+           'bandstand-sicherung-'+_stempel()+'.json');
+    return rec.zahl;
+  }
+
+  /* ---- Export ----------------------------------------------------------
+     Die wichtigste Vorkehrung, und die unauffaelligste: Der Bestand muss die
+     App jederzeit vollstaendig verlassen koennen, in einer Form, die auch ohne
+     BandStand lesbar ist. Ein Papierkorb hilft gegen einen Fehlgriff, eine
+     Sicherung gegen einen abgebrochenen Umbau. Gegen einen Fehler im Programm
+     hilft nur, dass die Daten hinausgehen koennen.
+
+     Sprechende Namen im Ordner, die Kennungen im Katalog daneben — so
+     entschieden am 29. Juli. Der Mensch findet sich im Ordner zurecht, das
+     Wiedereinlesen haelt sich an den Katalog. Ohne Kompression, weil PDFs
+     schon komprimiert sind.                                                 */
+  function _sauber(s){ return (s||'').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,' ').trim().slice(0,80) || 'ohne Namen'; }
+  async function exportieren({arten, fortschritt}={}){
+    if(typeof JSZip==='undefined') throw new Error('JSZip fehlt.');
+    const k=await katalog();
+    if(!k.elemente.length && !k.buecher.length) throw new Error('Der Bestand ist leer.');
+    const erlaubt = arten || Object.keys(ARTEN).filter(a=>ARTEN[a].austausch==='immer');
+    const zip=new JSZip();
+    const buchById=Object.fromEntries(k.buecher.map(b=>[b.id,b]));
+    const titelById=Object.fromEntries(k.titel.map(t=>[t.id,t]));
+    const nachTitel={}; k.elemente.forEach(e=>(nachTitel[e.titelId]=nachTitel[e.titelId]||[]).push(e));
+    const kandidaten=k.elemente.filter(e=>erlaubt.includes(e.art) && ARTEN[e.art].bytes);
+    /* Der Zaehler heisst nicht `bytes`: Das wuerde die Funktion `bytes()`
+       gleichen Namens verdecken, und der Export waere gescheitert. */
+    const belegt=new Set(); let getan=0, bytesGesamt=0;
+    const katEl=[];
+    for(const t of k.titel){
+      const b=buchById[t.buchId];
+      const liste=(nachTitel[t.id]||[]).slice().sort((x,y)=>(x.reihung||0)-(y.reihung||0));
+      for(const e of liste){
+        if(!erlaubt.includes(e.art)){ continue; }
+        let pfad='';
+        if(ARTEN[e.art].bytes){
+          const blob=await bytes(e.id);
+          if(blob){
+            const endung = ARTEN[e.art].endung || ('.'+((e.dateiname||'').split('.').pop()||'dat')).replace('..','.');
+            const teil = _sauber(t.titel) + (e.etikett ? ' - '+_sauber(e.etikett) : '');
+            let name=_sauber(b?b.name:'Ohne Buch')+'/'+teil+endung, n=2;
+            while(belegt.has(name)){ name=_sauber(b?b.name:'Ohne Buch')+'/'+teil+' ('+(n++)+')'+endung; }
+            belegt.add(name); pfad=name;
+            zip.file(name, blob);
+            bytesGesamt+=blob.size;
+          }
+        }
+        katEl.push({...e, datei:pfad});
+        getan++; if(fortschritt) fortschritt(getan, kandidaten.length, t.titel);
+      }
+    }
+    const kat={ schema:VER, app:'BandStand', art:'bestand', erzeugt:new Date().toISOString(),
+                geraet:geraet(), buecher:k.buecher, titel:k.titel, elemente:katEl };
+    zip.file('katalog.json', JSON.stringify(kat,null,1));
+    zip.file('LIESMICH.txt',
+      'BandStand — Export vom '+new Date().toLocaleString('de-DE')+'\n\n'
+      +'Die Ordner tragen die Namen der Buecher, die Dateien die Namen der Stuecke\n'
+      +'und ihrer Stimmen. Sie lassen sich mit jedem PDF-Betrachter oeffnen; BandStand\n'
+      +'wird dafuer nicht gebraucht.\n\n'
+      +'katalog.json enthaelt denselben Bestand mit seinen Kennungen. Beim\n'
+      +'Wiedereinlesen haelt sich BandStand an diese Datei, damit Stuecke sich\n'
+      +'nicht verdoppeln.\n\n'
+      +'Buecher: '+k.buecher.length+'\nStuecke: '+k.titel.length+'\nElemente: '+katEl.length+'\n');
+    const out=await zip.generateAsync({type:'blob', compression:'STORE'});
+    return {blob:out, zahl:{buecher:k.buecher.length, titel:k.titel.length, elemente:katEl.length, bytes:bytesGesamt}};
+  }
+  async function exportAlsDatei(opt){
+    const r=await exportieren(opt);
+    _laden(r.blob, 'bandstand-bestand-'+_stempel()+'.zip');
+    return r.zahl;
+  }
+
+  /* ---- Persistenter Speicher -------------------------------------------
+     Safari darf die Datenbank bei Platznot wegraeumen. Danach zu fragen ist
+     billig; es nicht zu tun, kostet im schlimmsten Fall den Bestand.        */
+  async function speicherFest(){
+    const out={unterstuetzt:false, dauerhaft:false};
+    if(!navigator.storage) return out;
+    out.unterstuetzt=!!navigator.storage.persist;
+    try{ if(navigator.storage.persisted) out.dauerhaft=await navigator.storage.persisted(); }catch(e){}
+    if(!out.dauerhaft && navigator.storage.persist){
+      try{ out.dauerhaft=await navigator.storage.persist(); }catch(e){}
+    }
+    try{ if(navigator.storage.estimate){ const s=await navigator.storage.estimate();
+      out.belegt=s.usage; out.kontingent=s.quota; } }catch(e){}
+    return out;
+  }
+
+  return { DB, VER, ARTEN, oeffnen, schliessen, geraet, kennung,
+           seitenzahlAusBytes, seitenzahl,
+           katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
+           bytes, urlLeihen, urlZurueck, leiheLeeren,
+           loeschen, korb, wiederherstellen, korbLeeren,
+           sicherung, sicherungen, sicherungAlsDatei,
+           exportieren, exportAlsDatei, speicherFest,
+           _intern:{ tx, alle, holen } };
+})();
+window.BS = BS;
+/* Der persistente Speicher wird einmal beim Start erbeten, still. Er ist die
+   Vorkehrung gegen die Verdraengung durch Safari; das Ergebnis steht in der
+   Diagnose. */
+BS.speicherFest().then(r=>{ window._bsSpeicher=r; }).catch(()=>{});
 
 /* ---- Annotation editor ---- */
 const PEN_COLORS=['#111111','#e12d2d','#1560d1','#0a8a3a'];
@@ -4488,6 +5340,7 @@ async function openEditor(t){
      Knoepfe da, kein Stueck. Jetzt steht der Grund auf der Flaeche. */
   let doc;
   try{
+    await urlSichern(t);
     if(!t.f) throw new Error('Für dieses Stück ist keine Datei hinterlegt.');
     doc=await loadPdf(t.f);
   }catch(err){
@@ -4666,7 +5519,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-29 · BandStand — Neustart in der Wurzel';
+const APP_BUILD='2026-07-30 · Stufe 1b+1c — Bestand aus der neuen Ablage';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -5096,10 +5949,19 @@ loadLibrary().then(render).catch(()=>{});
   async function detachPart(part, eltern){
     if(!part || !eltern) return;
     if(!confirm('„'+(part.role||'Stimme')+'" vom Stück lösen?\n\nDie Stimme wird NICHT gelöscht — sie erscheint als eigenes Stück unter „Sonstiges Material".')) return;
-    let np=1; if(part.kind==='pdf'){ try{ const doc=await loadPdf(part._url); np=doc.numPages||1; }catch(e){} }
-    const rec={ id:'lib_'+uid(), bid:'user', title:(eltern.t||'Stück')+' — '+(part.role||'Stimme'),
-      composer:eltern.c||'', addedAt:Date.now(), np, fileName:part.fileName||'', blob:part.blob };
-    try{ await libPut(rec); }catch(e){ alert('Konnte die Stimme nicht ablegen: '+(e&&e.message||e)); return; }
+    /* Die geloeste Stimme wird ein eigenes Stueck in der neuen Ablage. Sie
+       braucht ein Buch; „Sonstiges Material" wird dafuer angelegt, wenn es
+       noch keines gibt. */
+    let np=1; if(part.kind==='pdf'){ try{ np=await BS.seitenzahl(part.blob); }catch(e){} }
+    try{
+      let buch=(USERBOOKS||[]).find(b=>b.name==='Sonstiges Material');
+      const bid = buch ? buch.bid : await createBook('Sonstiges Material');
+      if(!bid) throw new Error('Kein Buch für die gelöste Stimme.');
+      const ti=await BS.titelAnlegen({buchId:bid,
+        titel:(eltern.t||'Stück')+' — '+(part.role||'Stimme'), komponist:eltern.c||''});
+      await BS.elementAnlegen({titelId:ti.id, art:(part.kind==='audio'?'ton':'blatt'),
+        etikett:part.role||'', dateiname:part.fileName||'', blob:part.blob, np});
+    }catch(e){ alert('Konnte die Stimme nicht ablegen: '+(e&&e.message||e)); return; }
     await partDel(part.id);
     if(AKTIV && AKTIV.id===part.id) AKTIV=null;                 // sonst zeigt die Buehne eine Datei, die nicht mehr dazugehoert
     await loadParts(); if(typeof loadLibrary==='function'){ try{ await loadLibrary(); }catch(e){} }
@@ -6745,8 +7607,8 @@ loadLibrary().then(render).catch(()=>{});
 
     const z_neu=zeile('Neues Buch anlegen','Ein „Buch" bündelt Deine importierten PDFs; ein PDF ist ein Stück');
     const inp=document.createElement('input'); inp.className='txt'; inp.placeholder='z. B. Meine Standards';
-    const anlegen=()=>{ const v=inp.value.trim(); if(!v) return;
-      createBook(v); inp.value=''; render(); zeichne(); };
+    const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
+      await createBook(v); inp.value=''; render(); zeichne(); };
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
     z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
     w.append(karte('Eigene Bücher',[z_neu]));
@@ -7077,7 +7939,11 @@ loadLibrary().then(render).catch(()=>{});
          sagen, worauf „Automatisch erkennen" hinausliefe. */
       const auto = blattArt(rest) || ((voiceAusText(rest)||{}).name) || '';
       const hand = bandHand[kennung] || '';
+      /* `gruppe` ist die Kennung des Stuecks aus dieser Vorschau. Der Import
+         buendelt danach — nicht nach dem Titeltext. Zwei Ordner desselben
+         Namens bleiben dadurch zwei Stuecke und verschmelzen nicht. */
       const eintrag={file:e.file, pfad:e.pfad, name, kennung, titel, rest, auto, hand,
+                     gruppe: schl,
                      voice: hand && hand!=='-' ? hand : auto};
       if(hand==='-'){ ausgelassen.push(eintrag); return; }
       if(!eintrag.voice){ offen.push(eintrag); return; }
@@ -7108,8 +7974,8 @@ loadLibrary().then(render).catch(()=>{});
       }, neu=>{ bandBid=neu; zeichne(); }, 'Buch wählen'));
     }
     const inp=document.createElement('input'); inp.className='txt'; inp.placeholder='Neues Buch, z. B. Songbuch Band X';
-    const anlegen=()=>{ const v=inp.value.trim(); if(!v) return;
-      bandBid=createBook(v); inp.value=''; render(); zeichne(); };
+    const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
+      bandBid=await createBook(v); inp.value=''; render(); zeichne(); };
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
     const z_neu=zeile('Neues Buch','Bündelt die Sätze dieses Bandbuchs');
     z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
