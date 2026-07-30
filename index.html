@@ -4275,7 +4275,12 @@ async function importPackage(file){
       vorhanden.add(m.id); dazu++;
     }
   }
-  await loadLibrary(); render(); openLibrarySheet();
+  /* Frueher ging danach der alte Dialog „Eigene Noten" auf. Er ist seit dem
+     30. Juli ein Ueberrest: Das Einlesen wird aus Content angestossen, und
+     dorthin gehoert die Rueckkehr — nicht in ein Fenster, das der Nutzer nicht
+     gerufen hat. */
+  await loadLibrary(); render();
+  if(window.cPruef) cPruef.gehe([]);
   alert('Paket eingelesen.\n'+dazu+' Element'+(dazu===1?'':'e')+' hinzugefügt'
     +(schonDa?', '+schonDa+' schon vorhanden':'')
     +(ohneDatei?', '+ohneDatei+' ohne Datei übergangen':'')
@@ -5744,7 +5749,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Content — ein Fenster, drei Ebenen';
+const APP_BUILD='2026-07-30 · Komponist zurück, alter Dialog weg';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -7781,10 +7786,9 @@ loadLibrary().then(render).catch(()=>{});
         .sort((a,b)=>(a.titel||'').localeCompare(b.titel||'','de'))
         .map(t=>{ const el=(K.elemente||[]).filter(e=>e.titelId===t.id)
                     .sort((a,b)=>(a.reihung||0)-(b.reihung||0));
-          return { id:t.id, name:t.titel,
-            unten: (t.komponist? esc(t.komponist)+' · ':'')
-                   + (el.length ? esc(el.map(e=>e.etikett||e.instrument||e.art).join(' · '))
-                                : '<i>noch keine Elemente</i>'),
+          return { id:t.id, name:t.titel, komponist:t.komponist||'',
+            unten: el.length ? esc(el.map(e=>e.etikett||e.instrument||e.art).join(' · '))
+                             : '<i>noch keine Elemente</i>',
             hinein:()=>{ cPfad=[cPfad[0], t.id]; cZuruecksetzen(); zeichne(); } }; });
     }
     return (BS_KATALOG.elemente||[]).filter(e=>e.titelId===cPfad[1])
@@ -7819,6 +7823,21 @@ loadLibrary().then(render).catch(()=>{});
     feld.onclick=e=>e.stopPropagation();
     feld.onchange=()=>umbenennen(r, feld.value.trim());
     text.append(feld);
+    /* Der Komponist gehoert dem TITEL und gilt fuer alle seine Elemente. Das
+       Feld stand bis zum 30. Juli in der alten Verwaltung; ohne es liesse sich
+       der Komponist nirgends mehr eintragen. */
+    if('komponist' in r){
+      const kf=document.createElement('input'); kf.className='txt'; kf.value=r.komponist||'';
+      kf.placeholder='Komponist';
+      kf.style.cssText='width:100%;min-width:0;margin-top:6px';
+      kf.onclick=e=>e.stopPropagation();
+      kf.onchange=async()=>{
+        try{ await BS.aendern('titel', r.id, {komponist:kf.value.trim()}); }
+        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+        await loadLibrary(); render(); zeichne();
+      };
+      text.append(kf);
+    }
     if(r.unten){ const s=document.createElement('div'); s.className='sb'; s.innerHTML=r.unten; text.append(s); }
     links.innerHTML=''; links.append(box, text);
     if(r.hinein) z._ctl.append(knopf('Öffnen ›', r.hinein));
