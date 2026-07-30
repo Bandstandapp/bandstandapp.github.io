@@ -3814,23 +3814,49 @@ async function deleteBook(bid){ const ub=userBook(bid); if(!ub) return;
   catch(e){ alert('Löschen fehlgeschlagen: '+(e&&e.message||e)); return; }
   S.books.delete(bid);
   await loadLibrary(); render(); openLibrarySheet(); }
-/* Einzelne PDFs ohne Bandbuch-Erkennung: je Datei ein Stueck mit einem Blatt.
-   Die Seitenzahl kommt aus den Bytes — gemessen 0,2 statt 82 ms je Blatt, und
-   PDF.js bleibt der Rueckfallweg fuer den Einzelfall, den sie nicht liest. */
+/* Einzelne PDFs dazulegen — der Knopf „＋ PDF" am Buch.
+
+   Er liest Titel und Stimme genauso aus dem Dateinamen wie der
+   Bandbuch-Import. Vorher nahm er den ganzen Dateinamen als Titel: Aus
+   „Afro Blue Alt 1 NEU.pdf" wurde ein Stueck namens „Afro Blue Alt 1 NEU"
+   ohne Stimme. Das war beim schnellen Nachlegen einer einzelnen Datei
+   unbrauchbar und hat Jens am 30. Juli zu Recht gewundert.
+
+   Gehoeren die Blaetter zu Stuecken, die im Buch schon stehen, wird EINMAL
+   gefragt. Stillschweigend zusammengelegt wird nichts — dieselbe Regel wie in
+   der Vorschau des Bandbuch-Imports. */
 async function importPdfs(bid, files){
   const liste=[...files].filter(f=>/pdf$/i.test(f.type||'') || /\.pdf$/i.test(f.name||''));
   if(!liste.length) return 0;
-  const gruppen=[];
-  for(const file of liste){
-    const np=await BS.seitenzahl(file);
-    gruppen.push({ titel:{titel:(file.name||'Stück').replace(/\.pdf$/i,'').trim()||'Stück'},
-                   elemente:[{art:'blatt', dateiname:file.name, blob:file, np}] });
+
+  const saetze=liste.map(file=>{
+    const name=file.name||'Stück';
+    let z=nameZerlegen(name, ' - ');
+    if(z.rest){ if(stimmeAmAnfang(z.titel) && !stimmeAmAnfang(z.rest)) z={titel:z.rest, rest:z.titel}; }
+    else { const t=titelVorStimme(name); if(t) z=t; }
+    const auto = blattArt(z.rest) || ((voiceAusText(z.rest)||{}).name) || '';
+    return { file, pfad:name, name, kennung:name, titel:z.titel||name.replace(/\.pdf$/i,''),
+             rest:z.rest||'', auto, hand:'', gruppe:'t:'+titelSchluessel(z.titel||name),
+             voice:auto };
+  });
+
+  /* Was gibt es im Buch schon? */
+  const imBuch={};
+  (BS_KATALOG.titel||[]).filter(t=>t.buchId===bid).forEach(t=>{
+    const k=titelSchluessel(t.titel||''); if(!(k in imBuch)) imBuch[k]=t.id; });
+  const treffer=[...new Set(saetze.map(s=>titelSchluessel(s.titel)).filter(k=>imBuch[k]))];
+  if(treffer.length){
+    const andocken=confirm(
+      treffer.length+' der Blätter '+(treffer.length===1?'gehört':'gehören')+' zu einem Stück, '
+      +'das in diesem Buch schon steht.\n\n'
+      +'OK: als weitere Stimme zum vorhandenen Stück legen\n'
+      +'Abbrechen: als eigenes Stück anlegen');
+    if(andocken) saetze.forEach(s=>{ const id=imBuch[titelSchluessel(s.titel)]; if(id) s.andockAn=id; });
   }
-  let ber;
-  try{ ber=await BS.stueckeSchreiben(bid, gruppen); }
-  catch(e){ alert('Import fehlgeschlagen: '+(e&&e.message||e)); return 0; }
-  await loadLibrary(); render(); openLibrarySheet();
-  return ber.elemente;
+
+  const n=await importBandbuch(bid, saetze);
+  openLibrarySheet();
+  return n;
 }
 /* Ein Bandbuch schreiben. Erst hier, nach der Vorschau — vorher wird nichts
    angelegt und nichts geraten.
@@ -5601,7 +5627,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Stufe 3 + Dateiwahl auf dem iPad';
+const APP_BUILD='2026-07-30 · Dateiwahl behoben';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -8188,19 +8214,30 @@ loadLibrary().then(render).catch(()=>{});
      Chrome dort grosszuegiger sind. Das war Jens' „eingefrorener" Knopf am
      30. Juli: Der erste Griff ging noch, danach passierte gar nichts mehr.
 
-     Das Feld wird nach der Wahl wieder entfernt, damit sich keine Halde
-     unsichtbarer Felder ansammelt. */
+     EIN Feld, dauerhaft im Dokument, wiederverwendet. Die erste Fassung dieses
+     Umbaus hat das Feld nach der Wahl wieder entfernt — und damit einen
+     schlimmeren Fehler eingebaut als den behobenen: Eine Datei aus der Dropbox
+     muss erst heruntergeladen werden, das `change`-Ereignis kommt entsprechend
+     spaet, und das Feld war da schon weg. Die Auswahl fiel ins Leere. Der
+     Knopf „+ PDF" funktionierte weiter, weil sein Feld fest im Markup steht —
+     genau dieser Unterschied hat den Fehler verraten.
+
+     Also: nie entfernen, nichts an Zeitgeber haengen. */
+  let _dateiFeld=null;
   function dateiFeld(bau, fertig){
-    const i=document.createElement('input'); i.type='file';
-    i.style.cssText='position:fixed;left:-9999px;width:1px;height:1px;opacity:0';
+    if(!_dateiFeld || !_dateiFeld.isConnected){
+      _dateiFeld=document.createElement('input');
+      _dateiFeld.type='file'; _dateiFeld.className='dateifeld';
+      document.body.append(_dateiFeld);
+    }
+    const i=_dateiFeld;
+    /* Vor jeder Wahl zuruecksetzen. `value=''` ist noetig, damit dieselbe
+       Datei zweimal hintereinander gewaehlt werden kann. */
+    i.value=''; i.multiple=false; i.accept='';
+    try{ i.webkitdirectory=false; }catch(e){}
+    i.removeAttribute('webkitdirectory');
     bau(i);
-    document.body.append(i);
-    const weg=()=>{ setTimeout(()=>{ try{ i.remove(); }catch(e){} }, 0); };
-    i.onchange=()=>{ const fs=[...i.files]; weg(); fertig(fs); };
-    /* Bricht der Nutzer ab, kommt kein `change`. Das Feld faellt dann beim
-       naechsten Blick auf das Fenster weg. */
-    window.addEventListener('focus', function nachher(){
-      window.removeEventListener('focus', nachher); setTimeout(weg, 1500); });
+    i.onchange=()=>{ i.onchange=null; fertig([...i.files]); };
     i.click();
   }
 
@@ -8338,6 +8375,43 @@ loadLibrary().then(render).catch(()=>{});
       'Alle Sätze bekommen die Stimme <b>'+esc(bandAusgabe)+'</b>'));
     halter.append(karte('Vorschau',vorschauZeilen));
 
+    /* ---- Der Knopf zum Schreiben, GLEICH HIER ---------------------------
+       Er stand bis zum 30. Juli am Ende aller Karten — bei 57 Stücken viele
+       Bildschirme weit unten. Jens hat ihn deshalb nicht gefunden und gemeint,
+       der Import sei bereits gelaufen. Solange nichts geschrieben ist, sagt
+       die Zeile das jetzt ausdrücklich. */
+    /* Das Buch muss es auch wirklich geben. Zeigt `bandBid` auf ein
+       geloeschtes Buch, entstuenden Stuecke ohne Buch — im Katalog unsichtbar
+       und nur noch ueber den Export zu finden. */
+    const buchDa = !!userBook(bandBid);
+    const bereit = buchDa && v.saetze.length && !v.offen.length;
+    const andockZahl=v.stuecke.filter(s=>s.andocken).length;
+    const neuZahl=v.stuecke.length-andockZahl;
+    const z_go=zeile('Noch nichts gespeichert',
+      !buchDa ? 'Wähle oben ein Buch'
+      : !v.saetze.length ? 'Es ist nichts zuzuordnen'
+      : v.offen.length ? 'Erst die <b>'+v.offen.length+'</b> nicht zugeordneten Dateien klären — weiter unten'
+      : '<b>'+v.saetze.length+'</b> Sätze in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
+        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : ''));
+    const b=knopf('Jetzt importieren', async ()=>{
+      b.disabled=true;
+      /* Bei 400 Blaettern dauert das spuerbar. Der Knopf sagt, wo es steht,
+         statt still zu warten. */
+      const ber=await importBandbuch(bandBid, v.saetze, (was,a,g)=>{
+        b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
+      });
+      const z=window._letzterImport||{};
+      alert('Import fertig.\n'
+        + (ber||0)+' '+((ber===1)?'Satz':'Sätze')+' geschrieben.\n'
+        + (z.stuecke||0)+' neue Stücke'
+        + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
+        + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
+      unter='noten'; bandZustand(); zeichne();
+    });
+    b.disabled=!bereit;
+    z_go._ctl.append(b);
+    halter.append(karte(null,[z_go]));
+
     /* ---- Was es im Buch schon gibt --------------------------------------
        Nichts davon geschieht von selbst. Die Karte sagt, was gefunden wurde,
        und stellt die Frage; geschrieben wird erst auf „Jetzt importieren". */
@@ -8462,33 +8536,6 @@ loadLibrary().then(render).catch(()=>{});
       halter.append(karte('Übergangen ('+v.uebergangen.length+')', zeilen));
     }
 
-    const bereit = bandBid && v.saetze.length && !v.offen.length;
-    const andockZahl=v.stuecke.filter(s=>s.andocken).length;
-    const neuZahl=v.stuecke.length-andockZahl;
-    const z_go=zeile('Importieren',
-      !bandBid ? 'Wähle oben ein Buch'
-      : !v.saetze.length ? 'Es ist nichts zuzuordnen'
-      : v.offen.length ? 'Erst die nicht zugeordneten Dateien klären — zuweisen oder auslassen'
-      : '<b>'+v.saetze.length+'</b> Sätze in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
-        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : ''));
-    const b=knopf('Jetzt importieren', async ()=>{
-      b.disabled=true;
-      /* Bei 400 Blaettern dauert das spuerbar. Der Knopf sagt, wo es steht,
-         statt still zu warten. */
-      const ber=await importBandbuch(bandBid, v.saetze, (was,a,g)=>{
-        b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
-      });
-      const z=window._letzterImport||{};
-      alert('Import fertig.\n'
-        + (ber||0)+' '+((ber===1)?'Satz':'Sätze')+' geschrieben.\n'
-        + (z.stuecke||0)+' neue Stücke'
-        + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
-        + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
-      unter='noten'; bandZustand(); zeichne();
-    });
-    b.disabled=!bereit;
-    z_go._ctl.append(b);
-    halter.append(karte(null,[z_go]));
 
     /* Zum Schluss die offenen Fenster nachziehen: Wer die Stimme in der Liste
        aendert, soll sie im Fenster stehen sehen und umgekehrt. */
