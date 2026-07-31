@@ -1803,6 +1803,30 @@ function nameZerlegen(dateiname, trenner){
 }
 window.nameZerlegen = nameZerlegen;
 
+/* Was vom Dateinamen uebrig bleibt, wenn der Titel vorn abgezogen ist. Das
+   ist der Weg, auf dem der Import zu „Alt 1" kommt, wenn der Ordner den
+   Titel liefert.
+
+   Sie stand bis zum 30. Juli im Import-Baustein. Sie ist aber eine reine
+   Namensrechnung wie ihre beiden Nachbarn — und seit dem Glattziehen der
+   Etiketten wird sie auch beim Schreiben gebraucht, weit ausserhalb des
+   Bausteins: Ein bereits abgelegtes Blatt traegt seinen `dateiname` mit sich,
+   und daraus laesst sich sein Rest zurueckgewinnen. */
+function restNachTitel(dateiname, titel){
+  const ohne=String(dateiname||'').replace(ENDUNG,'').trim();
+  const tn=instrNorm(titel); if(!tn) return ohne;
+  let j=0, i=0;
+  for(; i<ohne.length && j<tn.length; i++){
+    const c=instrNorm(ohne[i]); if(!c) continue;
+    if(c===tn[j]) j++; else break;
+  }
+  /* Fuehrende Trennzeichen fallen mit weg: „Blue Bossa_Sheet in Eb" laesst
+     sonst „_Sheet in Eb" stehen. Erkannt wuerde es trotzdem — aber in der
+     Vorschau liest es sich wie ein Fehler. */
+  return j<tn.length ? ohne : ohne.slice(i).replace(/^[\s_\-–—:.,]+/,'').trim();
+}
+window.restNachTitel = restNachTitel;
+
 /* Ein Dateiname ohne Trennzeichen: „Bienentanz Alt 1.pdf". Wo hoert das Stueck
    auf und wo faengt die Stimme an?
 
@@ -1867,10 +1891,42 @@ function etikettSauber(r){
     .replace(/[\s_\-–—:.,]+/g,' ')
     .replace(/\s+/g,' ').trim().slice(0,18);
 }
+/* `vorhandene` sind die Blaetter, die am Stueck schon haengen.
+
+   Als blosse Zeichenketten nennen sie nur das Instrument — dann zaehlen sie
+   mit, mehr nicht. Als Objekte `{instrument, etikett, rest}` erlauben sie
+   ausserdem das GLATTZIEHEN, und das ist seit dem 30. Juli der Regelfall.
+
+   Der Grund: Wer erst ein einzelnes Alt-Blatt ablegt, bekommt „Alt-Sax"
+   darauf, denn das Instrument kommt nur einmal vor. Legt er spaeter das
+   zweite dazu, hiess das erste weiter „Alt-Sax" und das zweite „Alt 2" —
+   der Name eines Blattes haette also davon abgehangen, in welcher
+   REIHENFOLGE importiert wurde. Zwei Bestaende mit demselben Inhalt saehen
+   verschieden aus. Jetzt wird das vorhandene Etikett mitgerechnet und am
+   uebergebenen Objekt zurueckgeschrieben; der Aufrufer traegt es nach.
+
+   Angefasst wird dabei nur, was die Maschine gesetzt hat — erkennbar daran,
+   dass das Etikett noch gleich dem Instrument ist. Eine selbst getippte
+   Schreibweise bleibt unantastbar. Am 30. Juli mit Jens so festgelegt
+   (Frage 3, Weg B). */
 function etikettenBerechnen(saetze, vorhandene){
+  const alt=(vorhandene||[]).map(v => (v && typeof v==='object')
+    ? v : {instrument:String(v||''), etikett:String(v||''), rest:'', _nurZaehlen:true});
   const zahl={}, lauf={};
-  (vorhandene||[]).forEach(i=>{ const k=i||''; zahl[k]=(zahl[k]||0)+1; lauf[k]=(lauf[k]||0)+1; });
+  alt.forEach(a=>{ const k=a.instrument||''; zahl[k]=(zahl[k]||0)+1; });
   (saetze||[]).forEach(s=>{ const k=s.instrument||''; zahl[k]=(zahl[k]||0)+1; });
+  /* Zuerst die vorhandenen: Sie besetzen die Nummern 1..n, damit die neuen
+     dahinter weiterzaehlen — genau wie zuvor, als `lauf` aus ihrer Anzahl
+     vorbelegt wurde. */
+  alt.forEach(a=>{
+    const k=a.instrument||'';
+    lauf[k]=(lauf[k]||0)+1;
+    if(a._nurZaehlen) return;              /* nur das Instrument bekannt */
+    if(zahl[k]<=1) return;                 /* bleibt allein, bleibt wie es ist */
+    if((a.etikett||'')!==k) return;        /* selbst getippt — unantastbar */
+    const r=etikettSauber(a.rest);
+    a.etikett = (r && r.length<=18) ? r : (k+' '+lauf[k]);
+  });
   (saetze||[]).forEach(s=>{
     const k=s.instrument||'';
     if(zahl[k]<=1){ s.etikett=k; return; }
@@ -3977,14 +4033,22 @@ async function importBandbuch(bid, saetze, fortschritt){
      schon haengen; sonst hiessen ein vorhandenes und ein neues Alt-Blatt beide
      „Alt-Sax". Dieselben Eingaben, dasselbe Ergebnis: Was die Vorschau zeigt,
      wird auch geschrieben. */
+  const glattziehen=[];
   for(const g of gruppen){
-    const vorhandene = g.titelId
-      ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===g.titelId).map(e=>e.instrument||'')
-      : [];
+    const vorEl = g.titelId ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===g.titelId) : [];
+    const tName = g.titelId
+      ? (((BS_KATALOG.titel||[]).find(t=>t.id===g.titelId)||{}).titel || '')
+      : (g.titel.titel||'');
+    const vorhandene = vorEl.map(e=>({ instrument:e.instrument||'', etikett:e.etikett||'',
+      rest: restNachTitel(e.dateiname||'', tName) }));
     const paare=g.elemente.map(e=>({instrument:e.instrument||'', rest:e._rest||''}));
     etikettenBerechnen(paare, vorhandene);
     g.elemente.forEach((e,i)=>{ e.etikett=paare[i].etikett; delete e._rest; });
     g.elemente.sort(nachStimmeOrdnen);
+    /* Dieselbe Rechnung wie in der Vorschau, also auch dasselbe Ergebnis.
+       Geschrieben wird es erst NACH dem Import — siehe unten. */
+    vorhandene.forEach((v,i)=>{ if(v.etikett!==(vorEl[i].etikett||''))
+      glattziehen.push({id:vorEl[i].id, etikett:v.etikett}); });
   }
   /* Seitenzahl aus den Bytes, mit PDF.js als Rueckfallweg. */
   let gelesen=0;
@@ -3996,8 +4060,15 @@ async function importBandbuch(bid, saetze, fortschritt){
   let ber;
   try{ ber=await BS.stueckeSchreiben(bid, gruppen, (n,g,t)=>{ if(fortschritt) fortschritt('schreiben',n,g,t); }); }
   catch(e){ alert('Import fehlgeschlagen: '+(e&&e.message||e)); return 0; }
+  /* Erst jetzt die vorhandenen Etiketten glattziehen: Sie sollen sich nur
+     aendern, wenn die neuen Blaetter auch wirklich angekommen sind. Scheitert
+     der Import, bleibt der Bestand, wie er war. */
+  let glatt=0;
+  for(const g of glattziehen){
+    try{ await BS.aendern('element', g.id, {etikett:g.etikett}); glatt++; }catch(e){}
+  }
   await loadLibrary(); render();
-  window._letzterImport = ber;
+  window._letzterImport = Object.assign({}, ber, {glatt});
   return ber.elemente;
 }
 window.importBandbuch = importBandbuch;
@@ -5765,7 +5836,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-30 · Der Papierkorb nennt das Blatt';
+const APP_BUILD='2026-07-31 · Etiketten werden glattgezogen';
 (function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
 
 /* register service worker (offline / installable) + Auto-Update:
@@ -8638,7 +8709,7 @@ loadLibrary().then(render).catch(()=>{});
   let bandBid='', bandTrenner=' - ', bandDateien=[], bandHand={}, bandTitelHand={};
   /* Die Ausgabe des Durchgangs — leer heisst „je Datei erkennen". Und die
      Handentscheidung je Stueck, ob es an ein vorhandenes andockt. */
-  let bandAusgabe='', bandAndockHand={};
+  let bandAusgabe='', bandAndockHand={}, bandGlattAuf=false;
   /* Die Ausgaben eines Buchs sind Stimmen, keine eigenen Buecher. Die Namen
      stimmen mit STIMM_ORDNUNG ueberein, damit die Reihenfolge in der Zeile
      dieselbe ist wie bei den frueher mitgelieferten Real Books. */
@@ -8650,7 +8721,7 @@ loadLibrary().then(render).catch(()=>{});
   /* Welche Stuecke ihre Saetze zeigen. Voreingestellt keines. */
   const bandOffen=new Set();
   function bandZustand(){ bandDateien=[]; bandHand={}; bandTitelHand={}; bandTrenner=' - ';
-    bandAusgabe=''; bandAndockHand={};
+    bandAusgabe=''; bandAndockHand={}; bandGlattAuf=false;
     bandOffen.clear(); bandLetzte=null;
     /* Offene Fenster zeigen sonst Blaetter, die es nicht mehr gibt. */
     if(window.PDFW) PDFW.alleZu();
@@ -8747,19 +8818,6 @@ loadLibrary().then(render).catch(()=>{});
      Grosszuegig verglichen: ohne Ruecksicht auf Gross- und Kleinschreibung,
      Umlaute und Satzzeichen. Steht der Titel nicht vorn, bleibt der ganze
      Name stehen — dann traegt er die Stimme irgendwo in sich. */
-  function restNachTitel(dateiname, titel){
-    const ohne=String(dateiname||'').replace(ENDUNG,'').trim();
-    const tn=instrNorm(titel); if(!tn) return ohne;
-    let j=0, i=0;
-    for(; i<ohne.length && j<tn.length; i++){
-      const c=instrNorm(ohne[i]); if(!c) continue;
-      if(c===tn[j]) j++; else break;
-    }
-    /* Fuehrende Trennzeichen fallen mit weg: „Blue Bossa_Sheet in Eb" laesst
-       sonst „_Sheet in Eb" stehen. Erkannt wuerde es trotzdem — aber in der
-       Vorschau liest es sich wie ein Fehler. */
-    return j<tn.length ? ohne : ohne.slice(i).replace(/^[\s_\-–—:.,]+/,'').trim();
-  }
 
   /* Was aus den gewaehlten Dateien wird — gerechnet, nicht gespeichert. */
   function bandLesen(){
@@ -8871,13 +8929,24 @@ loadLibrary().then(render).catch(()=>{});
        wird geordnet — nach Instrument, dann nach Etikett, sonst stehen
        „Alt 2" und „Alt 1" in der Reihenfolge der Dateien. */
     liste.forEach(st=>{
-      const vorhandene = (st.andocken && st.vorhanden)
-        ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===st.vorhanden.id).map(e=>e.instrument||'')
-        : [];
+      const vorEl = (st.andocken && st.vorhanden)
+        ? (BS_KATALOG.elemente||[]).filter(e=>e.titelId===st.vorhanden.id) : [];
+      /* Objekte statt blosser Instrumentennamen — nur so kann die Rechnung ein
+         vorhandenes Etikett glattziehen. Den Rest des Dateinamens gewinnt
+         `restNachTitel` aus dem gespeicherten Namen zurueck; anders waere
+         nicht zu erfahren, dass aus „Alt-Sax" „Alt 1" werden soll und nicht
+         „Alt-Sax 1". */
+      const vorhandene = vorEl.map(e=>({ instrument:e.instrument||'', etikett:e.etikett||'',
+        rest: restNachTitel(e.dateiname||'', (st.vorhanden&&st.vorhanden.titel)||'') }));
       const paare=st.saetze.map(s=>({instrument:s.voice||'', rest:s.rest||''}));
       etikettenBerechnen(paare, vorhandene);
       st.saetze.forEach((s,i)=>{ s.etikett=paare[i].etikett; s.instrument=s.voice||''; });
       st.saetze.sort(nachStimmeOrdnen);
+      /* Was an vorhandenen Blaettern angepasst WUERDE. Die Vorschau zeigt es;
+         geschrieben wird es erst beim Import. */
+      st.glatt = vorhandene
+        .map((v,i)=>({ id:vorEl[i].id, alt:vorEl[i].etikett||'', neu:v.etikett }))
+        .filter(g=>g.neu!==g.alt);
     });
 
     return { saetze, offen, toene, uebergangen, ausgelassen, stuecke:liste, treffer,
@@ -9035,7 +9104,7 @@ loadLibrary().then(render).catch(()=>{});
     /* Auch die Ausgabe faellt zurueck auf „je Datei erkennen". Bliebe sie
        stehen, bekaeme der naechste Stapel still die Stimme des vorigen — bei
        vierhundert Blaettern faellt das erst auf, wenn es zu spaet ist. */
-    bandHand={}; bandTitelHand={}; bandAndockHand={}; bandAusgabe='';
+    bandHand={}; bandTitelHand={}; bandAndockHand={}; bandAusgabe=''; bandGlattAuf=false;
     bandOffen.clear(); bandLetzte=null;
     PDFW.alleZu();
     zeichne();
@@ -9167,6 +9236,7 @@ loadLibrary().then(render).catch(()=>{});
         + (ber||0)+' '+((ber===1)?'Blatt':'Blätter')+' geschrieben.\n'
         + (z.stuecke||0)+' neue Titel'
         + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
+        + (z.glatt ? '\n'+z.glatt+(z.glatt===1?' vorhandenes Etikett':' vorhandene Etiketten')+' angepasst' : '')
         + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
       /* Zurueck in den Content, und zwar IN das Buch, das gerade gefuellt
          wurde — nicht auf die oberste Ebene. Man will sehen, was angekommen
@@ -9204,6 +9274,33 @@ loadLibrary().then(render).catch(()=>{});
       });
       if(v.treffer>14) zeilen.push(zeile('…','und '+(v.treffer-14)+' weitere, alle nach der Vorgabe oben'));
       halter.append(karte('Schon im Buch ('+v.treffer+')', zeilen));
+    }
+
+    /* ---- Etiketten, die dabei angepasst werden --------------------------
+       Zusammengefasst mit einem Aufklapper — am 30. Juli so von Jens gewaehlt.
+       Beim Nachladen einer zweiten Real-Book-Ausgabe docken schnell dreihundert
+       Titel an; dreihundert einzelne Zeilen waeren keine Auskunft, sondern
+       eine Wand. Die Zahl steht oben, die Einzelheiten holt, wer sie will.
+       Stillschweigend geschieht damit nichts. */
+    const glatt=[].concat(...v.stuecke.map(s=>(s.glatt||[]).map(g=>
+      ({alt:g.alt, neu:g.neu, titel:s.titel}))));
+    if(glatt.length){
+      const kopf=zeile('Vorhandene Etiketten',
+        'An <b>'+glatt.length+'</b> vorhandenen '+(glatt.length===1?'Blatt':'Blättern')
+        +' wird das Etikett angepasst, weil dasselbe Instrument dort künftig '
+        +'mehrfach vorkommt. Selbst getippte Schreibweisen bleiben unberührt.');
+      kopf._ctl.append(knopf(bandGlattAuf?'Verbergen':'Zeigen',
+        ()=>{ bandGlattAuf=!bandGlattAuf; zeichneVorschau(); }));
+      const gz=[kopf];
+      if(bandGlattAuf){
+        glatt.slice(0,200).forEach(g=>{
+          const z=zeile('', esc(g.alt||'(ohne)')+' → <b>'+esc(g.neu)+'</b>');
+          z.querySelector('.lb').innerHTML='<b>'+esc(g.titel)+'</b>';
+          gz.push(z);
+        });
+        if(glatt.length>200) gz.push(zeile('…','und '+(glatt.length-200)+' weitere'));
+      }
+      halter.append(karte('Etiketten anpassen ('+glatt.length+')', gz));
     }
 
     /* Was sich nicht zuordnen liess, steht einzeln da. Es verschwindet nicht
