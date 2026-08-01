@@ -320,6 +320,9 @@
     font-size:15px;font-weight:650;cursor:pointer;display:flex;align-items:center;gap:6px}
   .btn.ghost{background:var(--bg-control);color:var(--text);border:1px solid var(--border)}
   .btn.sm{height:38px;padding:0 12px;font-size:13.5px}
+  /* Der eine Knopf, der die Hauptsache tut. Am 1. August von Jens verlangt:
+     „Jetzt importieren" soll den blauen Ton der Wortmarke tragen. */
+  .btn.ghost.wichtig{background:var(--accent);color:var(--white);border-color:var(--accent)}
   .btn:disabled{opacity:.4}
   .viewer .frame{flex:1;background:var(--bg-pdfframe)}
   .viewer iframe{width:100%;height:100%;border:none;background:var(--bg-pdfframe)}
@@ -1361,7 +1364,7 @@
   </div>
   <div style="display:flex;gap:8px;margin-left:auto">
     <div class="iconbtn" id="libBtn" title="Eigene Noten importieren & verwalten" style="font-size:26px">＋</div>
-    <div class="iconbtn" id="settingsBtn" title="Daten &amp; Offline" style="font-size:30px">⚙︎</div>
+    <div class="iconbtn" id="settingsBtn" title="Daten &amp; Offline"><i class="i ic-settings" style="width:22px;height:22px"></i></div>
   </div>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -1387,12 +1390,12 @@
   <div class="vbar">
     <div class="vtitle"><span id="vTitle"></span> <span class="vsub" id="vSub"></span></div>
     <div id="seqnav" style="display:none;gap:6px"></div>
-    <button class="btn ghost" id="vFitBtn" title="Vollbild – ganze Seite, ohne Menüs">⛶ Vollbild</button>
-    <button class="btn ghost" id="vEditBtn" title="Handschriftliche Notiz">✏️ Notiz</button>
-    <button class="btn ghost" id="vMetaBtn" title="Titel &amp; Komponist korrigieren" style="display:none">✎ Titel</button>
+    <button class="btn ghost" id="vFitBtn" title="Vollbild – ganze Seite, ohne Menüs"><i class="i ic-maximize"></i> Vollbild</button>
+    <button class="btn ghost" id="vEditBtn" title="Handschriftliche Notiz"><i class="i ic-pencil"></i> Notiz</button>
+    <button class="btn ghost" id="vMetaBtn" title="Titel &amp; Komponist korrigieren" style="display:none"><i class="i ic-pencil"></i> Titel</button>
     <button class="btn ghost" id="vShare" title="Weitergeben — die Datei über das Teilen-Blatt des Geräts"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Weitergeben</button>
-    <button class="btn ghost" id="vPrint" title="Drucken">🖨 Drucken</button>
-    <button class="btn ghost" id="vTab">↗</button>
+    <button class="btn ghost" id="vPrint" title="Drucken"><i class="i ic-printer"></i> Drucken</button>
+    <button class="btn ghost" id="vTab" title="In neuem Tab öffnen"><i class="i ic-external-link"></i></button>
     <button class="btn" id="vClose">Schließen</button>
   </div>
   <div class="frame">
@@ -1413,7 +1416,7 @@
       <button class="gb" data-a="full"  title="Vollbild"><i class="i ic-maximize"></i></button>
     </div>
   </div>
-  <button class="fsclose" id="vFsClose" title="Vollbild verlassen">✕</button>
+  <button class="fsclose" id="vFsClose" title="Vollbild verlassen"><i class="i ic-x"></i></button>
   <button class="fsnav prev" id="vFsPrev" title="Vorheriges Stück">‹</button>
   <button class="fsnav next" id="vFsNext" title="Nächstes Stück">›</button>
 </div>
@@ -1424,9 +1427,9 @@
     <input class="txt etitle" id="eTitle" placeholder="Titel der Notiz…" autocomplete="off">
     <div class="etools" id="ePens"></div>
     <div class="etools" id="eWidths"></div>
-    <button class="ebtn" id="eHL" title="Textmarker">🖍</button>
-    <button class="ebtn" id="eErase" title="Radierer">◧ Radierer</button>
-    <button class="ebtn" id="eUndo" title="Rückgängig">↶</button>
+    <button class="ebtn" id="eHL" title="Textmarker">Marker</button>
+    <button class="ebtn" id="eErase" title="Radierer"><i class="i ic-eraser"></i> Radierer</button>
+    <button class="ebtn" id="eUndo" title="Rückgängig"><i class="i ic-undo-2"></i></button>
     <div id="ePageNav" style="display:none;gap:6px;align-items:center"></div>
     <span style="flex:1"></span>
     <span id="eBuild" style="color:var(--sub);font-size:11px;opacity:.75;align-self:center;margin-right:8px"></span>
@@ -2504,7 +2507,7 @@ function renderBooks(){
   const line=document.createElement('div'); line.className='chiprow'; line.style.cssText='gap:10px;align-items:center;flex-wrap:wrap';
   const isDef=booksAreDefault() && (DEFAULT_BOOKS.length>0 || S.books.size>0);
   const setBtn=document.createElement('button'); setBtn.id='bookDefaultBtn'; setBtn.className='btn ghost'; setBtn.style.cssText='padding:6px 12px';
-  setBtn.textContent = isDef ? '✓ Ist der Standard' : '★ Auswahl als Standard';
+  setBtn.innerHTML = isDef ? '<i class="i ic-check"></i> Ist der Standard' : '<i class="i ic-star"></i> Auswahl als Standard';
   setBtn.disabled = isDef;
   if(isDef){ setBtn.style.color='var(--accent-bright)'; setBtn.style.borderColor='var(--accent-bright)'; }
   setBtn.onclick=()=>setDefaultBooks();
@@ -2559,7 +2562,7 @@ function tuneRow(t, stimmen){
   const tt=gruppeTagIds(t); const hasTags=tt.length>0;
   let metaHTML;
   if(t.isEdit){ const d=t.editedAt?new Date(t.editedAt).toLocaleDateString('de-DE'):'';
-    metaHTML=`<span>✏️${t.editor?' '+esc(t.editor)+' ·':''}</span><span class="book">${esc(bookName(t))}</span>`
+    metaHTML=`<span><i class="i ic-pencil"></i> ${t.editor?esc(t.editor)+' ·':''}</span><span class="book">${esc(bookName(t))}</span>`
       +`${d?`<span>· ${d}</span>`:''}${seitenzahl(t)}`; }
   else metaHTML=`${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>`
       +`<span class="book">· S.&nbsp;${esc(t.pg)}</span>${seitenzahl(t)}`;
@@ -3349,7 +3352,7 @@ function openViewer(t, keepNav){
   }
   document.getElementById('vTitle').textContent=t.t;
   document.getElementById('vSub').textContent = t.isEdit
-    ? ('✏️ '+(t.editor||'')+(t.editedAt?' — '+new Date(t.editedAt).toLocaleString('de-DE'):''))
+    ? ('Notiz'+(t.editor?' von '+t.editor:'')+(t.editedAt?' — '+new Date(t.editedAt).toLocaleString('de-DE'):''))
     : t.isLib ? ((t.c?t.c+' — ':'')+t.b)
     : ((t.c?t.c+' — ':'')+t.b+', S. '+t.pg);
   const frame=document.getElementById('vFrame'), fit=document.getElementById('vFit');
@@ -3640,14 +3643,14 @@ function assignTagsFlow(t){
 function tagCard(tag){
   const c=document.createElement('div'); c.className='tagcard'; c.dataset.tag=tag.id;
   c.innerHTML=`<span class="grip">⣿</span><span class="dot" style="width:11px;height:11px;border-radius:50%;background:${tag.color}"></span>${esc(tag.name)}`
-    +`<span data-e="edit" title="Bearbeiten" style="margin-left:5px;color:var(--sub);cursor:pointer">✎</span>`;
+    +`<span data-e="edit" title="Bearbeiten" style="margin-left:5px;color:var(--sub);cursor:pointer"><i class="i ic-pencil"></i></span>`;
   c.querySelector('[data-e=edit]').onclick=ev=>{ev.stopPropagation();openTagEditor(tag);};
   return c;
 }
 function manageTagsFlow(){
   openSheet(card=>{
     card.innerHTML='<h2>Tags verwalten</h2>'
-      +'<div class="muted" style="margin:-6px 0 12px">Ziehe Tags zwischen den Bereichen. „Favoriten" erscheinen oben in der Menüleiste. Zum Umbenennen/Färben/Löschen auf ✎ tippen.</div>';
+      +'<div class="muted" style="margin:-6px 0 12px">Ziehe Tags zwischen den Bereichen. „Favoriten" erscheinen oben in der Menüleiste. Zum Umbenennen, Färben oder Löschen auf das Stift-Zeichen tippen.</div>';
     const mkZone=(label,pinned)=>{
       const lab=document.createElement('div'); lab.className='zonelbl'; lab.textContent=label; card.append(lab);
       const z=document.createElement('div'); z.className='tagzone'; z.dataset.pinned=pinned?'1':'0'; card.append(z);
@@ -3656,7 +3659,7 @@ function manageTagsFlow(){
       tags.forEach(tag=>z.append(tagCard(tag)));
       return z;
     };
-    mkZone('★ Favoriten (in der Menüleiste)',true);
+    mkZone('Favoriten (in der Menüleiste)',true);
     mkZone('Alle Tags',false);
     const nr=document.createElement('div'); nr.className='row newrow'; nr.style.marginTop='6px';
     nr.innerHTML='<input class="txt" id="ntg" placeholder="Neuer Tag…"><button class="btn" id="addtg">Anlegen</button>';
@@ -3750,7 +3753,7 @@ function recentRow(t,ts){
   const star=S.fav.has(t.key), prac=S.prac.has(t.key);
   const tt=tuneTagIds(t.key); const hasTags=tt.length>0;
   const inSets=S.sets.filter(st=>st.items.includes(t.key)).map(st=>st.name);
-  const setsHTML = inSets.length? `<span style="color:var(--badge-active)">· 🎵 ${inSets.map(esc).join(', ')}</span>`:'';
+  const setsHTML = inSets.length? `<span style="color:var(--badge-active)">· <i class="i ic-list-music"></i> ${inSets.map(esc).join(', ')}</span>`:'';
   const d=new Date(ts);
   const dateStr=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'})+', '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
   li.innerHTML=`
@@ -3759,7 +3762,7 @@ function recentRow(t,ts){
         <div class="title">${esc(t.t)}</div>
         ${aktionenHTML(hasTags,prac,star)}
       </div>
-      <div class="meta">${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>${t.isEdit?'':`<span class="book">· S.&nbsp;${esc(t.pg)}</span>`}${setsHTML}${pillenHTML(tt)}<span style="color:var(--text-faint)">· 🕒 ${dateStr}</span></div>
+      <div class="meta">${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>${t.isEdit?'':`<span class="book">· S.&nbsp;${esc(t.pg)}</span>`}${setsHTML}${pillenHTML(tt)}<span style="color:var(--text-faint)">· <i class="i ic-clock"></i> ${dateStr}</span></div>
     </div>`;
   langesTippen(li.querySelector('.title'), ()=>openMetaSheet(t));
   li.querySelector('.main').onclick=()=>{ if(li._langGetippt){ li._langGetippt=false; return; }
@@ -3774,7 +3777,7 @@ function renderRecent(main){
   entries.sort((a,b)=>{ let c = (by==='name') ? norm(a.t.t).localeCompare(norm(b.t.t)) : (a.ts-b.ts); return dir==='asc'?c:-c; });
   const arrow=col=> by===col ? (dir==='asc'?' ▲':' ▼') : '';
   const head=document.createElement('div'); head.className='controls'; head.style.padding='12px 8px';
-  head.innerHTML=`<h2 style="margin:2px 2px 8px;font-size:20px">🕒 Zuletzt gespielt</h2>
+  head.innerHTML=`<h2 style="margin:2px 2px 8px;font-size:20px"><i class="i ic-clock"></i> Zuletzt gespielt</h2>
     <div class="row" style="gap:16px;align-items:center">
       <span class="muted">Sortieren:</span>
       <span class="link" id="sName">Name${arrow('name')}</span>
@@ -3869,7 +3872,7 @@ function renderOneSet(main){
       <div class="main"><div class="title">${i+1}. ${esc(t.t)}</div>
       <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}</div>
       ${stimmenZeile(grp, t)}</div>
-      <div class="iconbtn" data-a="rm">✕</div>`;
+      <div class="iconbtn" data-a="rm" title="Aus der Setliste nehmen"><i class="i ic-x"></i></div>`;
     /* Ein Tipp auf die Zeile waehlt das STUECK, ein Tipp auf eine Stimme genau
        diese — wie in der Hauptliste. */
     li.querySelector('.main').onclick=()=>{ STIMMWUNSCH=''; openViewer(t); };
@@ -4057,8 +4060,8 @@ function openDataSheet(){
     card.innerHTML=`<h2>Daten & Offline</h2>
       <div class="muted" style="margin:-6px 0 14px">Deine Setlists, Tags, Favoriten & Üben-Liste. Noten selbst sind immer lokal.</div>`;
     const r1=document.createElement('div'); r1.className='row';
-    r1.innerHTML='<button class="btn" id="exp" style="flex:1">⬇︎ Daten exportieren</button>'
-      +'<button class="btn ghost" id="imp" style="flex:1">⬆︎ Daten importieren</button>'
+    r1.innerHTML='<button class="btn" id="exp" style="flex:1"><i class="i ic-download"></i> Daten exportieren</button>'
+      +'<button class="btn ghost" id="imp" style="flex:1"><i class="i ic-upload"></i> Daten importieren</button>'
       +'<input type="file" id="impFile" accept="application/json,.json" class="dateifeld">';
     card.append(r1);
     card.insertAdjacentHTML('beforeend','<div class="muted" style="margin:2px 2px 14px">Import wird <b>zusammengeführt</b> (nichts wird gelöscht; bei Konflikten gewinnt der neuere Stand).</div>');
@@ -4066,12 +4069,12 @@ function openDataSheet(){
     const rp=document.createElement('div'); rp.style.cssText='border-top:1px solid var(--line);padding-top:14px';
     rp.innerHTML='<div class="lbl" style="margin:0 0 8px">Einzeln sichern &amp; teilen</div>'
       +'<div class="row" style="margin:0 0 8px;flex-wrap:wrap;gap:8px">'
-      +'<button class="btn ghost" data-part="setlists" style="flex:1 1 46%">⬇︎ Setlists</button>'
-      +'<button class="btn ghost" data-part="tags" style="flex:1 1 46%">⬇︎ Tags</button>'
-      +'<button class="btn ghost" data-part="favorites" style="flex:1 1 46%">⬇︎ Favoriten</button>'
-      +'<button class="btn ghost" data-part="practice" style="flex:1 1 46%">⬇︎ Üben-Liste</button>'
+      +'<button class="btn ghost" data-part="setlists" style="flex:1 1 46%"><i class="i ic-download"></i> Setlists</button>'
+      +'<button class="btn ghost" data-part="tags" style="flex:1 1 46%"><i class="i ic-download"></i> Tags</button>'
+      +'<button class="btn ghost" data-part="favorites" style="flex:1 1 46%"><i class="i ic-download"></i> Favoriten</button>'
+      +'<button class="btn ghost" data-part="practice" style="flex:1 1 46%"><i class="i ic-download"></i> Üben-Liste</button>'
       +'</div>'
-      +'<button class="btn ghost" id="impPart" style="width:100%">⬆︎ Einzelne Datei einlesen</button>'
+      +'<button class="btn ghost" id="impPart" style="width:100%"><i class="i ic-upload"></i> Einzelne Datei einlesen</button>'
       +'<input type="file" id="impPartFile" accept="application/json,.json" class="dateifeld">'
       +'<div class="muted" style="margin-top:6px">Jede Datei trägt eine Kennung – beim Einlesen wird automatisch erkannt, worum es sich handelt, und sauber zusammengeführt.</div>';
     card.append(rp);
@@ -4358,7 +4361,7 @@ function openLibrarySheet(){
         +stueckZahl+' Stück'+(stueckZahl===1?'':'e')+', '
         +own.length+(own.length===1?' Blatt':' Blätter')+'</span></div>'
         +'<button class="btn ghost" data-imp style="padding:6px 10px">＋ PDF</button>'
-        +'<button class="btn ghost" data-del style="padding:6px 10px">🗑</button>'
+        +'<button class="btn ghost" data-del style="padding:6px 10px"><i class="i ic-trash-2"></i></button>'
         +'<input type="file" data-file accept="application/pdf,.pdf" multiple class="dateifeld">';
       sec.append(head);
       const fi=head.querySelector('[data-file]');
@@ -4371,8 +4374,8 @@ function openLibrarySheet(){
           +'<span class="muted" style="flex:0 0 auto;max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
           +' title="'+esc(t.stimme||'ohne Stimme')+'">'+esc(t.stimme||'—')+'</span>'
           +'<input class="txt" data-c value="'+esc(t.c||'')+'" placeholder="Komponist" style="flex:1;min-width:0">'
-          +'<button class="btn ghost" data-exp title="Exportieren" style="padding:6px 9px">⬇︎</button>'
-          +'<button class="btn ghost" data-x title="Löschen" style="padding:6px 9px">✕</button>';
+          +'<button class="btn ghost" data-exp title="Exportieren" style="padding:6px 9px"><i class="i ic-download"></i></button>'
+          +'<button class="btn ghost" data-x title="Löschen" style="padding:6px 9px"><i class="i ic-x"></i></button>';
         row.querySelector('[data-t]').onchange=e=>saveLibMeta(t.libId,{title:e.target.value.trim()||'Stück'});
         row.querySelector('[data-c]').onchange=e=>saveLibMeta(t.libId,{composer:e.target.value.trim()});
         row.querySelector('[data-exp]').onclick=()=>exportLibTune(t.libId);
@@ -4385,12 +4388,12 @@ function openLibrarySheet(){
     const pkg=document.createElement('div'); pkg.style.cssText='border-top:1px solid var(--line);padding-top:14px;margin-top:14px';
     pkg.innerHTML='<div class="lbl" style="margin:0 0 8px">Sammlung sichern &amp; übertragen</div>'
       +'<div class="row" style="margin:0;gap:8px">'
-      +'<button class="btn ghost" id="pkgExp" style="flex:1">⬇︎ Als Paket sichern</button>'
-      +'<button class="btn ghost" id="pkgImp" style="flex:1">⬆︎ Paket einlesen</button>'
+      +'<button class="btn ghost" id="pkgExp" style="flex:1"><i class="i ic-download"></i> Als Paket sichern</button>'
+      +'<button class="btn ghost" id="pkgImp" style="flex:1"><i class="i ic-upload"></i> Paket einlesen</button>'
       +'<input type="file" id="pkgFile" accept=".zip,application/zip" class="dateifeld"></div>'
       +'<div class="muted" style="margin-top:6px">Bündelt alle eigenen Bücher samt PDFs in <b>einer</b> Datei – zum Sichern oder auf ein anderes Gerät übertragen. Einlesen führt zusammen (vorhandene Stücke werden übersprungen).</div>';
     card.append(pkg);
-    pkg.querySelector('#pkgExp').onclick=()=>{ pkg.querySelector('#pkgExp').textContent='… wird erstellt'; exportPackage().finally(()=>{ const el=pkg.querySelector('#pkgExp'); if(el)el.textContent='⬇︎ Als Paket sichern'; }); };
+    pkg.querySelector('#pkgExp').onclick=()=>{ pkg.querySelector('#pkgExp').textContent='… wird erstellt'; exportPackage().finally(()=>{ const el=pkg.querySelector('#pkgExp'); if(el)el.innerHTML='<i class="i ic-download"></i> Als Paket sichern'; }); };
     pkg.querySelector('#pkgImp').onclick=()=>pkg.querySelector('#pkgFile').click();
     pkg.querySelector('#pkgFile').onchange=e=>{ if(e.target.files[0]) importPackage(e.target.files[0]); };
     const close=document.createElement('div'); close.className='row'; close.style.marginTop='16px';
@@ -4405,7 +4408,7 @@ function resetOverride(key){ const t=byKey[key]; if(!t) return; delete OVERRIDES
 function syncViewerTune(key){ if(CURRENT && CURRENT.key===key){ const t=byKey[key]; if(!t) return; CURRENT=t;
   document.getElementById('vTitle').textContent=t.t;
   document.getElementById('vSub').textContent = t.isEdit
-      ? ('✏️ '+(t.editor||'')+(t.editedAt?' — '+new Date(t.editedAt).toLocaleString('de-DE'):''))
+      ? ('Notiz'+(t.editor?' von '+t.editor:'')+(t.editedAt?' — '+new Date(t.editedAt).toLocaleString('de-DE'):''))
       : t.isLib ? ((t.c?t.c+' — ':'')+t.b)
       : ((t.c?t.c+' — ':'')+t.b+', S. '+t.pg); } }
 function saveNoteMeta(t, patch){ const u=USER.find(x=>x.key===t.key); if(!u) return;
@@ -6016,22 +6019,22 @@ document.getElementById('eSave').onclick=async()=>{
   USER.push({key:uk,t:title,editor:name,editedAt:Date.now(),isEdit:true,book:ED.tune.b,bid:'user',baseKey:ED.tune.key,np:ED.pages.length,c:'',pg:'Notiz'});
   saveUser();
   document.getElementById('editor').classList.remove('open'); ED=null; render();
-  alert('Notiz gespeichert.'+(name?'':' Tipp: trage im ⚙︎-Menü deinen Namen ein, damit du deine Edits leichter wiederfindest.'));
+  alert('Notiz gespeichert.'+(name?'':' Tipp: trage im Zahnrad-Menü deinen Namen ein, damit du deine Edits leichter wiederfindest.'));
 };
 
 /* Hinweis, wenn per Doppelklick (file://) geöffnet – dann kann der Browser die Noten nicht einpassen */
 if(location.protocol==='file:'){
   const d=document.createElement('div'); d.className='filebanner';
-  d.innerHTML='<div>⚠︎ <b>Per Doppelklick geöffnet.</b> So darf der Browser die Noten nicht laden/einpassen '
+  d.innerHTML='<div><i class="i ic-triangle-alert"></i> <b>Per Doppelklick geöffnet.</b> So darf der Browser die Noten nicht laden/einpassen '
     +'(Seite zu groß, Scrollen nötig). Starte die App über <b>„BandStand starten.command"</b> im App-Ordner '
     +'(Doppelklick) – oder im Terminal: <code>python3 -m http.server 8777</code>, dann <b>http://localhost:8777</b>. '
     +'Auf dem iPad bzw. über die gehostete/installierte App funktioniert alles automatisch.</div>'
-    +'<span class="x" title="Ausblenden">✕</span>';
+    +'<span class="x" title="Ausblenden"><i class="i ic-x"></i></span>';
   d.querySelector('.x').onclick=()=>d.remove();
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Aufgeräumt: Auswahl, Leiste, Brotkrumen';
+const APP_BUILD='2026-08-02 · Symbole statt Emoji';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -6313,7 +6316,7 @@ loadLibrary().then(render).catch(()=>{});
     setStatus('Gleiche ab…');
     let anyLocal = false;
     const run = CAT_KEYS.reduce((p, cat) => p.then(() => syncCat(cat).then(r => { if(r && r.changedLocally) anyLocal = true; })
-        .catch(e => { setStatus('⚠ '+ (e && e.message ? e.message : e)); throw e; })), Promise.resolve());
+        .catch(e => { setStatus('Fehler: '+ (e && e.message ? e.message : e)); throw e; })), Promise.resolve());
     _syncRunning = run.then(() => {
       jset(K.meta, META); jset(K.snap, SNAP); lsSet(K.last, String(now()));
       if(anyLocal){ try { render(); } catch(e){} }
@@ -6350,16 +6353,16 @@ loadLibrary().then(render).catch(()=>{});
     box.style.cssText = 'border-top:1px solid var(--line);padding-top:14px;margin-top:14px';
     const last = lsGet(K.last);
     if(!isConnected()){
-      box.innerHTML = '<div class="lbl" style="margin:0 0 8px">☁︎ Cloud-Abgleich (Dropbox)</div>'
+      box.innerHTML = '<div class="lbl" style="margin:0 0 8px">Cloud-Abgleich (Dropbox)</div>'
         + '<div class="muted" style="margin:0 0 10px">Gleicht Setlists, Tags, Favoriten, Üben-Liste und Metadaten-Korrekturen automatisch zwischen deinen Geräten ab. Noten-PDFs bleiben lokal.</div>'
         + '<button class="btn" id="rbSyncConnect" style="width:100%">Mit Dropbox verbinden</button>'
         + '<div class="muted" id="rbSyncStatus" style="margin:8px 2px 0">'+esc(statusText)+'</div>';
       card.append(box);
       const b = document.getElementById('rbSyncConnect'); if(b) b.onclick = startLogin;
     } else {
-      box.innerHTML = '<div class="lbl" style="margin:0 0 8px">☁︎ Cloud-Abgleich (Dropbox)</div>'
+      box.innerHTML = '<div class="lbl" style="margin:0 0 8px">Cloud-Abgleich (Dropbox)</div>'
         + '<div class="muted" style="margin:0 0 10px">Verbunden.'+(last?' Letzter Abgleich: '+esc(stamp(parseInt(last,10))):' Noch nicht abgeglichen.')+'</div>'
-        + '<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rbSyncNow" style="flex:1">↻ Jetzt abgleichen</button>'
+        + '<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rbSyncNow" style="flex:1">Jetzt abgleichen</button>'
         + '<button class="btn ghost" id="rbSyncOff" style="flex:1">Verbindung trennen</button></div>'
         + '<label style="display:flex;align-items:center;gap:8px;margin:10px 2px 0;font-size:14px;cursor:pointer">'
         + '<input type="checkbox" id="rbSyncAuto"'+(autoOn()?' checked':'')+'> Automatisch abgleichen</label>'
@@ -6394,11 +6397,11 @@ loadLibrary().then(render).catch(()=>{});
       history.replaceState({}, '', REDIRECT);
       setStatus('Verbinde…');
       exchangeCode(code).then(() => { setStatus('Verbunden.'); return syncAll(); })
-        .catch(e => setStatus('⚠ '+(e && e.message ? e.message : e)));
+        .catch(e => setStatus('Fehler: '+(e && e.message ? e.message : e)));
     } else if(q.indexOf('error=') >= 0){
       const err = new URLSearchParams(q).get('error_description') || new URLSearchParams(q).get('error');
       history.replaceState({}, '', REDIRECT);
-      setStatus('⚠ Dropbox: '+err+' (ist die Adresse '+REDIRECT+' als Redirect-URI eingetragen?)');
+      setStatus('Dropbox: '+err+' (ist die Adresse '+REDIRECT+' als Redirect-URI eingetragen?)');
     } else if(isConnected() && autoOn()){
       syncAll();
     }
@@ -6423,7 +6426,7 @@ loadLibrary().then(render).catch(()=>{});
   const DEF_ROLES=['Leadsheet','Piano','Bass','Gitarre','Alt-Sax','Tenor-Sax','Trompete','Posaune','Audio'];
   const AUDIO_RX=/\.(mp3|m4a|aac|wav|ogg|opus)$/i;
   const SHORT={ 'Leadsheet':'LS','Piano':'Pno','Bass':'Bass','Gitarre':'Git','Alt-Sax':'ASax',
-    'Tenor-Sax':'TSax','Trompete':'Tpt','Posaune':'Pos','Audio':'♪','Gesang':'Voc','Vocals':'Voc','Schlagzeug':'Dr' };
+    'Tenor-Sax':'TSax','Trompete':'Tpt','Posaune':'Pos','Audio':'Ton','Gesang':'Voc','Vocals':'Voc','Schlagzeug':'Dr' };
   const shortOf = r => SHORT[r] || (r||'').slice(0,4);
   const uid = () => 'p_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
   const roles = () => { try{ const r=JSON.parse(localStorage.getItem(ROLE_KEY)); if(Array.isArray(r)&&r.length) return r; }catch(e){} return DEF_ROLES.slice(); };
@@ -6647,7 +6650,7 @@ loadLibrary().then(render).catch(()=>{});
       frame.append(s); verdrahteSchalter(s);
     }
     const i=bl.findIndex(b=>b.id===jetztId());
-    s.querySelector('.sname').textContent = (i>=0 ? bl[i].name : (bl.length ? bl[0].name : '♪'));
+    s.querySelector('.sname').textContent = (i>=0 ? bl[i].name : (bl.length ? bl[0].name : 'Ton'));
     s.querySelector('[data-r="-1"]').disabled = !(i>0);
     s.querySelector('[data-r="1"]').disabled  = !(i>=0 && i<bl.length-1);
     s.classList.toggle('tont', !!laufenderTon());
@@ -6757,10 +6760,10 @@ loadLibrary().then(render).catch(()=>{});
 
   function renderSec(sec, t){
     const ps=partsOf(t.key);
-    let html='<div class="lbl" style="margin:0 0 6px">🎼 Stimmen &amp; Audio</div>'
+    let html='<div class="lbl" style="margin:0 0 6px">Stimmen &amp; Audio</div>'
       +'<div class="muted" style="margin:0 0 8px">Lade PDF-Stimmen oder ein MP3 hoch — die Rolle ordnest du danach je Zeile zu (oder „Andere…" für einen eigenen Namen). Die Dateien bleiben auf diesem Gerät.</div>';
     if(ps.length){ html+='<div id="pList">'+ps.map(p=>
-      '<div class="prow" data-id="'+p.id+'"><span class="pkind">'+(p.kind==='audio'?'♪':'📄')+'</span>'
+      '<div class="prow" data-id="'+p.id+'"><span class="pkind">'+(p.kind==='audio'?'<i class="i ic-music"></i>':'<i class="i ic-book-open"></i>')+'</span>'
       + roleSelectHTML(p)
       +'<span class="pfile">'+esc(p.fileName||'')+'</span>'
       +(p.kind==='pdf'?'<button class="pdetach" title="Vom Stück lösen → Sonstiges Material"><i class="i ic-external-link"></i></button>':'')
@@ -7662,7 +7665,7 @@ loadLibrary().then(render).catch(()=>{});
         +'<span style="flex:1"></span>'
         +(istStandard
             ? '<span class="istStandard">✓ Ist der Standard</span>'
-            : '<button class="btn ghost sm" data-a="default" title="Diese Auswahl beim Start vorwählen">★ Als Standard</button>')
+            : '<button class="btn ghost sm" data-a="default" title="Diese Auswahl beim Start vorwählen"><i class="i ic-star"></i> Als Standard</button>')
         +'<button class="btn sm" data-a="done">Fertig</button>'
       +'</div>';
   }
@@ -8385,7 +8388,7 @@ loadLibrary().then(render).catch(()=>{});
       card.append(kasten);
       const reihe=document.createElement('div'); reihe.className='row'; reihe.style.cssText='margin-top:14px;gap:8px';
       const merk=document.createElement('button'); merk.className='btn ghost'; merk.style.flex='1';
-      merk.textContent='★ Auswahl als Standard';
+      merk.innerHTML='<i class="i ic-star"></i> Auswahl als Standard';
       merk.onclick=()=>{ try{ localStorage.setItem(C_ARTEN_KEY, JSON.stringify(arten)); }catch(e){}
         merk.textContent='Gespeichert'; };
       const los=document.createElement('button'); los.className='btn'; los.style.flex='1';
@@ -9530,6 +9533,9 @@ loadLibrary().then(render).catch(()=>{});
       zeichne();
     });
     b.disabled=!bereit;
+    /* Der eine Knopf, der die Hauptsache tut — er traegt den Ton der
+       Wortmarke und hebt sich damit von allem ab, was daneben nur anbietet. */
+    b.classList.add('wichtig');
     z_go._ctl.append(b);
     halter.append(karte(null,[z_go]));
 
