@@ -1087,7 +1087,10 @@
      etwas darueber schwebt — ein dauerhafter Rahmen waere blosser Zierrat. */
   [data-zielflaeche][data-zieh]{outline:2px dashed var(--accent-edge);outline-offset:-6px;
      border-radius:var(--r-13);background:var(--accent-wash)}
-  .srow .btn.warn{color:var(--danger-ink);border-color:var(--danger-line)}
+  /* Warnende Knoepfe gab es bisher nur in einer Setup-Zeile. Seit „Setlist
+     löschen" am Ende der Liste steht, wird die Auszeichnung allgemein
+     gebraucht. */
+  .btn.warn{color:var(--danger-ink);border-color:var(--danger-line)}
   .srow input.txt{min-height:36px;padding:7px 11px;font-size:13px;width:180px}
   .sw{width:44px;height:26px;border-radius:var(--r-pill);background:var(--switch-off);position:relative;
      cursor:pointer;transition:background var(--motion-fast);flex:none;border:none}
@@ -3675,18 +3678,28 @@ function renderOneSet(main){
   head.innerHTML=`<div class="row"><span class="link" id="back">‹ Setlists</span></div>
     <h2 style="margin:4px 2px;font-size:20px">${esc(st.name)} <span class="muted">(${st.items.length})</span></h2>
     <div class="row">
-      <button class="btn" id="playAll" ${st.items.length?'':'disabled'}>▶ Durchblättern</button>
-      <button class="btn ghost" id="shareAll" ${st.items.length?'':'disabled'}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Weitergeben</button>
-      <button class="btn ghost" id="printAll" ${st.items.length?'':'disabled'}>🖨 Drucken</button>
-      <span class="danger" id="del" style="margin-left:auto">Löschen</span>
+      <button class="btn ghost" id="shareAll" ${st.items.length?'':'disabled'}><i class="i ic-share"></i> Weitergeben</button>
+      <button class="btn ghost" id="printAll" ${st.items.length?'':'disabled'}><i class="i ic-printer"></i> Drucken</button>
     </div><div class="muted" style="padding:0 2px">Zum Sortieren am Griff ⣿ ziehen.</div>`;
   main.append(head);
   head.querySelector('#back').onclick=()=>{S.openSet=null;render();};
-  head.querySelector('#del').onclick=()=>{if(confirm('Setlist löschen?')){S.sets=S.sets.filter(s=>s.id!==st.id);S.openSet=null;save();render();}};
-  head.querySelector('#playAll').onclick=()=>playSequence(st);
   head.querySelector('#shareAll').onclick=()=>shareSetlist(st);
   head.querySelector('#printAll').onclick=()=>printSetlist(st);
-  if(!st.items.length){main.insertAdjacentHTML('beforeend','<div class="empty">Leer. Füge Titel über ＋ hinzu.</div>');LISTNAV=[];return;}
+  /* „Setlist löschen" steht ganz unten und in Rot. Im Kopf lag es einen
+     Fingerbreit neben Drucken und Weitergeben — ein Fehlgriff dort ist teuer,
+     und Jens hat das am 31. Juli als gefaehrlich gemeldet. Ans Ende zu gehen
+     ist der Vorsatz, den es hier braucht. */
+  const loeschZeile=()=>{
+    const f=document.createElement('div'); f.className='row';
+    f.style.cssText='padding:22px 10px 40px;justify-content:center';
+    const b=document.createElement('button'); b.className='btn ghost warn';
+    b.innerHTML='<i class="i ic-trash-2"></i> Setlist löschen';
+    b.onclick=()=>{ if(!confirm('Setlist „'+st.name+'" löschen?\n\n'
+      +'Die Stücke selbst bleiben im Bestand; nur die Liste geht weg.')) return;
+      S.sets=S.sets.filter(s=>s.id!==st.id); S.openSet=null; save(); render(); };
+    f.append(b); main.append(f);
+  };
+  if(!st.items.length){main.insertAdjacentHTML('beforeend','<div class="empty">Leer. Füge Titel über ＋ hinzu.</div>');LISTNAV=[];loeschZeile();return;}
   LISTNAV=st.items.filter(k=>byKey[k]);
   listFix(st.items.filter(k=>byKey[k]));
   const ul=document.createElement('ul'); ul.className='list'; ul.id='setUL'; main.append(ul);
@@ -3702,6 +3715,7 @@ function renderOneSet(main){
     li.prepend(selBox(k)); if(S.selection.has(k)) li.classList.add('selected');
     enableDrag(li, st); ul.append(li);
   });
+  loeschZeile();
 }
 let drag=null;
 function enableDrag(li, st){
@@ -3720,10 +3734,11 @@ function onDragEnd(){if(!drag)return;const li=drag.li,ul=li.parentElement;
   drag.st.items=[...ul.children].map(x=>x.dataset.key);drag.st.updatedAt=Date.now();
   window.removeEventListener('pointermove',onDragMove);window.removeEventListener('pointerup',onDragEnd);window.removeEventListener('pointercancel',onDragEnd);
   drag=null;save();render();}
-function playSequence(st){
-  const items=st.items.filter(k=>byKey[k]); if(!items.length)return;
-  LISTNAV=items.slice(); openViewer(byKey[items[0]]);
-}
+/* `playSequence` ist am 31. Juli entfallen. Sie setzte den Blaetter-Kontext auf
+   die Setliste und schlug das erste Stueck auf — beides tut `renderOneSet`
+   ohnehin, sobald die Liste dasteht. Der Knopf ersetzte also nur den Tipp auf
+   die erste Zeile und versprach mit seinem Play-Zeichen etwas, das er nicht
+   hielt. Geblaettert wird immer durch die Liste, die in der Mitte steht. */
 async function printSetlist(st){
   const items=st.items.map(k=>byKey[k]).filter(Boolean);
   const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
@@ -4436,9 +4451,19 @@ const AWAHL = (function(){
     }, true);
     document.addEventListener('keydown', e=>{ if(e.key==='Escape' && offenerKnopf){ e.stopPropagation(); zu(); } }, true);
     /* Rollt oder dreht sich etwas, stimmt die Stelle nicht mehr. Dann lieber
-       schliessen als daneben stehen. */
+       schliessen als daneben stehen.
+
+       ABER: Die Liste selbst darf rollen. Sie hat `max-height:60vh` und
+       `overflow-y:auto`, und bei zwanzig Stimmen braucht sie das auch. Bis zum
+       31. Juli fing dieser Horcher das Roll-Ereignis der Liste mit — sie schloss
+       sich also genau in dem Moment, in dem man sie zu rollen versuchte. Jens
+       ist in der Probe darueber gestolpert: Das Tenor-Sax war nicht erreichbar.
+       Deshalb wird das eigene Rollen ausgenommen. */
     window.addEventListener('resize', zu);
-    window.addEventListener('scroll', zu, true);
+    window.addEventListener('scroll', e=>{
+      if(liste && (e.target===liste || (e.target && e.target.nodeType===1 && liste.contains(e.target)))) return;
+      zu();
+    }, true);
   }
   function zu(){
     if(!offenerKnopf) return;
@@ -5836,8 +5861,49 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-07-31 · Etiketten werden glattgezogen';
-(function(){ const b=document.getElementById('eBuild'); if(b){ b.textContent='Build '+APP_BUILD; b.style.cursor='pointer'; b.title='Tippen: Diagnose-Overlay an/aus'; b.onclick=diagToggle; } })();
+const APP_BUILD='2026-08-01 · Vier Fehler aus der ersten Probe';
+/* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
+   Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
+   Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
+   danach gesucht und das Falsche bekommen. Die Zeichen-Diagnose ist ein
+   Werkzeug fuer den Stift-Editor und liegt jetzt auf dem langen Tippen. */
+/* „1 Buch" und nicht „1 Bücher". Dieselbe Rechnung steht im Papierkorb; sie
+   hier ein zweites Mal hinzuschreiben ist billiger, als den Baustein aus dem
+   Setup-Block herauszuloesen. */
+function zahlwortEins(n, eins, viele){ return n+' '+(n===1?eins:viele); }
+window.zahlwortEins = zahlwortEins;
+async function infoText(){
+  const s=window._bsSpeicher||{};
+  const k=(typeof BS_KATALOG==='object'&&BS_KATALOG)||{};
+  let cache='—';
+  try{ cache=(await caches.keys()).filter(n=>n.startsWith('shell-')).join(', ')||'keiner'; }catch(e){}
+  return 'Build    '+APP_BUILD
+    +'\nShell    '+cache
+    +'\nSpeicher dauerhaft: '+(s.dauerhaft?'ja':'nein')
+       +' · unterstützt: '+(s.unterstuetzt?'ja':'nein')
+    +'\nBestand  '+zahlwortEins((k.buecher||[]).length,'Buch','Bücher')
+       +' · '+zahlwortEins((k.titel||[]).length,'Titel','Titel')
+       +' · '+zahlwortEins((k.elemente||[]).length,'Element','Elemente')
+    +'\nGerät    '+(BS.geraet?BS.geraet():'—')
+    +'\n\n(lang tippen: Zeichen-Diagnose)';
+}
+function infoToggle(){
+  const o=document.getElementById('eDiag'); if(!o) return;
+  if(o.style.display==='block' && o.dataset.art==='info'){ o.style.display='none'; return; }
+  o.dataset.art='info'; o.style.display='block'; o.textContent='…';
+  infoText().then(t=>{ o.textContent=t; });
+}
+(function(){ const b=document.getElementById('eBuild'); if(!b) return;
+  b.textContent='Build '+APP_BUILD; b.style.cursor='pointer';
+  b.title='Tippen: Auskunft über den Stand · lang tippen: Zeichen-Diagnose';
+  let lang=null, langWar=false;
+  b.addEventListener('pointerdown', ()=>{ langWar=false;
+    lang=setTimeout(()=>{ langWar=true; const o=document.getElementById('eDiag');
+      if(o) o.dataset.art='diag'; diagToggle(); }, 600); });
+  ['pointerup','pointercancel','pointerleave'].forEach(n=>
+    b.addEventListener(n, ()=>{ clearTimeout(lang); }));
+  b.onclick=()=>{ if(langWar){ langWar=false; return; } infoToggle(); };
+})();
 
 /* register service worker (offline / installable) + Auto-Update:
    sobald eine neue Version aktiv wird, die Seite einmal automatisch neu laden. */
@@ -8243,9 +8309,22 @@ loadLibrary().then(render).catch(()=>{});
 
     /* Auf der obersten Ebene: was es zu tun gibt. */
     if(eb==='buch' && !cFlach){
-      const z_add=zeile('Noten hinzufügen',
-        'Viele PDFs auf einmal — Titel und Stimme werden aus dem Namen gelesen, und Du siehst vorher, was erkannt wurde');
-      z_add._ctl.append(knopf('Öffnen', ()=>{ unter='bandbuch'; bandZustand(); zeichne(); }));
+      /* Steht noch eine ungeschriebene Auswahl offen, sagt die Zeile es. Jens
+         ist am 31. Juli mehrfach darauf hereingefallen: Er hatte gewaehlt, wollte
+         in der Liste nachsehen, ob die Noten da sind — und fand sie leer, weil
+         noch nichts geschrieben war. */
+      const offeneWahl = bandDateien.length;
+      const z_add=zeile('Noten hinzufügen', offeneWahl
+        ? '<b>'+offeneWahl+' Dateien gewählt und noch nicht geschrieben.</b> '
+          +'Die Auswahl steht weiter bereit — hier weitermachen'
+        : 'Viele PDFs auf einmal — Titel und Stimme werden aus dem Namen gelesen, und Du siehst vorher, was erkannt wurde');
+      if(offeneWahl) z_add.classList.add('warnrow');
+      /* NICHT mehr `bandZustand()` beim Oeffnen. Das raeumte die gewaehlten
+         Dateien weg, und wer zwischendurch in die Liste sah, fing von vorn an.
+         Zurueckgesetzt wird nur, wenn ohnehin nichts offen ist; einen neuen
+         Stapel beginnt man ueber „Ordner wählen", das die Auswahl ersetzt. */
+      z_add._ctl.append(knopf(offeneWahl?'Weiter':'Öffnen', ()=>{
+        unter='bandbuch'; if(!bandDateien.length) bandZustand(); zeichne(); }));
       const z_alle=zeile('Alle Titel',
         'Quer über alle Bücher — zum Zusammenstellen und als Paket teilen');
       z_alle._ctl.append(knopf('Öffnen ›', ()=>{ cFlach=true; cZuruecksetzen(); zeichne(); }));
@@ -8499,7 +8578,7 @@ loadLibrary().then(render).catch(()=>{});
   /* ---- Thema: Über ---- */
   function themaUeber(w){
     const z_ver=zeile('Version','Tippen schaltet das Diagnose-Overlay an und aus');
-    z_ver._ctl.append(knopf(APP_BUILD, ()=>{ if(window.diagToggle) diagToggle(); }));
+    z_ver._ctl.append(knopf(APP_BUILD, ()=>{ if(window.infoToggle) infoToggle(); }));
     /* Messwerte des letzten Drehens. Safari laesst sich von hier aus nicht
        fernmessen; diese Zeile bringt die Zahlen dorthin, wo Jens sie ohne
        Entwicklerwerkzeuge ablesen kann. */
