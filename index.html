@@ -1092,6 +1092,14 @@
      gebraucht. */
   .btn.warn{color:var(--danger-ink);border-color:var(--danger-line)}
   .srow input.txt{min-height:36px;padding:7px 11px;font-size:13px;width:180px}
+  /* Der Fortschritt beim Import. Er lag bis zum 31. Juli nur als Text auf dem
+     Knopf und wurde uebersehen. */
+  .fortschritt{position:relative;height:30px;margin:2px 0 10px;border-radius:var(--r-9);
+     background:var(--bg-panel);border:1px solid var(--border);overflow:hidden}
+  .fortschritt i{position:absolute;inset:0 auto 0 0;width:0;background:var(--accent-wash-strong);
+     border-right:2px solid var(--accent-bright);transition:width .18s linear}
+  .fortschritt span{position:absolute;inset:0;display:flex;align-items:center;
+     justify-content:center;font:600 12.5px/1 var(--font-sans);color:var(--text-body)}
   .sw{width:44px;height:26px;border-radius:var(--r-pill);background:var(--switch-off);position:relative;
      cursor:pointer;transition:background var(--motion-fast);flex:none;border:none}
   .sw::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
@@ -1757,8 +1765,37 @@ const BLATTARTEN=[
   {art:'Leadsheet', w:['leadsheet','leadsh','sheet']},
   {art:'Lyrics',    w:['lyrics','text','songtext','chords','akkorde']},
   {art:'Ablauf',    w:['ablauf','setliste','setlist']},
+  /* „Misc." nimmt auf, was gar keine Stimme ist, aber mitgehen soll — die
+     Telefonnummer fuer den Auftritt, ein Hinweiszettel, ein Foto von der
+     Tafel. Am 31. Juli von Jens verlangt. */
+  {art:'Misc.',     w:['misc','sonstiges','diverses','info','infos']},
 ];
 const BLATT_NAMEN = BLATTARTEN.map(a=>a.art);
+
+/* Wohin alles faellt, was sich nicht benennen liess. Es ist KEINE Blattart mit
+   Wortschatz: Erkannt wird es nie, es ist der Auffangort.
+
+   Bis zum 31. Juli sperrte der Import, solange auch nur eine Datei ohne Stimme
+   dastand. Bei Jens' Bandbestand hielten elf von 460 Dateien die uebrigen 449
+   auf, und in der Probe war das der teuerste Punkt der ganzen Liste. Jetzt
+   landet Unerkanntes hier, bleibt sichtbar und laesst sich jederzeit spaeter
+   zuordnen. */
+const OHNE_STIMME = 'Not Assigned';
+window.OHNE_STIMME = OHNE_STIMME;
+
+/* Eine nackte Tonart im Dateinamen ist eine Stimme: „Summertime Bb" ist die
+   B♭-Ausgabe. Gerechnet wird das ZULETZT, nach Blattart und Instrument —
+   „Mardi Gras Flöte in C" ist eine Flöte und keine C-Ausgabe.
+
+   Bewusst NICHT dabei: das einzelne „b" und „bass". Beide gehoeren schon dem
+   E-Bass, und ein „Blue Bossa Bass melodie" ist seine Stimme und nicht die
+   Bass-Ausgabe eines Real Books. */
+const AUSGABE_WORT = { bb:'B♭', eb:'E♭', c:'C' };
+function ausgabeAusText(text){
+  for(const x of wortfolgen(text)) if(AUSGABE_WORT[x.s]) return AUSGABE_WORT[x.s];
+  return '';
+}
+window.ausgabeAusText = ausgabeAusText;
 function blattArt(text){
   const b=wortfolgen(text);
   for(const a of BLATTARTEN) if(b.some(x=>a.w.includes(x.s))) return a.art;
@@ -1952,6 +1989,9 @@ window.nachStimmeOrdnen = nachStimmeOrdnen;
 /* Die Reihenfolge der Stimmen. Tonarten stehen fest; Bandstimmen folgen der
    Voice-Liste — also der Ordnung, die Jens im Setup durch Ziehen setzt. */
 function stimmenRang(s){
+  /* Das Unzugeordnete steht immer zuletzt — es ist kein Rang, sondern eine
+     offene Aufgabe. */
+  if(s===OHNE_STIMME) return 1000;
   const i=STIMM_ORDNUNG.indexOf(s); if(i>=0) return i;
   const n=instrNorm(s); if(!n) return 999;
   const j=INSTRUMENTE.findIndex(x=>instrNorm(x.name)===n || instrNorm(x.en)===n);
@@ -4432,8 +4472,15 @@ function stimmenAuswahlBestand(){
   const aus=[{ wert:'', text:'Keine Stimme', ton:'steht für sich', kopf:null }];
   INSTRUMENTE.forEach((i,n)=>aus.push({ wert:i.name, text:i.name, ton:notationText(i),
                                         kopf: n===0 ? 'Instrumente' : null }));
+  /* Die Ausgaben stehen jetzt ausdruecklich zur Wahl. Sie waren ueber das Feld
+     „Ausgabe" schon erreichbar, aber nur fuer den ganzen Durchgang; fuer ein
+     einzelnes Blatt gab es sie nicht. */
+  STIMM_ORDNUNG.forEach((s,k)=>aus.push({ wert:s, text:s+'-Ausgabe', ton:'Tonart',
+                                        kopf: k===0 ? 'Ausgaben' : null }));
   BLATT_NAMEN.forEach((n,k)=>aus.push({ wert:n, text:n, ton:'keine Stimme',
                                         kopf: k===0 ? 'Blätter' : null }));
+  aus.push({ wert:OHNE_STIMME, text:OHNE_STIMME, ton:'später zuordnen',
+             kopf:'Ohne Zuordnung' });
   return aus;
 }
 const AWAHL = (function(){
@@ -5861,7 +5908,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-01 · Vier Fehler aus der ersten Probe';
+const APP_BUILD='2026-08-01 · Der Import sperrt nicht mehr';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -8947,7 +8994,10 @@ loadLibrary().then(render).catch(()=>{});
          Was die App VON SELBST erkennt, wird immer gerechnet, auch wenn von
          Hand etwas anderes gesetzt ist. Nur so kann die Wahl im Dropdown
          sagen, worauf „Automatisch erkennen" hinausliefe. */
-      const auto = blattArt(rest) || ((voiceAusText(rest)||{}).name) || '';
+      /* Reihenfolge: Blattart, dann Instrument, dann die nackte Tonart. Die
+         Tonart zuletzt, weil „Mardi Gras Flöte in C" eine Flöte ist und keine
+         C-Ausgabe. */
+      const auto = blattArt(rest) || ((voiceAusText(rest)||{}).name) || ausgabeAusText(rest) || '';
       const hand = bandHand[kennung] || '';
       /* Ist eine Ausgabe angesagt, gilt sie fuer den ganzen Durchgang und
          schlaegt die Erkennung aus dem Dateinamen. Ein Real Book traegt seine
@@ -8962,7 +9012,11 @@ loadLibrary().then(render).catch(()=>{});
                      gruppe: schl, ausgabe: ausg,
                      voice: hand && hand!=='-' ? hand : (ausg || auto)};
       if(hand==='-'){ ausgelassen.push(eintrag); return; }
-      if(!eintrag.voice){ offen.push(eintrag); return; }
+      /* Unerkanntes haelt den Import nicht mehr auf. Es bekommt „Not Assigned"
+         und geht mit; in `offen` steht es weiterhin, damit die Vorschau danach
+         fragen kann und damit man es vorher klaeren KANN, ohne es zu MUESSEN.
+         Am 31. Juli nach der ersten Probe so von Jens verlangt. */
+      if(!eintrag.voice){ eintrag.voice=OHNE_STIMME; eintrag.offen=true; offen.push(eintrag); }
       saetze.push(eintrag);
       st.saetze.push(eintrag);
     });
@@ -9292,23 +9346,36 @@ loadLibrary().then(render).catch(()=>{});
        geloeschtes Buch, entstuenden Stuecke ohne Buch — im Katalog unsichtbar
        und nur noch ueber den Export zu finden. */
     const buchDa = !!userBook(bandBid);
-    const bereit = buchDa && v.saetze.length && !v.offen.length;
+    /* Die offenen Dateien sperren NICHT mehr. Bis zum 31. Juli stand hier
+       zusaetzlich `&& !v.offen.length`, und elf von 460 Dateien hielten den
+       ganzen Import auf. Sie gehen jetzt als „Not Assigned" mit. */
+    const bereit = buchDa && v.saetze.length;
     const andockZahl=v.stuecke.filter(s=>s.andocken).length;
     const neuZahl=v.stuecke.length-andockZahl;
     const z_go=zeile('Noch nichts gespeichert',
       !buchDa ? 'Wähle oben ein Buch'
       : !v.saetze.length ? 'Es ist nichts zuzuordnen'
-      : v.offen.length ? 'Erst die <b>'+v.offen.length+'</b> nicht zugeordneten Dateien klären — weiter unten'
       : '<b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Satz':'Sätze')
         +' in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
-        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : ''));
+        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : '')
+        + (v.offen.length ? ' · <b>'+v.offen.length+'</b> davon als „'+OHNE_STIMME+'"' : ''));
     const b=knopf('Jetzt importieren', async ()=>{
       b.disabled=true;
-      /* Bei 400 Blaettern dauert das spuerbar. Der Knopf sagt, wo es steht,
-         statt still zu warten. */
+      /* Bei 460 Blaettern dauert das zwanzig Sekunden. Bis zum 31. Juli stand
+         der Fortschritt nur als Text AUF dem Knopf — Jens hat ihn in der Probe
+         nicht gesehen und dachte, es passiere nichts. Jetzt liegt ein Balken
+         unter der Zeile, dort, wo man ohnehin hinsieht. */
+      const bar=document.createElement('div'); bar.className='fortschritt';
+      const fuell=document.createElement('i'); const txt=document.createElement('span');
+      bar.append(fuell, txt); z_go.after(bar);
       const ber=await importBandbuch(bandBid, v.saetze, (was,a,g)=>{
+        const p = g ? Math.round(a/g*100) : 0;
         b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
+        fuell.style.width = p+'%';
+        txt.textContent = (was==='lesen' ? 'Blätter lesen' : 'In den Bestand schreiben')
+                        + ' — ' + a + ' von ' + g + ' (' + p + ' %)';
       });
+      bar.remove();
       const z=window._letzterImport||{};
       const ziel=bandBid;
       alert('Import fertig.\n'
@@ -9383,9 +9450,13 @@ loadLibrary().then(render).catch(()=>{});
     }
 
     /* Was sich nicht zuordnen liess, steht einzeln da. Es verschwindet nicht
-       stillschweigend und wird auch nicht geraten. */
+       stillschweigend und wird auch nicht geraten — es haelt den Import aber
+       auch nicht mehr auf. */
     if(v.offen.length){
-      const zeilen=v.offen.map(o=>{
+      const kopf=zeile(v.offen.length+' ohne erkannte Stimme',
+        'Sie gehen als <b>'+esc(OHNE_STIMME)+'</b> mit und lassen sich jederzeit später zuordnen — '
+        +'in Content über die Stimmen-Wahl am Blatt. Wer will, klärt sie gleich hier.');
+      const zeilen=[kopf].concat(v.offen.map(o=>{
         const z=zeile('', esc(o.name));
         z.querySelector('.lb').innerHTML = '<b>'+esc(o.titel||'(ohne Titel)')+'</b>'
           + (o.rest ? ' · übrig bleibt „'+esc(o.rest)+'"' : ' · nichts übrig, was eine Stimme nennt');
@@ -9393,8 +9464,8 @@ loadLibrary().then(render).catch(()=>{});
            nicht verraet, verraet die erste Zeile der Noten. */
         z._ctl.append(vorschauKnopf(o), stimmenWahl(o.kennung));
         return z;
-      });
-      halter.append(karte('Nicht zugeordnet ('+v.offen.length+')', zeilen));
+      }));
+      halter.append(karte('Ohne Stimme ('+v.offen.length+')', zeilen));
     }
 
     /* Ausgelassene Dateien stehen weiter da, mit dem Weg zurueck. Sonst waere
