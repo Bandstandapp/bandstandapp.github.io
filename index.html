@@ -2013,6 +2013,46 @@ window.stimmenRang = stimmenRang;
 const stimmWert = t => (t && (t.instrument || t.stimme)) || '';
 window.stimmWert = stimmWert;
 
+/* ================================================================
+   Was auf dem Schalter STEHT — und was darunter gespeichert ist
+
+   Am 1. August mit Jens festgelegt. Angezeigt wird kurz und englisch,
+   gespeichert bleibt der bisherige Wert als Kennung. Das kostet keine
+   Umstellung des Bestands, ist jederzeit umkehrbar und kann nichts
+   verlieren; ein Datenumbau fuer eine Beschriftung waere das schlechteste
+   Geschaeft von beiden.
+
+   Der Anlass ist Platz. In der Setliste stand „Alt-Sax · E-Bass · Gitarre ·
+   Klavier · Tenor-Sax" und fuellte die Zeile; „Alto · Bass · Guitar · Keys ·
+   Tenor" sagt dasselbe in gut der halben Breite. Das Ziel heisst: eine Stimme,
+   eine Zeile.
+
+   Umbenennt ein Nutzer eine Voice im Setup, greift die Tabelle nicht mehr —
+   dann gilt sein Name, und das ist richtig so.
+   ================================================================ */
+const STIMM_ANZEIGE = {
+  'Akkordeon':'Accordion',  'Alt-Sax':'Alto',       'Bariton-Sax':'Bari',
+  'Cello':'Cello',          'E-Bass':'Bass',        'Flöte':'Flute',
+  'Flügelhorn':'Flugel',    'Gesang':'Vocals',      'Gitarre':'Guitar',
+  'Klarinette':'Clarinet',  'Klavier':'Keys',       'Kontrabass':'Upright',
+  'Percussion':'Perc.',     'Posaune':'Trombone',   'Schlagzeug':'Drums',
+  'Sopran-Sax':'Soprano',   'Tenor-Sax':'Tenor',    'Trompete':'Trumpet',
+  'Tuba':'Tuba',            'Violine':'Violin',
+  /* Die Blattarten. „Misc." heisst schon so. */
+  'Leadsheet':'Lead',       'Ablauf':'Form',        'Not Assigned':'none',
+};
+function anzeigeStimme(wert){ const w=String(wert||''); return STIMM_ANZEIGE[w] || w; }
+/* Ein selbst getipptes Etikett bleibt unangetastet — erkennbar daran, dass es
+   vom erkannten Instrument abweicht. Dieselbe Regel wie beim Glattziehen der
+   Etiketten: Angefasst wird nur, was die Maschine gesetzt hat. */
+function zeigStimme(etikett, instrument){
+  const e=String(etikett||''), i=String(instrument||'');
+  if(e && i && e!==i) return e;
+  return anzeigeStimme(e||i);
+}
+window.anzeigeStimme = anzeigeStimme;
+window.zeigStimme = zeigStimme;
+
 function waehleStimme(stimmen){
   if(!stimmen || !stimmen.length) return null;
   const ich=meinInstrument();
@@ -2554,7 +2594,8 @@ function stimmenHTML(stimmen, zeige){
   const gezeigt = stimmen.some(s=>s.key===aktiv) ? aktiv : zeige.key;
   return '<span class="stimmen">'+stimmen.map(s=>
     '<button class="stimme'+(s.key===gezeigt?' an':'')+'" data-skey="'+esc(s.key)+'"'
-    + ' title="'+esc(s.stimme)+'-Ausgabe öffnen · S. '+esc(s.pg)+'">'+esc(s.stimme)+'</button>').join('')+'</span>';
+    + ' title="'+esc(s.stimme||s.instrument||'')+' öffnen · S. '+esc(s.pg)+'">'
+    + esc(zeigStimme(s.stimme, s.instrument))+'</button>').join('')+'</span>';
 }
 function verdrahteStimmen(li){
   li.querySelectorAll('.stimme[data-skey]').forEach(b=>{
@@ -3746,11 +3787,33 @@ function renderOneSet(main){
   st.items.forEach((k,i)=>{
     const t=byKey[k]; if(!t)return;
     const li=document.createElement('li'); li.className='tune'; li.dataset.key=k;
+    li.dataset.gid = t.gid || t.key;
+    /* Die Stimmen gehoeren in die Setliste — der wichtigste Befund der ersten
+       Probe. Der Griff zur richtigen Stimme ist die haeufigste Handlung, wenn
+       ein Ensemble arbeitet; eine Liste, die nur Titel zeigt, wird deshalb
+       nicht benutzt.
+
+       Gebaut wird das mit DEMSELBEN Baustein wie die Hauptliste. Zwei
+       Zeilenbauer mit zwei Verhaltensweisen waeren genau die Art von
+       Unterschied, die man auf der Buehne nicht gebrauchen kann. */
+    /* Sortiert wird HIER und nicht beim Laden: Die Reihenfolge folgt der
+       Voice-Liste, und die zieht Jens im Setup selbst zurecht. Wer sie dort
+       aendert, soll das Ergebnis sofort sehen und nicht erst nach einem
+       Neustart. Dieselbe Rechnung wie in `zuZeilen`. */
+    const grp = (t.gid && GRUPPEN[t.gid] && GRUPPEN[t.gid].length>1)
+      ? GRUPPEN[t.gid].slice().sort((a,b)=>
+          (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
+          || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}))
+      : [t];
     li.innerHTML=`<div class="handle" title="Ziehen zum Sortieren">⣿</div>
       <div class="main"><div class="title">${i+1}. ${esc(t.t)}</div>
-      <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}</div></div>
+      <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}</div>
+      ${stimmenZeile(grp, t)}</div>
       <div class="iconbtn" data-a="rm">✕</div>`;
-    li.querySelector('.main').onclick=()=>openViewer(t);
+    /* Ein Tipp auf die Zeile waehlt das STUECK, ein Tipp auf eine Stimme genau
+       diese — wie in der Hauptliste. */
+    li.querySelector('.main').onclick=()=>{ STIMMWUNSCH=''; openViewer(t); };
+    verdrahteStimmen(li);
     li.querySelector('[data-a=rm]').onclick=()=>{st.items.splice(i,1);st.updatedAt=Date.now();save();render();};
     li.prepend(selBox(k)); if(S.selection.has(k)) li.classList.add('selected');
     enableDrag(li, st); ul.append(li);
@@ -4457,9 +4520,9 @@ function notationText(i){ return i.notation ? i.notation : 'ohne Notation'; }
 function stimmenAuswahl(erkannt){
   const aus=[{ wert:'', text:'Automatisch erkennen',
                ton: erkannt ? erkannt : 'nichts erkannt', kopf:null }];
-  INSTRUMENTE.forEach((i,n)=>aus.push({ wert:i.name, text:i.name, ton:notationText(i),
+  INSTRUMENTE.forEach((i,n)=>aus.push({ wert:i.name, text:anzeigeStimme(i.name), ton:notationText(i),
                                         kopf: n===0 ? 'Instrumente' : null }));
-  BLATT_NAMEN.forEach((n,k)=>aus.push({ wert:n, text:n, ton:'keine Stimme',
+  BLATT_NAMEN.forEach((n,k)=>aus.push({ wert:n, text:anzeigeStimme(n), ton:'keine Stimme',
                                         kopf: k===0 ? 'Blätter' : null }));
   aus.push({ wert:'-', text:'Auslassen', ton:'wird nicht importiert', kopf:'Sonst' });
   return aus;
@@ -4470,16 +4533,16 @@ function stimmenAuswahl(erkannt){
    fehlende. */
 function stimmenAuswahlBestand(){
   const aus=[{ wert:'', text:'Keine Stimme', ton:'steht für sich', kopf:null }];
-  INSTRUMENTE.forEach((i,n)=>aus.push({ wert:i.name, text:i.name, ton:notationText(i),
+  INSTRUMENTE.forEach((i,n)=>aus.push({ wert:i.name, text:anzeigeStimme(i.name), ton:notationText(i),
                                         kopf: n===0 ? 'Instrumente' : null }));
   /* Die Ausgaben stehen jetzt ausdruecklich zur Wahl. Sie waren ueber das Feld
      „Ausgabe" schon erreichbar, aber nur fuer den ganzen Durchgang; fuer ein
      einzelnes Blatt gab es sie nicht. */
   STIMM_ORDNUNG.forEach((s,k)=>aus.push({ wert:s, text:s+'-Ausgabe', ton:'Tonart',
                                         kopf: k===0 ? 'Ausgaben' : null }));
-  BLATT_NAMEN.forEach((n,k)=>aus.push({ wert:n, text:n, ton:'keine Stimme',
+  BLATT_NAMEN.forEach((n,k)=>aus.push({ wert:n, text:anzeigeStimme(n), ton:'keine Stimme',
                                         kopf: k===0 ? 'Blätter' : null }));
-  aus.push({ wert:OHNE_STIMME, text:OHNE_STIMME, ton:'später zuordnen',
+  aus.push({ wert:OHNE_STIMME, text:anzeigeStimme(OHNE_STIMME), ton:'später zuordnen',
              kopf:'Ohne Zuordnung' });
   return aus;
 }
@@ -5908,7 +5971,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-01 · Der Import sperrt nicht mehr';
+const APP_BUILD='2026-08-01 · Stimmen in der Setliste, kurz und englisch';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -7777,7 +7840,11 @@ loadLibrary().then(render).catch(()=>{});
      Aus dem Instrument folgt, welche Ausgabe aufgeht; es gibt keine zweite
      Regel und keinen Ort, an dem sich zwei Einstellungen widersprechen
      koennten. */
-  const instrTitel = i => esc(i.name) + (i.en && i.en!==i.name ? ' · '+esc(i.en) : '');
+  /* In der Voice-Verwaltung steht der Anzeigename vorn — er ist der, den man
+     ueberall sonst sieht. Der gespeicherte Name folgt dahinter, damit man die
+     Kennung erkennt, unter der die Blaetter haengen. */
+  const instrTitel = i => { const a=anzeigeStimme(i.name);
+    return esc(a) + (a!==i.name ? ' <span class="muted">· '+esc(i.name)+'</span>' : ''); };
   function themaInstrument(w){
     const ich=(typeof meinInstrument==='function') ? meinInstrument() : null;
     const z_ich=zeile('Meine Voice',
@@ -7892,6 +7959,11 @@ loadLibrary().then(render).catch(()=>{});
       const ids=[...liste.querySelectorAll('.srow[data-iid]')].map(r=>r.dataset.iid);
       INSTRUMENTE.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id));
       instrumenteSichern(); liste=null;
+      /* Die Reihenfolge dieser Liste bestimmt, in welcher Folge die Stimmen in
+         der Hauptliste und in der Setliste stehen. Am 1. August von Jens so
+         verlangt. Deshalb muss die Liste MIT neu gezeichnet werden — sonst
+         sieht man die Wirkung erst nach einem Neustart. */
+      render();
       zeichne();
     };
     window.addEventListener('pointerup', ende, true);
@@ -7987,16 +8059,16 @@ loadLibrary().then(render).catch(()=>{});
         .map(t=>{ const el=(K.elemente||[]).filter(e=>e.titelId===t.id)
                     .sort((a,b)=>(a.reihung||0)-(b.reihung||0));
           return { id:t.id, name:t.titel, komponist:t.komponist||'',
-            unten: el.length ? esc(el.map(e=>e.etikett||e.instrument||e.art).join(' · '))
+            unten: el.length ? esc(el.map(e=>zeigStimme(e.etikett,e.instrument)||e.art).join(' · '))
                              : '<i>noch keine Elemente</i>',
             hinein:()=>{ cPfad=[cPfad[0], t.id]; cZuruecksetzen(); zeichne(); } }; });
     }
     return (BS_KATALOG.elemente||[]).filter(e=>e.titelId===cPfad[1])
       .sort((a,b)=>(a.reihung||0)-(b.reihung||0))
-      .map(e=>({ id:e.id, name:e.etikett||e.instrument||BS.ARTEN[e.art].name,
+      .map(e=>({ id:e.id, name:zeigStimme(e.etikett,e.instrument)||BS.ARTEN[e.art].name,
         unten: BS.ARTEN[e.art].name + ' · ' + esc(e.dateiname||'ohne Datei')
                + (e.np>1 ? ' · '+e.np+' Seiten' : '')
-               + (e.etikett && e.instrument && e.etikett!==e.instrument ? ' · erkannt als '+esc(e.instrument) : ''),
+               + (e.etikett && e.instrument && e.etikett!==e.instrument ? ' · erkannt als '+esc(anzeigeStimme(e.instrument)) : ''),
         el:e }));
   }
 
@@ -8077,7 +8149,7 @@ loadLibrary().then(render).catch(()=>{});
     if(!blob){ alert('Dieses Element hat keine Datei.'); return; }
     window.pdfVorschau({ kennung:'c|'+el.id, datei:blob,
       name: el.dateiname || ((el.etikett||'Blatt')+'.pdf'),
-      unter: (cTitel()||{}).titel + ' · ' + (el.etikett||el.instrument||''),
+      unter: (cTitel()||{}).titel + ' · ' + zeigStimme(el.etikett,el.instrument),
       /* Auch im Fenster, mit dem Blatt vor Augen. */
       wahl: { hole: ()=>{
                 const jetzt=(BS_KATALOG.elemente||[]).find(x=>x.id===el.id) || el;
@@ -8092,6 +8164,12 @@ loadLibrary().then(render).catch(()=>{});
   async function cUmbenennen(r, neu){
     if(!neu) { zeichne(); return; }
     const eb=cEbene();
+    /* Im Namensfeld einer Element-Zeile steht der ANZEIGENAME („Alto"),
+       gespeichert ist die Kennung („Alt-Sax"). Wer das Feld verlaesst, ohne
+       etwas zu aendern, darf den Anzeigenamen nicht als eigenes Etikett
+       festschreiben — sonst waere „Alto" ploetzlich von Hand getippt und
+       liesse sich nie wieder glattziehen. */
+    if(eb==='element' && r.el && neu===zeigStimme(r.el.etikett, r.el.instrument)){ zeichne(); return; }
     try{
       if(eb==='buch')   await BS.aendern('buch',   r.id, {name:neu, chip:neu.length>18?neu.slice(0,16)+'…':neu});
       if(eb==='titel')  await BS.aendern('titel',  r.id, {titel:neu});
@@ -8305,7 +8383,7 @@ loadLibrary().then(render).catch(()=>{});
              || (BS_KATALOG.titel||[]).find(y=>y.id===id);
         return t ? t.titel : '';
       };
-      const etikett=el=> el.etikett || el.instrument || el.dateiname
+      const etikett=el=> zeigStimme(el.etikett,el.instrument) || el.dateiname
                       || (BS.ARTEN[el.art]||{}).name || 'Element';
       const elementName=(el, eintrag)=>
         [titelName(el.titelId, eintrag), etikett(el)].filter(Boolean).join(' · ');
@@ -9521,8 +9599,8 @@ loadLibrary().then(render).catch(()=>{});
           /* Links das Etikett, und wo es vom erkannten Instrument abweicht,
              steht dieses dahinter — sonst waere nicht zu sehen, worauf die
              Zuordnung beruht. */
-          const u=zeile(s.etikett||s.voice, esc(s.name)
-            + (s.etikett && s.etikett!==s.voice ? ' · erkannt als '+esc(s.voice) : ''));
+          const u=zeile(zeigStimme(s.etikett, s.voice), esc(s.name)
+            + (s.etikett && s.etikett!==s.voice ? ' · erkannt als '+esc(anzeigeStimme(s.voice)) : ''));
           u.style.paddingLeft='34px';
           /* Auch ein erkannter Satz laesst sich hier richtigstellen — ohne
              dafuer erst das Fenster aufmachen zu muessen. */
