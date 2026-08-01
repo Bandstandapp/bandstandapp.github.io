@@ -168,7 +168,13 @@
 
     /* --- Masse --------------------------------------------------------- */
     --tap:46px;
+    /* Die Themenspalte im Setup. Sie wird an zwei Stellen gebraucht: von der
+       Spalte selbst und vom Kopf darueber, damit der Brotkrumenpfad genau
+       ueber der rechten Spalte beginnt. Deshalb steht sie hier und nicht in
+       den Regeln. */
+    --supnav-w:232px;
   }
+  body[data-o=port]{ --supnav-w:180px; }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{background:var(--bg-app);color:var(--text);
@@ -456,7 +462,9 @@
     display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--white);font-size:15px;background:var(--bg-control);user-select:none}
   .selbox.on{background:var(--accent);border-color:var(--accent)}
   li.tune.selected{border-color:var(--accent)}
-  .selall{display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:14px;padding:8px 6px 0;cursor:pointer;user-select:none}
+  /* Sie steht seit dem 2. August unmittelbar ueber der ersten Zeile, in der
+     Liste selbst — nicht mehr im Kopfbereich darueber. */
+  .selall{display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:14px;padding:6px 8px 8px;cursor:pointer;user-select:none}
   .selall .selbox{width:22px;height:22px;min-width:22px;font-size:13px}
   /* Die Sammelaktionen standen als Leiste am unteren Rand. Jetzt sind sie ein
      schwebendes Fenster wie die Dialoge — im Querformat ueber den Noten. */
@@ -472,8 +480,21 @@
   body[data-page="setup"] .selbar.open{display:none}
   .selbar-head{display:flex;align-items:center;gap:12px}
   .selbar-head .cnt{font:700 13.5px/1.3 var(--font-sans);color:var(--text)}
-  .selbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .selbar-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .selbar-actions .btn{flex:none;white-space:nowrap;height:36px;padding:0 12px;font-size:13px}
+  .selbar-actions .btn .i{width:15px;height:15px;margin-right:2px;vertical-align:-2px}
+  /* Hinzufuegen und Wegnehmen gehoeren zusammen und werden als EIN Ding
+     gelesen: ein Wort, zwei kleine Schalter in einer gemeinsamen Fassung. */
+  .selpaar{display:flex;align-items:center;gap:2px;height:36px;padding:0 4px 0 10px;
+     border:1px solid var(--border);border-radius:var(--r-9);background:var(--bg-control)}
+  /* `text-transform` und `letter-spacing` der allgemeinen `.lbl`-Regel
+     ausdruecklich zuruecknehmen — sie ist fuer Ueberschriften gedacht und
+     schrieb hier „ÜBEN" statt „Üben". */
+  .selpaar .lbl{font:600 13px/1 var(--font-sans);color:var(--text-body);white-space:nowrap;
+     margin:0 6px 0 0;text-transform:none;letter-spacing:0}
+  .selpaar .lbl .i{width:15px;height:15px;margin-right:2px;vertical-align:-2px}
+  .selpaar .btn{height:28px;min-width:30px;padding:0 8px;border:none;background:transparent;font-size:15px}
+  @media (hover:hover){ .selpaar .btn:hover{background:var(--bg-panel-hover)} }
   .bookgroup{margin:0 0 4px}
   .gtitle{color:var(--text-faint);font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;margin:9px 2px 5px}
 
@@ -674,7 +695,6 @@
   .pintag .cnt{color:var(--text-dim);font-weight:700}
   .pintag.active{background:var(--accent);border-color:var(--accent);color:var(--white)}
   .pintag.active .cnt{color:var(--white)}
-  #listfix .selall{padding:8px 0}
 
   /* Die ausgeklappten Buecher- und Tag-Listen der Seitenleiste entfallen:
      Beide fuehren jetzt in den Dialog. Die Knoten bleiben im Baum, damit
@@ -1037,14 +1057,19 @@
   body[data-page=setup] #stage{display:none}
   /* Im Hochformat scrollt die ganze Seite; ohne sticky waere „Schließen"
      nach dem ersten Scrollen nicht mehr erreichbar. */
+  /* Der Brotkrumenpfad beginnt dort, wo die rechte Spalte beginnt. Ueber der
+     Themenspalte hat er nichts zu suchen: Was dort gewaehlt ist, steht schon
+     farbig hervorgehoben da. Am 1. August von Jens so verlangt. Die Breite
+     steht als Token und wird von beiden gelesen. */
   .suphead{display:flex;align-items:center;gap:12px;flex:none;position:sticky;top:0;z-index:2;
      background:var(--bg-nav);
-     padding:15px 22px 14px;padding-top:calc(15px + env(safe-area-inset-top))}
+     padding:15px 22px 14px;padding-left:calc(22px + var(--supnav-w));
+     padding-top:calc(15px + env(safe-area-inset-top))}
   .suphead h2{margin:0;font:800 19px/1.2 var(--font-sans)}
   /* Zweispaltig: links die Themen, rechts die Einstellungen des gewaehlten
      Themas. Eine einzige lange Liste war unuebersichtlich. */
   .supcols{flex:1;min-height:0;display:flex;align-items:stretch}
-  .supnav{width:232px;flex:none;background:var(--bg-nav);overflow-y:auto;
+  .supnav{width:var(--supnav-w);flex:none;background:var(--bg-nav);overflow-y:auto;
      -webkit-overflow-scrolling:touch;padding:10px 8px calc(20px + env(safe-area-inset-bottom))}
   .supitem{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:var(--r-9);
      cursor:pointer;font:600 13.5px/1.3 var(--font-sans);color:var(--text-body);margin-bottom:2px}
@@ -1058,7 +1083,7 @@
      Reihe, und was nicht in die Breite passte, lag ausserhalb — man sah nie
      alle sechs auf einmal. Die Spalte ist schmaler als im Querformat, aber
      sie zeigt vollstaendig, was es gibt. */
-  body[data-o=port] .supnav{width:180px;padding:10px 6px calc(20px + env(safe-area-inset-bottom))}
+  body[data-o=port] .supnav{padding:10px 6px calc(20px + env(safe-area-inset-bottom))}
   body[data-o=port] .supitem{padding:10px 9px;font-size:13px;gap:8px}
   body[data-o=port] .supscroll{padding-left:14px;padding-right:14px}
   body[data-o=port] .supitem{flex:none;margin:0;white-space:nowrap}
@@ -2703,7 +2728,7 @@ function kontextzeile(treffer){
    im eingeklappten Zustand nicht zu sehen. Jetzt stehen alle da, die
    angehefteten zuerst. Tags ohne ein einziges Stueck bleiben weg; sie waeren
    ein Filter, der nichts findet. */
-function listFix(keys){
+function listFix(){
   const box=document.getElementById('listfix'); if(!box) return;
   box.innerHTML='';
   const tags=S.tags.filter(t=>t.pinned || tagCount(t.id)>0)
@@ -2720,7 +2745,10 @@ function listFix(keys){
     });
     box.append(reihe);
   }
-  if(keys && keys.length) box.append(selectAllRow(keys));
+  /* „Alle auswählen" steht seit dem 2. August NICHT mehr hier, sondern
+     unmittelbar ueber der ersten Zeile. In `#listfix` lag es ueber den
+     Tag-Pillen und — in einer geoeffneten Setliste — ueber deren ganzem Kopf:
+     zweihundert Pixel von der Liste entfernt, auf die es sich bezieht. */
   box.classList.toggle('leer', !box.children.length);
 }
 /* Die Zeile ueber der Liste. Solange nichts gewaehlt ist, laedt sie zum
@@ -2752,28 +2780,47 @@ function renderSelBar(){
     zu.onclick=()=>{ S.selection.clear(); refreshSelUI(); }; }
   const act=document.getElementById('selActions'); act.innerHTML='';
   if(!n){ bar.classList.remove('open'); return; }
-  const mk=(html,fn)=>{ const b=document.createElement('button'); b.className='btn ghost sm'; b.innerHTML=html; b.onclick=fn; act.append(b); };
-  mk('＋ Setlist', bulkSetlistFlow);
-  mk('Üben ＋', ()=>bulkSet(S.prac,true));
-  mk('Üben −', ()=>bulkSet(S.prac,false));
-  mk('★ ＋', ()=>bulkSet(S.fav,true));
-  mk('★ −', ()=>bulkSet(S.fav,false));
-  mk('🏷 Tags', bulkTagsFlow);
+  /* Symbole der App statt Emoji. Ein Emoji wird von jedem Betriebssystem
+     anders gezeichnet, springt farbig aus der Zeile und laesst sich nicht
+     einfaerben; die eigenen Symbole tun all das. Am 31. Juli von Jens
+     verlangt.
+
+     Zugleich raeumt die Leiste auf. Sie trug bis dahin vier einzelne Knoepfe
+     fuer zwei Dinge — „Üben ＋", „Üben −", „★ ＋", „★ −". Jetzt steht je ein
+     Paar zusammen: ein Symbol, ein Wort, zwei kleine Schalter. */
+  const mk=(html,fn,art)=>{ const b=document.createElement('button');
+    b.className='btn ghost sm'+(art?' '+art:''); b.innerHTML=html; b.onclick=fn; act.append(b); return b; };
+  const sym=n=>'<i class="i ic-'+n+'"></i> ';
+  /* Ein Paar aus Hinzufuegen und Wegnehmen, als eine Einheit gelesen. */
+  const paar=(icon, wort, ein, aus)=>{
+    const g=document.createElement('span'); g.className='selpaar';
+    g.innerHTML='<span class="lbl">'+sym(icon)+esc(wort)+'</span>';
+    const a=document.createElement('button'); a.className='btn ghost sm'; a.textContent='＋'; a.title=wort+' hinzufügen';
+    const b=document.createElement('button'); b.className='btn ghost sm'; b.textContent='−'; b.title=wort+' wegnehmen';
+    a.onclick=ein; b.onclick=aus; g.append(a,b); act.append(g);
+  };
+  mk(sym('list-plus')+'Setlist', bulkSetlistFlow);
+  paar('metronome','Üben', ()=>bulkSet(S.prac,true), ()=>bulkSet(S.prac,false));
+  paar('star','Favorit',   ()=>bulkSet(S.fav,true),  ()=>bulkSet(S.fav,false));
+  mk(sym('tags')+'Tags', bulkTagsFlow);
   /* „Weitergeben" reicht die Dateien an das Teilen-Blatt des Geraets — lose
      PDFs an irgendein Programm. Das ist etwas anderes als „Als Paket teilen"
      in Content, wo ein BandStand-Paket fuer ein anderes BandStand entsteht.
      Bis zum 30. Juli hiessen beide „Teilen". */
-  mk('⤴ Weitergeben', bulkShare);
-  mk('🖨 Drucken', bulkPrint);
-  if(S.view==='set' && S.openSet) mk('Aus Setlist entfernen', bulkRemoveFromSet);
-  if(hasSelectedNotes()) mk('🗑 Notiz löschen', bulkDeleteNotes);
+  mk(sym('share')+'Weitergeben', bulkShare);
+  mk(sym('printer')+'Drucken', bulkPrint);
+  if(S.view==='set' && S.openSet) mk(sym('minus')+'Aus Setlist', bulkRemoveFromSet);
   /* Die Bruecke nach Content. Die Hauptliste fasst den Bestand nicht an;
      Umbenennen, Verschieben und Entfernen stehen dort. Am 30. Juli mit Jens
      so festgelegt: eine Regel, zwei Tueren. */
   const titelIds=[...new Set([...S.selection].map(k=>byKey[k])
                    .filter(t=>t&&t.titelId).map(t=>t.titelId))];
   if(titelIds.length && window.contentZeigen)
-    mk('Im Content zeigen', ()=>window.contentZeigen(titelIds));
+    mk(sym('book-open')+'Im Content', ()=>window.contentZeigen(titelIds));
+  /* Das Loeschen steht zuletzt, abgesetzt und rot — dieselbe Vorsicht wie bei
+     „Setlist löschen". Ein Fehlgriff neben Drucken ist teuer. */
+  if(hasSelectedNotes())
+    mk(sym('trash-2')+'Notiz löschen', bulkDeleteNotes, 'warn');
   bar.classList.add('open'); a11y(bar);
 }
 document.getElementById('selClear').onclick=()=>{ S.selection.clear(); refreshSelUI(); };
@@ -2883,17 +2930,19 @@ function render(){
   if(S.view==='recent'){ renderRecent(main); return; }
   const zeilen=zuZeilen(currentList());
   kontextzeile(zeilen.length); markeZahlen();
-  if(!zeilen.length){ main.innerHTML='<div class="empty">Keine Treffer.</div>'; LISTNAV=[]; listFix([]); return; }
+  if(!zeilen.length){ main.innerHTML='<div class="empty">Keine Treffer.</div>'; LISTNAV=[]; listFix(); return; }
   /* Geblaettert wird von Stueck zu Stueck, nicht von Ausgabe zu Ausgabe.
      Darum steht je Zeile genau ein Schluessel im Kontext: der der Stimme,
      die aufgeht. */
   const schluessel=zeilen.map(z=>z.zeige.key);
   LISTNAV=schluessel;
   LISTGIDS=zeilen.map(z=>z.gid);
-  listFix(schluessel);
+  listFix();
   /* Solange ein Anfangsbuchstabe gewaehlt ist, entfallen die Gruppentitel —
      sie wuerden nur denselben Buchstaben ueber der ganzen Liste wiederholen. */
-  listeAufbauen(main, zeilen, !S.initial, merke);
+  /* Die Zeile „Alle auswählen" geht MIT hinein und steht dann unmittelbar
+     ueber der ersten Zeile — nicht mehr im Kopfbereich darueber. */
+  listeAufbauen(main, zeilen, !S.initial, merke, selectAllRow(schluessel));
 }
 
 /* ================================================================
@@ -2983,7 +3032,12 @@ function fensterMerken(main){
   return { y:main.scrollTop, gid:(e.art==='Z' ? e.z.gid : null), v:a.v };
 }
 
-function listeAufbauen(main, zeilen, gruppiert, merke){
+/* `kopf` ist ein Knoten, der VOR der Liste stehen soll — seit dem 2. August
+   die Zeile „Alle auswählen". Sie muss durch diese Funktion hindurch: Sie
+   leert `main` selbst, und ein Anhaengen davor waere spurlos weg. Ein
+   Anhaengen danach wiederum verschoebe die gemerkte Rollposition, die hier
+   unten gesetzt wird. */
+function listeAufbauen(main, zeilen, gruppiert, merke, kopf){
   const eintraege = eintraegeBauen(zeilen, gruppiert);
   /* Wie viele Zeilen die Liste im Ganzen hat — fuer die Messzeile im Setup.
      Ohne sie liest sich „37 Zeilen" wie ein Verlust von Noten, obwohl es der
@@ -2993,6 +3047,7 @@ function listeAufbauen(main, zeilen, gruppiert, merke){
   document.body.dataset.fenster = lang ? 'an' : 'aus';
   if(FEN && FEN.haupt) FEN.haupt.removeEventListener('scroll', fensterAnstossen);
   main.innerHTML='';
+  if(kopf) main.append(kopf);
   if(!lang){
     FEN=null;
     const ul=document.createElement('ul'); ul.className='list';
@@ -3731,7 +3786,8 @@ function renderRecent(main){
   head.querySelector('#sDate').onclick=()=>setRecentSort('date');
   if(!entries.length){ main.insertAdjacentHTML('beforeend','<div class="empty">Noch keine Titel gespielt.<br>Öffne einen Titel – danach erscheint er hier.</div>'); return; }
   LISTNAV=entries.map(x=>x.t.key);
-  listFix(entries.map(x=>x.t.key));
+  listFix();
+  main.append(selectAllRow(entries.map(x=>x.t.key)));
   const ul=document.createElement('ul'); ul.className='list'; main.append(ul);
   entries.forEach(({t,ts})=>ul.append(recentRow(t,ts)));
 }
@@ -3782,7 +3838,11 @@ function renderOneSet(main){
   };
   if(!st.items.length){main.insertAdjacentHTML('beforeend','<div class="empty">Leer. Füge Titel über ＋ hinzu.</div>');LISTNAV=[];loeschZeile();return;}
   LISTNAV=st.items.filter(k=>byKey[k]);
-  listFix(st.items.filter(k=>byKey[k]));
+  listFix();
+  /* Unmittelbar ueber der ersten Zeile. Vorher lag es im Kopfbereich ueber der
+     Liste — bei einer geoeffneten Setliste zweihundert Pixel entfernt, hinter
+     Namen, Knoepfen und Sortierhinweis. */
+  main.append(selectAllRow(st.items.filter(k=>byKey[k])));
   const ul=document.createElement('ul'); ul.className='list'; ul.id='setUL'; main.append(ul);
   st.items.forEach((k,i)=>{
     const t=byKey[k]; if(!t)return;
@@ -5971,7 +6031,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-01 · Stimmen in der Setliste, kurz und englisch';
+const APP_BUILD='2026-08-02 · Aufgeräumt: Auswahl, Leiste, Brotkrumen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
