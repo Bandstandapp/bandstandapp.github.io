@@ -2084,6 +2084,37 @@ function stimmeAmAnfang(text){
   }
   return false;
 }
+/* Ist der Text NICHTS ALS eine Stimme? „Alt", „Tenor Sax", „C" — ja. „Tenor
+   Madness" — nein, das ist ein Stueck, das zufaellig mit einem Instrument
+   anfaengt.
+
+   Der Unterschied ist am 2. August teuer geworden. Beim Einlesen eines Real
+   Books wurde „Tenor Madness - C.pdf" vertauscht, weil der Titel mit einer
+   Stimme BEGINNT: Aus dem Stueck wurde ein Titel namens „C" mit der Stimme
+   „Tenor Madness". `stimmeAmAnfang` allein reicht als Bedingung fuer das
+   Vertauschen also nicht. */
+function nurStimme(text){
+  let t=String(text||'').trim();
+  if(!t) return false;
+  /* Eine angehaengte Nummer („Alt 2") und eine Tonartangabe („Trumpet in Bb")
+     gehoeren noch zur Stimme und werden vor dem Vergleich abgezogen. */
+  t=t.replace(/\s+in\s+[A-Ha-h][b#♭]?$/i,'').replace(/[\s_-]+\d+$/,'').trim();
+  if(!t) return false;
+  /* Verglichen wird der GANZE Text, nicht sein Anfang. `stimmeAmAnfang` taugt
+     dafuer nicht: Es sagt bei „Tenor Madness" ja, weil es nur vorne schaut. */
+  const s=instrNorm(t);
+  if(!s) return false;
+  for(const a of BLATTARTEN) if(a.w.includes(s)) return true;
+  for(const i of INSTRUMENTE){
+    const kand=[i.name, i.en].concat(i.kurz||[]).filter(Boolean).map(instrNorm);
+    if(kand.includes(s)) return true;
+  }
+  /* Die Ausgaben: „C", „Bb", „Eb", „Bass". */
+  if(STIMM_ORDNUNG.some(x=>instrNorm(x)===s)) return true;
+  return !!ausgabeAusText(t) && instrNorm(ausgabeAusText(t))===s
+      || !!ausgabeAusText(t) && t.length<=3;
+}
+window.nurStimme = nurStimme;
 function titelVorStimme(dateiname){
   const ohne=String(dateiname||'').replace(ENDUNG,'').trim();
   const woerter=[]; const re=/[0-9A-Za-zÄÖÜäöüß]+/g; let m;
@@ -3544,6 +3575,45 @@ function titelBearbeiten(titelId){
    Einlesen nichts. Erkannt wird das an der Datei und nicht vom Nutzer
    erfragt.
    ================================================================ */
+/* ================================================================
+   Nach einem Import muss zu sehen sein, was hereingekommen ist
+
+   Jens hat am 2. August ein Buch mit 56 Titeln eingelesen. Der Import lief
+   durch, das Buch stand im Bestand, die Liste blieb leer. Der Fehler lag
+   nicht im Import, sondern in einem Filter.
+
+   `matches()` zeigt eine Zeile nur, wenn ihr Buch in `S.books` steht — und
+   `S.books` wird beim Start aus `rb_defaultbooks` gefuellt. Wer je einmal
+   „Als Standard setzen" gedrueckt hat, sieht jedes neu angelegte Buch nicht.
+   Ohne Meldung, ohne Hinweis, bei jedem Start aufs Neue. Dasselbe gilt fuer
+   den Anfangsbuchstaben, die Suche, eine Tag-Auswahl und jede Ansicht ausser
+   „Alle".
+
+   Deshalb raeumt ein Import sie alle weg. Was gerade hereingekommen ist, hat
+   Vorrang vor jeder frueheren Einschraenkung — und weil eine Standardauswahl
+   sonst beim naechsten Start wieder zuschlagen wuerde, faellt auch sie. Das
+   geschieht nicht stillschweigend: Die Meldung nennt es.
+   ================================================================ */
+function nachImportZeigen(){
+  const hatteBuchfilter = S.books.size>0 || (typeof DEFAULT_BOOKS!=='undefined' && DEFAULT_BOOKS.length>0);
+  const hatteEnge = hatteBuchfilter || !!S.initial || !!S.q || S.tagFilter.size>0 || S.view!=='all';
+  S.view='all'; S.openSet=null;
+  S.books=new Set(); S.initial=''; S.q=''; S.tagFilter=new Set();
+  const feld=document.getElementById('q'); if(feld) feld.value='';
+  if(typeof DEFAULT_BOOKS!=='undefined' && DEFAULT_BOOKS.length){
+    DEFAULT_BOOKS.length=0;
+    try{ localStorage.removeItem('rb_defaultbooks'); }catch(e){}
+  }
+  save(); render();
+  const m=document.getElementById('main'); if(m) m.scrollTop=0;
+  return hatteEnge;
+}
+/* Wie viele Titel stehen jetzt in der Liste? Die Zahl gehoert in die Meldung:
+   Sie ist der Beleg dafuer, dass das Eingelesene wirklich da ist. */
+function titelInDerListe(){
+  try{ return zuZeilen(ALL().filter(matches)).length; }
+  catch(e){ return (BS_KATALOG.titel||[]).length; }
+}
 async function empfangen(files){
   const liste=[...(files||[])].filter(Boolean);
   if(!liste.length) return;
@@ -3639,8 +3709,10 @@ function empfangenBuchFlow(pdfs){
       c.textContent=b.name;
       c.onclick=async()=>{ closeSheet();
         const z=await importPdfs(b.bid, pdfs, true);
-        await loadLibrary(); render();
-        alert(z+(z===1?' Blatt':' Blätter')+' in „'+b.name+'" aufgenommen.'); };
+        await loadLibrary(); const eng=nachImportZeigen();
+        alert(z+(z===1?' Blatt':' Blätter')+' in „'+b.name+'" aufgenommen.'
+          +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
+          +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : '')); };
       wrap.append(c);
     });
     card.append(wrap);
@@ -3654,8 +3726,10 @@ function empfangenBuchFlow(pdfs){
       closeSheet();
       const bid=buch.id||buch;
       const z=await importPdfs(bid, pdfs, true);
-      await loadLibrary(); render();
-      alert(z+(z===1?' Blatt':' Blätter')+' in „'+v+'" aufgenommen.');
+      await loadLibrary(); const eng=nachImportZeigen();
+      alert(z+(z===1?' Blatt':' Blätter')+' in „'+v+'" aufgenommen.'
+        +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
+        +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
     };
     nr.querySelector('#mkb').onclick=anlegen;
     const close=document.createElement('div'); close.className='row'; close.style.marginTop='12px';
@@ -4913,7 +4987,9 @@ async function importPdfs(bid, files, stumm){
   const saetze=liste.map(file=>{
     const name=file.name||'Stück';
     let z=nameZerlegen(name, ' - ');
-    if(z.rest){ if(stimmeAmAnfang(z.titel) && !stimmeAmAnfang(z.rest)) z={titel:z.rest, rest:z.titel}; }
+    /* Vertauscht wird nur, wenn der vordere Teil NICHTS ALS eine Stimme ist.
+       „Alt - Blue Bossa" gehoert getauscht, „Tenor Madness - C" nicht. */
+    if(z.rest){ if(nurStimme(z.titel) && !nurStimme(z.rest)) z={titel:z.rest, rest:z.titel}; }
     else { const t=titelVorStimme(name); if(t) z=t; }
     /* Unerkanntes bekommt „Not Assigned" und geht mit — dieselbe Regel wie im
        grossen Import seit dem 1. August. Ohne sie bleibt das Blatt ganz ohne
@@ -5210,8 +5286,11 @@ function openLibrarySheet(){
    dem Zahnrad ist der einzige in der Seitenleiste, der keine Sicht traegt. */
 document.getElementById('libBtn').onclick=()=>{
   if(!window.dateiWaehlen){ alert('Der Empfang steht erst nach dem vollständigen Laden bereit.'); return; }
-  window.dateiWaehlen(fs=>empfangen(fs),
-    'application/pdf,.pdf,application/zip,.zip', true);
+  /* OHNE Filter. Auf iOS greifen `accept`-Angaben nicht zuverlaessig: Eine
+     ZIP-Datei stand im Dateien-Dialog grau da und liess sich nicht antippen —
+     damit war der Weg fuer ein ganzes Buch zu. Lieber alles anbieten und
+     hinterher sagen, was nicht geht; das tut `empfangen` ohnehin. */
+  window.dateiWaehlen(fs=>empfangen(fs), '', true);
 };
 
 /* ---------- Baustein 3a: Metadaten-Korrektur der Großsammlung ---------- */
@@ -5341,8 +5420,13 @@ async function zipAlsOrdner(zip, zipName){
     const n=await importPdfs(bid, files, true);
     gesamt+=n; bericht.push(buchName+': '+n+(n===1?' Blatt':' Blätter'));
   }
-  await loadLibrary(); render();
-  alert('Eingelesen: '+gesamt+(gesamt===1?' Blatt':' Blätter')+'\n\n'+bericht.join('\n'));
+  await loadLibrary();
+  const engeWar=nachImportZeigen();
+  alert('Eingelesen: '+gesamt+(gesamt===1?' Blatt':' Blätter')+'\n\n'+bericht.join('\n')
+    +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
+    +(engeWar ? '\n\nDie Liste war eingeschränkt — auf bestimmte Bücher, einen '
+              + 'Anfangsbuchstaben, eine Suche oder eine andere Ansicht. Sie steht '
+              + 'jetzt auf „Alle", damit Du das Eingelesene siehst.' : ''));
 }
 /* Einlesen. Es kennt zwei Formen: den neuen Katalog und das alte
    Sammlungspaket, damit frueher erzeugte Pakete nicht verloren sind.
@@ -5427,12 +5511,15 @@ async function importPackage(file){
      30. Juli ein Ueberrest: Das Einlesen wird aus Content angestossen, und
      dorthin gehoert die Rueckkehr — nicht in ein Fenster, das der Nutzer nicht
      gerufen hat. */
-  await loadLibrary(); render();
+  await loadLibrary();
   if(window.cPruef) cPruef.gehe([]);
+  const eng=nachImportZeigen();
   alert('Paket eingelesen.\n'+dazu+' Element'+(dazu===1?'':'e')+' hinzugefügt'
     +(schonDa?', '+schonDa+' schon vorhanden':'')
     +(ohneDatei?', '+ohneDatei+' ohne Datei übergangen':'')
-    +(neueBuecher?'\n'+neueBuecher+' Buch/Bücher angelegt':''));
+    +(neueBuecher?'\n'+neueBuecher+' Buch/Bücher angelegt':'')
+    +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
+    +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
 }
 /* Ein Sammelbuch fuer Stuecke, deren Buch im Paket fehlt. */
 let _sammelBid=null;
@@ -6922,7 +7009,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Gedruckt wird gezeichnet, abgelegt wird gezogen';
+const APP_BUILD='2026-08-02 · Eingelesenes ist sichtbar';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
