@@ -512,10 +512,18 @@
      `setPointerCapture`. Sie liegt ueber dem Betrachter und unter der Leiste. */
   .selbar-fang{position:fixed;inset:0;z-index:94;display:none}
   body[data-selbar-zieht] .selbar-fang{display:block}
-  /* Liegt eine Datei ueber der Liste, sagt es die Liste. Ohne dieses Zeichen
-     weiss niemand, dass man hier ablegen darf. */
-  body[data-ablage] #listcol{outline:2px dashed var(--accent-edge);outline-offset:-6px;
-    background:var(--accent-wash)}
+  /* Liegt eine Datei ueber dem Fenster, sagt es das Fenster. Die Marke lag
+     bis zum 2. August auf der Listenspalte — in der geteilten Ansicht des
+     iPads ist die aber gar nicht zu sehen, wenn ein Blatt offen ist. Deshalb
+     ein Streifen ueber allem, der sagt, was beim Loslassen geschieht. */
+  #ablageZeichen{position:fixed;inset:0;z-index:97;display:none;
+    align-items:center;justify-content:center;pointer-events:none;
+    background:var(--accent-wash-strong)}
+  #ablageZeichen span{background:var(--bg-elev);color:var(--text);
+    border:2px dashed var(--accent-edge);border-radius:var(--r-16);
+    padding:18px 26px;font:700 15px/1.3 var(--font-sans);
+    box-shadow:var(--shadow-dlg);max-width:80vw;text-align:center}
+  body[data-ablage] #ablageZeichen{display:flex}
   /* Die Auswahl-Leiste gehoert der Hauptliste. Steht Setup offen, verdeckte
      sie dessen Werkzeugleiste — und seit „Im Content zeigen" ist genau das
      der uebliche Weg. Die Auswahl bleibt stehen und kommt beim Schliessen
@@ -1517,6 +1525,7 @@
   <div class="selbar-actions" id="selActions"></div>
 </div>
 <div class="selbar-fang" id="selbarFang"></div>
+<div id="ablageZeichen"><span>Loslassen, um die Noten aufzunehmen</span></div>
 
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 
@@ -3670,24 +3679,35 @@ async function geteiltesAbholen(){
    Tueren davor. Ob iPadOS-Safari eine Datei aus einer fremden App wirklich
    als Ablage durchreicht, kann nur Jens sagen — am Mac ist es geprueft. */
 function ablageAnmelden(){
-  const ziel=document.getElementById('listcol') || document.getElementById('main');
-  if(!ziel) return;
+  /* Angemeldet wird am ganzen Dokument, nicht an der Listenspalte.
+
+     Der Grund kam am 2. August vom iPad: In der geteilten Ansicht ist das
+     Fenster schmal, BandStand geht ins Hochformat, und dort schliessen Noten
+     und Liste einander aus. Wer gerade ein Blatt offen hat, sieht keine
+     Liste — und haette nichts, worauf er ziehen koennte. Eine Ablageflaeche,
+     die nur auf der Liste liegt, ist genau dann nicht da, wenn man sie
+     braucht. Jetzt nimmt das ganze Fenster an. */
+  const nurDateien = dt => !!dt && [...(dt.types||[])].includes('Files');
+  const eigenerZug = e => !!(e.target && e.target.closest
+                        && e.target.closest('[data-zielflaeche]'));
+  const gesperrt = () => {
+    const ed=document.getElementById('editor');
+    return !!(ed && ed.classList.contains('open'));   /* nicht beim Zeichnen */
+  };
   const halt=e=>{ e.preventDefault(); e.stopPropagation(); };
-  ['dragenter','dragover'].forEach(n=>ziel.addEventListener(n, e=>{
-    /* Nur Dateien, nicht die eigene Sortiergeste in Setlisten und Tags. */
-    const dt=e.dataTransfer; if(!dt) return;
-    if(![...(dt.types||[])].includes('Files')) return;
-    halt(e); dt.dropEffect='copy'; document.body.dataset.ablage='1';
+  ['dragenter','dragover'].forEach(n=>document.addEventListener(n, e=>{
+    if(!nurDateien(e.dataTransfer) || eigenerZug(e) || gesperrt()) return;
+    halt(e); e.dataTransfer.dropEffect='copy'; document.body.dataset.ablage='1';
   }));
-  ['dragleave','dragend'].forEach(n=>ziel.addEventListener(n, e=>{
-    if(n==='dragleave' && ziel.contains(e.relatedTarget)) return;
+  ['dragleave','dragend'].forEach(n=>document.addEventListener(n, e=>{
+    /* Nur loeschen, wenn der Zeiger das Fenster wirklich verlassen hat. */
+    if(n==='dragleave' && e.relatedTarget) return;
     delete document.body.dataset.ablage;
   }));
-  ziel.addEventListener('drop', e=>{
-    const dt=e.dataTransfer;
-    if(!dt || ![...(dt.types||[])].includes('Files')) return;
+  document.addEventListener('drop', e=>{
+    if(!nurDateien(e.dataTransfer) || eigenerZug(e) || gesperrt()) return;
     halt(e); delete document.body.dataset.ablage;
-    const files=[...(dt.files||[])];
+    const files=[...(e.dataTransfer.files||[])];
     if(files.length) empfangen(files);
   });
 }
@@ -7009,7 +7029,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Eingelesenes ist sichtbar';
+const APP_BUILD='2026-08-02 · Ablegen geht im ganzen Fenster';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
