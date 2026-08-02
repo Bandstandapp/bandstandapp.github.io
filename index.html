@@ -2196,11 +2196,54 @@ window.stimmeAmAnfang = stimmeAmAnfang;
    `saetze` = [{instrument, rest}] und bekommt `.etikett` gesetzt.
    `vorhandene` = Instrumente der Blaetter, die am Stueck schon haengen. */
 const ETIKETT_ZUSATZ=/(^|[\s_\-–—]+)(neu|new|kopie|copy|final)\s*\d*(?=$|[\s_\-–—])/gi;
+/* Eine Nummer am Ende eines Etiketts abschneiden.
+
+   Jens' Bandnoten tragen im Dateinamen eine Katalognummer: „Cute Alt 1 612".
+   Das Etikett ist bewusst seine Schreibweise und nicht die gerechnete, und
+   deshalb stand die 612 auf dem Schalter. Sie bedeutet nichts, und am
+   3. August hat er gebeten, sie wegzulassen.
+
+   Abgeschnitten wird nur eine Gruppe von DREI oder mehr Ziffern am Ende.
+   „Alt 1" und „Git 2" bleiben damit unangetastet — dort unterscheidet die
+   Nummer zwei Stimmen desselben Instruments, und das ist ihr ganzer Zweck. */
+function etikettOhneNummer(s){
+  const t=String(s||'').trim();
+  if(/^\d{3,}$/.test(t)) return '';               /* nur die Nummer */
+  return t.replace(/[\s_\-–—]+\d{3,}$/,'').trim();
+}
+window.etikettOhneNummer = etikettOhneNummer;
+/* Welche Etiketten im Bestand tragen noch eine solche Nummer? Die Regel oben
+   greift beim Import; was vorher hereinkam, traegt sie weiter. */
+function etikettenMitNummer(){
+  return (BS_KATALOG.elemente||[]).filter(e=>{
+    const et=(e.etikett||'').trim(); if(!et) return false;
+    return etikettOhneNummer(et)!==et;
+  });
+}
+async function nummernAusEtiketten(){
+  const treffer=etikettenMitNummer();
+  if(!treffer.length){ alert('Kein Etikett trägt eine Nummer am Ende.'); return 0; }
+  const neuVon = e => etikettOhneNummer(e.etikett) || (e.instrument||'');
+  const zeig=treffer.slice(0,8).map(e=>'· '+e.etikett+'  →  '+(neuVon(e)||'(ohne)'));
+  if(!confirm(treffer.length+(treffer.length===1?' Etikett trägt':' Etiketten tragen')
+    +' eine Nummer am Ende:\n\n'+zeig.join('\n')
+    +(treffer.length>8?'\n… und '+(treffer.length-8)+' weitere':'')
+    +'\n\nDie Nummern entfernen?\n\nDas Blatt selbst bleibt unangetastet — nur die '
+    +'Beschriftung auf dem Schalter ändert sich. Rückgängig geht es über „Bearbeiten".')) return 0;
+  let n=0;
+  for(const e of treffer){
+    try{ await BS.aendern('element', e.id, {etikett:neuVon(e)}); n++; }catch(_){}
+  }
+  await loadLibrary(); render();
+  alert(n+(n===1?' Etikett':' Etiketten')+' aufgeräumt.');
+  return n;
+}
+window.nummernAusEtiketten = nummernAusEtiketten;
 function etikettSauber(r){
-  return String(r||'')
+  return etikettOhneNummer(String(r||'')
     .replace(ETIKETT_ZUSATZ,' ')
     .replace(/[\s_\-–—:.,]+/g,' ')
-    .replace(/\s+/g,' ').trim().slice(0,18);
+    .replace(/\s+/g,' ').trim()).slice(0,18);
 }
 /* `vorhandene` sind die Blaetter, die am Stueck schon haengen.
 
@@ -4807,7 +4850,7 @@ function renderOneSet(main){
       <div class="main">
       <div class="tline"><div class="title">${i+1}. ${esc(t.t)}</div>
       ${aktionenHTML(tt.length>0,prac,star)}</div>
-      <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}</div>
+      <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}${seitenzahl(t)}</div>
       ${tagZeile(tt)}
       ${stimmenZeile(grp, t)}</div>
       <div class="iconbtn" data-a="rm" title="Aus der Setliste nehmen"><i class="i ic-x"></i></div>`;
@@ -7096,7 +7139,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-03 · Drucken ohne zweites Fenster, eigene Stimme zuerst';
+const APP_BUILD='2026-08-03 · Etiketten ohne Katalognummer, Seitenzahl in der Setliste';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -9636,6 +9679,18 @@ setTimeout(ablageAnmelden, 0);
       const z_korb=zeile('Papierkorb','Entferntes zurückholen oder endgültig löschen');
       z_korb._ctl.append(knopf('Öffnen ›', ()=>{ cKorb=true; zeichne(); }));
       w.append(karte(null,[z_add, z_alle, z_korb]));
+
+      /* Die Zeile steht nur da, solange es etwas aufzuraeumen gibt — danach
+         verschwindet sie von selbst. Ein Angebot, das sich erledigt, muss
+         nicht dauerhaft Platz einnehmen. */
+      const mitNr=etikettenMitNummer();
+      if(mitNr.length){
+        const z_nr=zeile('Nummern in den Etiketten',
+          mitNr.length+' Stimmen tragen eine Nummer am Ende, etwa „'+esc(mitNr[0].etikett)+'". '
+          +'Sie stammt aus dem Dateinamen. „Alt 1" und „Git 2" bleiben unangetastet.');
+        z_nr._ctl.append(knopf('Aufräumen', async()=>{ await nummernAusEtiketten(); zeichne(); }));
+        w.append(karte(null,[z_nr]));
+      }
     }
 
     /* Der Suchschlitz — nur auf der flachen Ebene, wo die Liste lang wird. */
