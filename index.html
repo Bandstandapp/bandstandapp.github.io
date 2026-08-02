@@ -512,6 +512,10 @@
      `setPointerCapture`. Sie liegt ueber dem Betrachter und unter der Leiste. */
   .selbar-fang{position:fixed;inset:0;z-index:94;display:none}
   body[data-selbar-zieht] .selbar-fang{display:block}
+  /* Liegt eine Datei ueber der Liste, sagt es die Liste. Ohne dieses Zeichen
+     weiss niemand, dass man hier ablegen darf. */
+  body[data-ablage] #listcol{outline:2px dashed var(--accent-edge);outline-offset:-6px;
+    background:var(--accent-wash)}
   /* Die Auswahl-Leiste gehoert der Hauptliste. Steht Setup offen, verdeckte
      sie dessen Werkzeugleiste — und seit „Im Content zeigen" ist genau das
      der uebliche Weg. Die Auswahl bleibt stehen und kommt beim Schliessen
@@ -1429,7 +1433,7 @@
     <div><div class="word">Band<b>Stand</b></div><div class="count" id="count"></div></div>
   </div>
   <div style="display:flex;gap:8px;margin-left:auto">
-    <div class="iconbtn" id="libBtn" title="Empfangen: ein Blatt oder ein BandStand-Paket"><i class="i ic-upload" style="width:20px;height:20px"></i></div>
+    <div class="iconbtn" id="libBtn" title="Empfangen: ein Blatt oder ein BandStand-Paket"><i class="i ic-download" style="width:20px;height:20px"></i></div>
     <div class="iconbtn" id="settingsBtn" title="Daten &amp; Offline"><i class="i ic-settings" style="width:22px;height:22px"></i></div>
   </div>
   </div>
@@ -3204,7 +3208,14 @@ function druckStil(){
     .bs-seite{ height:100vh; overflow:hidden; box-sizing:border-box;
                break-after:page; page-break-after:always }
     .bs-seite.letzte{ break-after:auto; page-break-after:auto }
-    .bs-blatt embed{ display:block; width:100%; height:100%; border:0 }
+    /* Ein Bild je Seite, in die Druckseite eingepasst und nie beschnitten.
+       Frueher stand hier ein embed mit dem PDF; siehe pdfAlsSeitenbilder.
+       ACHTUNG: Dieser Block steht in einer Vorlagen-Zeichenkette. Ein
+       rueckwaerts geneigtes Anfuehrungszeichen schliesst sie hier mitten im
+       Kommentar — genau daran ist der erste Anlauf gescheitert. */
+    .bs-blatt{ display:flex; align-items:center; justify-content:center; background:#fff }
+    .bs-blatt img{ max-width:100%; max-height:100%; width:auto; height:auto;
+                   display:block; border:0 }
     .bs-programm{ padding:20mm 18mm }
     .bs-programm h1{ font-size:22pt; margin:0 0 2mm }
     .bs-programm .unter{ color:#555; font-size:10pt; margin:0 0 8mm }
@@ -3237,17 +3248,65 @@ function druckFenster(titel){
   const w=window.open('','_blank');
   if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return null; }
   w.document.write('<html><head><title>'+esc(titel)+'</title></head><body style="margin:0;font:14px system-ui;color:#222">'
-    +'<p style="padding:16px">Blätter werden geholt…</p></body></html>');
+    +'<p id="fort" style="padding:16px">Blätter werden geholt…</p></body></html>');
   return w;
 }
-function druckSchreiben(w, titel, programm, items){
-  const mitBytes=items.filter(t=>t.f);
-  const blaetter=mitBytes.map((t,i)=>
-    '<div class="bs-seite bs-blatt'+(i===mitBytes.length-1?' letzte':'')+'">'
-    + '<embed src="'+encodeURI(t.f)+'" type="application/pdf"></div>').join('');
+function druckFortschritt(w, text){
+  try{ const p=w.document.getElementById('fort'); if(p) p.textContent=text; }catch(e){}
+}
+/* ================================================================
+   Ein Blatt wird zum Drucken gezeichnet, nicht eingebettet
+
+   Bis zum 2. August stand je Stueck ein `<embed>` mit dem PDF im
+   Druckdokument. Das war an zwei Stellen nicht zu retten.
+
+   Erstens zeigt ein `<embed>` nur den Anfang des Dokuments. Ein mehrseitiges
+   Stueck wurde ab Seite zwei weder angezeigt noch gedruckt — man haette
+   scrollen muessen, und Drucken scrollt nicht.
+
+   Zweitens entscheidet der PDF-Betrachter des Browsers selbst ueber Massstab
+   und Ausschnitt. Auf Jens' iPad hat er die Blaetter rechts und unten
+   abgeschnitten, und dagegen half keine Angabe im Stilblatt: Was in dem
+   Rahmen geschieht, gehoert dem Betrachter und nicht der Seite.
+
+   Gezeichnet wird jetzt mit PDF.js, ein Bild je SEITE. Dieselbe Bibliothek,
+   die auch die Buehne benutzt, aber ein eigener Weg — der Safari-Betrachter
+   wird nicht angefasst. Dasselbe Vorgehen wie beim Foto, das als eigenes PDF
+   gebaut wird, statt den Betrachter zu biegen.
+   ================================================================ */
+async function pdfAlsSeitenbilder(url){
+  if(!window.pdfjsLib) throw new Error('PDF.js steht nicht bereit.');
+  const buf=await (await fetch(encodeURI(url))).arrayBuffer();
+  const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+  const bilder=[];
+  for(let n=1; n<=doc.numPages; n++){
+    const s=await doc.getPage(n);
+    const eins=s.getViewport({scale:1});
+    /* 1400 Bildpunkte auf der langen Kante ergeben bei A4 rund 170 dpi:
+       fein genug fuer Notensatz und Handschrift, und ein Blatt wiegt als
+       JPEG ein paar hundert Kilobyte statt einiger Megabyte. */
+    const lang=Math.max(eins.width, eins.height);
+    const vp=s.getViewport({scale:1400/lang});
+    const c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round(vp.width)); c.height=Math.max(1,Math.round(vp.height));
+    const ctx=c.getContext('2d');
+    /* Weisser Grund: Ein gescanntes Blatt ist weiss, und eine Leinwand ist
+       durchsichtig. Ohne das kaeme Schwarz auf Schwarz aus dem Drucker. */
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+    await s.render({canvasContext:ctx, viewport:vp}).promise;
+    bilder.push(c.toDataURL('image/jpeg',0.85));
+  }
+  try{ doc.destroy(); }catch(e){}
+  return bilder;
+}
+function druckSchreiben(w, titel, programm, seitenbilder){
+  const bilder=seitenbilder||[];
+  const blaetter=bilder.map((src,i)=>
+    '<div class="bs-seite bs-blatt'+(i===bilder.length-1?' letzte':'')+'">'
+    + '<img src="'+src+'" alt=""></div>').join('');
   /* Gibt es keine Blaetter, traegt das Programm das Ende — sonst faellt hinter
      ihm eine leere Seite heraus. */
-  const prog = programm && !mitBytes.length
+  const prog = programm && !bilder.length
     ? programm.replace('class="bs-seite bs-programm"','class="bs-seite bs-programm letzte"')
     : (programm||'');
   /* Nach dem Drucken schliesst sich das Fenster von selbst; bricht man ab,
@@ -3255,11 +3314,21 @@ function druckSchreiben(w, titel, programm, items){
      Fenster, das ein Skript geoeffnet hat — und dieses hier ist eines. */
   const leiste='<div class="bs-leiste"><button onclick="window.close()">‹ Zurück zu BandStand</button>'
     + '<span class="hinweis">Dieser Streifen wird nicht mitgedruckt.</span></div>';
+  /* Gedruckt wird erst, wenn alle Seitenbilder da sind. Ein `setTimeout` auf
+     gut Glueck druckte sonst leere Seiten, sobald ein Blatt laenger brauchte.
+     Die Notbremse nach acht Sekunden sorgt dafuer, dass ein einzelnes
+     stummes Bild den Druck nicht ganz verhindert. */
+  const anstoss = '<script>(function(){var g=false;'
+    + 'function los(){if(g)return;g=true;setTimeout(function(){window.print();},250);}'
+    + 'window.onafterprint=function(){window.close();};'
+    + 'var b=[].slice.call(document.images),n=b.length,f=0;'
+    + 'if(!n){los();return;}'
+    + 'b.forEach(function(i){if(i.complete){if(++f===n)los();return;}'
+    + 'i.onload=i.onerror=function(){if(++f===n)los();};});'
+    + 'setTimeout(los,8000);})()<\/script>';
   w.document.open();
   w.document.write('<html><head><title>'+esc(titel)+'</title>'+druckStil()+'</head><body>'
-    + leiste + prog + blaetter
-    + '<script>window.onafterprint=()=>window.close();'
-    + 'setTimeout(()=>window.print(),900)<\/script></body></html>');
+    + leiste + prog + blaetter + anstoss + '</body></html>');
   w.document.close();
 }
 /* In einer offenen Setliste druckt „Drucken" das Programm voran: erst der Name
@@ -3276,7 +3345,25 @@ async function bulkPrint(){
   const name = st ? st.name : ('Auswahl ('+items.length+')');
   const w=druckFenster(name); if(!w) return;
   await urlSichernViele(items);
-  druckSchreiben(w, name, st?programmHTML(st.name, items):null, items);
+  const bilder=[], schief=[];
+  const mitBytes=items.filter(t=>t.f);
+  try{
+    let n=0;
+    for(const t of mitBytes){
+      n++;
+      druckFortschritt(w, 'Blatt '+n+' von '+mitBytes.length+' wird gezeichnet…');
+      try{ bilder.push(...await pdfAlsSeitenbilder(t.f)); }
+      catch(e){ schief.push(t.t||'ein Blatt'); }
+    }
+  } finally {
+    /* Die geliehenen Verweise gleich zurueckgeben: Die Seitenbilder tragen
+       ihre Daten selbst, das Druckdokument braucht die Dateien nicht mehr. */
+    urlFreigebenViele(items);
+  }
+  druckSchreiben(w, name, st?programmHTML(st.name, items):null, bilder);
+  if(schief.length)
+    alert('Nicht gezeichnet: '+schief.join(', ')
+      +'\n\nDie übrigen Blätter sind im Druck.');
 }
 
 /* ================================================================
@@ -3500,6 +3587,39 @@ async function geteiltesAbholen(){
     }
     if(files.length) await empfangen(files);
   }catch(e){}
+}
+/* Die dritte Tuer: eine Datei auf die Liste ziehen.
+
+   Auf dem iPad laesst sich in der geteilten Ansicht eine Datei aus „Dateien"
+   in die daneben liegende App ziehen; am Mac geht dasselbe aus dem Finder.
+   Damit entfaellt der Weg ueber die Dateiauswahl, und die Sendung landet mit
+   einem Zug im Bestand.
+
+   Der Baustein war schon da, aber nur auf der Seite „Noten hinzufügen". Hier
+   fuehrt er in dasselbe `empfangen` wie der Knopf: ein Weg herein, drei
+   Tueren davor. Ob iPadOS-Safari eine Datei aus einer fremden App wirklich
+   als Ablage durchreicht, kann nur Jens sagen — am Mac ist es geprueft. */
+function ablageAnmelden(){
+  const ziel=document.getElementById('listcol') || document.getElementById('main');
+  if(!ziel) return;
+  const halt=e=>{ e.preventDefault(); e.stopPropagation(); };
+  ['dragenter','dragover'].forEach(n=>ziel.addEventListener(n, e=>{
+    /* Nur Dateien, nicht die eigene Sortiergeste in Setlisten und Tags. */
+    const dt=e.dataTransfer; if(!dt) return;
+    if(![...(dt.types||[])].includes('Files')) return;
+    halt(e); dt.dropEffect='copy'; document.body.dataset.ablage='1';
+  }));
+  ['dragleave','dragend'].forEach(n=>ziel.addEventListener(n, e=>{
+    if(n==='dragleave' && ziel.contains(e.relatedTarget)) return;
+    delete document.body.dataset.ablage;
+  }));
+  ziel.addEventListener('drop', e=>{
+    const dt=e.dataTransfer;
+    if(!dt || ![...(dt.types||[])].includes('Files')) return;
+    halt(e); delete document.body.dataset.ablage;
+    const files=[...(dt.files||[])];
+    if(files.length) empfangen(files);
+  });
 }
 /* Wohin gehoert die Sendung? Gefragt wird einmal und nur nach dem Buch — den
    Titel liest der Import aus dem Dateinamen, und ob er an einen vorhandenen
@@ -6802,7 +6922,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Ordner werden Buecher, Werkzeuge nennen ihre Ebene';
+const APP_BUILD='2026-08-02 · Gedruckt wird gezeichnet, abgelegt wird gezogen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -6857,6 +6977,8 @@ if('serviceWorker' in navigator){
 render();
 /* eigene importierte Noten aus IndexedDB nachladen und Liste aktualisieren */
 loadLibrary().then(render).then(geteiltesAbholen).catch(()=>{});
+/* Erst nach dem Geruest von Schritt 4: `#listcol` entsteht dort. */
+setTimeout(ablageAnmelden, 0);
 
 /* ============================================================================
    Cloud-Abgleich (Dropbox) — Phase 4, Baustein „Cloud-Abgleich"
