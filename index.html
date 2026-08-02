@@ -1406,7 +1406,7 @@
     <div><div class="word">Band<b>Stand</b></div><div class="count" id="count"></div></div>
   </div>
   <div style="display:flex;gap:8px;margin-left:auto">
-    <div class="iconbtn" id="libBtn" title="Eigene Noten importieren & verwalten" style="font-size:26px">＋</div>
+    <div class="iconbtn" id="libBtn" title="Empfangen: ein Blatt oder ein BandStand-Paket"><i class="i ic-upload" style="width:20px;height:20px"></i></div>
     <div class="iconbtn" id="settingsBtn" title="Daten &amp; Offline"><i class="i ic-settings" style="width:22px;height:22px"></i></div>
   </div>
   </div>
@@ -3139,16 +3139,102 @@ async function bulkShare(){
   alert('Weitergeben ist hier nicht verfügbar (nur über localhost oder die veröffentlichte Adresse bzw. die installierte App). Ich öffne stattdessen den Druck-Dialog.');
   bulkPrint();
 }
+/* ================================================================
+   Drucken
+
+   Der Seitenumbruch hat lange nicht gestimmt: Von jedem Notenblatt rutschte
+   die letzte Zeile des Systems auf eine zweite Seite. Drei Ursachen, alle drei
+   hier behoben.
+
+   Erstens hatte der Rahmen eine feste Hoehe von 1000 Pixeln. Wie hoch eine
+   Druckseite ist, weiss das Blatt aber erst beim Drucken, und auf A4 sind
+   1000 px zu viel. `100vh` fragt die Seite selbst.
+
+   Zweitens ist `<embed>` von Haus aus ein Zeilen-Element. Unter ihm bleibt der
+   Platz fuer Unterlaengen stehen — ein paar Pixel, die genau diesen Ueberlauf
+   ergeben. `display:block` nimmt ihn weg.
+
+   Drittens brachte die Seite den voreingestellten Rand des Browsers mit, und
+   der kam zur Hoehe hinzu. `@page{margin:0}` setzt ihn auf null; seinen Rand
+   bringt das gescannte Blatt selbst mit.
+
+   Das letzte Blatt bekommt keinen Umbruch mehr, sonst faellt hinten eine leere
+   Seite heraus.
+   ================================================================ */
+function druckStil(){
+  return `<style>
+    @page{ size:auto; margin:0 }
+    html,body{ margin:0; padding:0 }
+    body{ font:14px/1.45 system-ui,-apple-system,sans-serif; color:#111 }
+    .bs-seite{ height:100vh; overflow:hidden; box-sizing:border-box;
+               break-after:page; page-break-after:always }
+    .bs-seite.letzte{ break-after:auto; page-break-after:auto }
+    .bs-blatt embed{ display:block; width:100%; height:100%; border:0 }
+    .bs-programm{ padding:20mm 18mm }
+    .bs-programm h1{ font-size:22pt; margin:0 0 2mm }
+    .bs-programm .unter{ color:#555; font-size:10pt; margin:0 0 8mm }
+    .bs-programm ol{ margin:0; padding-left:8mm; font-size:12pt }
+    .bs-programm li{ margin:0 0 3.5mm; break-inside:avoid }
+    .bs-programm .wer{ color:#555; font-size:10pt }
+    .bs-programm .tags{ margin-top:1mm }
+    .bs-programm .tag{ font-size:8.5pt; border:1px solid #999; border-radius:9px;
+                       padding:0 6px; margin-right:4px; display:inline-block; white-space:nowrap }
+  </style>`;
+}
+/* Das erste Blatt: der Name der Liste, darunter die Titel in ihrer Reihenfolge
+   mit Komponist, Buch und den vergebenen Tags. Am 2. August von Jens verlangt. */
+function programmHTML(name, items){
+  const zeilen=items.map(t=>{
+    const tags=gruppeTagIds(t).map(id=>{ const g=tagById(id); return g?g.name:null; }).filter(Boolean);
+    const wer=[t.c, bookName(t)].filter(Boolean).map(esc).join(' · ');
+    return '<li><b>'+esc(t.t)+'</b>'
+      + (wer ? '<div class="wer">'+wer+'</div>' : '')
+      + (tags.length ? '<div class="tags">'+tags.map(n=>'<span class="tag">'+esc(n)+'</span>').join('')+'</div>' : '')
+      + '</li>';
+  }).join('');
+  return '<div class="bs-seite bs-programm"><h1>'+esc(name)+'</h1>'
+    + '<div class="unter">'+items.length+(items.length===1?' Titel':' Titel')+'</div>'
+    + '<ol>'+zeilen+'</ol></div>';
+}
 /* Das Fenster wird VOR dem Warten geoeffnet. Nach einem `await` gilt der Klick
    nicht mehr als Nutzerhandlung, und der Pop-up-Blocker haelt es zurueck. */
-async function bulkPrint(){
-  const items=[...S.selection].map(k=>byKey[k]).filter(t=>t&&!t.isEdit); if(!items.length){ alert('Keine druckbaren Titel ausgewählt.'); return; }
-  const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
-  w.document.write('<html><head><title>Auswahl ('+items.length+')</title></head><body style="margin:0;font:14px system-ui;color:#222"><p style="padding:16px">Blätter werden geholt…</p></body></html>');
-  await urlSichernViele(items);
-  const embeds=items.filter(t=>t.f).map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
+function druckFenster(titel){
+  const w=window.open('','_blank');
+  if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return null; }
+  w.document.write('<html><head><title>'+esc(titel)+'</title></head><body style="margin:0;font:14px system-ui;color:#222">'
+    +'<p style="padding:16px">Blätter werden geholt…</p></body></html>');
+  return w;
+}
+function druckSchreiben(w, titel, programm, items){
+  const mitBytes=items.filter(t=>t.f);
+  const blaetter=mitBytes.map((t,i)=>
+    '<div class="bs-seite bs-blatt'+(i===mitBytes.length-1?' letzte':'')+'">'
+    + '<embed src="'+encodeURI(t.f)+'" type="application/pdf"></div>').join('');
+  /* Gibt es keine Blaetter, traegt das Programm das Ende — sonst faellt hinter
+     ihm eine leere Seite heraus. */
+  const prog = programm && !mitBytes.length
+    ? programm.replace('class="bs-seite bs-programm"','class="bs-seite bs-programm letzte"')
+    : (programm||'');
   w.document.open();
-  w.document.write(`<html><head><title>Auswahl (${items.length})</title></head><body style="margin:0">${embeds}<script>setTimeout(()=>window.print(),900)<\/script></body></html>`); w.document.close();
+  w.document.write('<html><head><title>'+esc(titel)+'</title>'+druckStil()+'</head><body>'
+    + prog + blaetter + '<script>setTimeout(()=>window.print(),900)<\/script></body></html>');
+  w.document.close();
+}
+/* In einer offenen Setliste druckt „Drucken" das Programm voran: erst der Name
+   der Liste und die Titel in ihrer Reihenfolge, dann die Blaetter. Sonst nur
+   die Blaetter. Die eigenen Knoepfe im Setlisten-Kopf sind dafuer entfallen —
+   sie taten dasselbe, standen aber ueber der Liste im Weg. */
+async function bulkPrint(){
+  let items=[...S.selection].map(k=>byKey[k]).filter(t=>t&&!t.isEdit);
+  if(!items.length){ alert('Keine druckbaren Titel ausgewählt.'); return; }
+  const st = (S.view==='set' && S.openSet) ? S.sets.find(s=>s.id===S.openSet) : null;
+  /* In der Setliste zaehlt ihre Reihenfolge und nicht die der Auswahl. */
+  if(st){ const drin=new Set(S.selection);
+    items=st.items.filter(k=>drin.has(k)).map(k=>byKey[k]).filter(t=>t&&!t.isEdit); }
+  const name = st ? st.name : ('Auswahl ('+items.length+')');
+  const w=druckFenster(name); if(!w) return;
+  await urlSichernViele(items);
+  druckSchreiben(w, name, st?programmHTML(st.name, items):null, items);
 }
 
 /* ================================================================
@@ -3262,6 +3348,44 @@ function titelBearbeiten(titelId){
       card.append(r);
     });
 
+    /* Schritt 2, die kontextbezogene Haelfte: Schickt ein Kollege die Bari-Stimme
+       zu einem Stueck, das schon im Bestand steht, gehoert sie an diesen Titel
+       und nirgends sonst. Der Kontext ist damit vollstaendig, es ist nichts zu
+       fragen — nur die Datei zu waehlen. Dieselben zwei Griffe wie in Content
+       auf der Element-Ebene, hier ohne den Umweg dorthin. */
+    const neu=document.createElement('div'); neu.className='row';
+    neu.style.cssText='margin:12px 0 0;gap:8px;flex-wrap:wrap';
+    const waehle=(arten, kamera, umbau)=>{
+      if(!window.dateiWaehlen){ alert('Die Dateiwahl steht erst nach dem vollständigen Laden bereit.'); return; }
+      window.dateiWaehlen(async fs=>{
+        let z=0; const schief=[];
+        for(const f of [].concat(fs)){
+          try{
+            const {blob, art, name} = await umbau(f);
+            await BS.elementAnlegen({ titelId, art, dateiname:name, blob, np:art==='foto'?1:await BS.seitenzahl(blob) });
+            z++;
+          }catch(e){ schief.push(f.name||'eine Datei'); }
+        }
+        await loadLibrary(); render(); titelBearbeiten(titelId);
+        alert(z+(z===1?' Blatt':' Blätter')+' zu „'+(ti.titel||'diesem Titel')+'" gelegt.'
+          + (schief.length ? '\n\nNicht lesbar: '+schief.join(', ') : ''));
+      }, arten, !kamera, kamera);
+    };
+    const bl=knopf=>{ const b=document.createElement('button'); b.className='btn ghost sm';
+      b.innerHTML=knopf.html; b.onclick=knopf.tu; neu.append(b); };
+    /* Text statt Symbol bei den beiden Foto-Wegen: Der Symbolsatz der App kennt
+       weder Kamera noch Bild, und ein Emoji kommt nicht in Frage. Content
+       beschriftet dieselben zwei Griffe ebenso. */
+    bl({html:'<i class="i ic-plus"></i> Blätter', tu:()=>waehle('application/pdf,.pdf', false,
+      async f=>({blob:f, art:'blatt', name:f.name||'Blatt.pdf'}))});
+    bl({html:'Kamera', tu:()=>waehle('image/*', true,
+      async f=>({blob:await fotoAlsPDF(f), art:'foto',
+                 name:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf'}))});
+    bl({html:'Aus Fotos', tu:()=>waehle('image/*', false,
+      async f=>({blob:await fotoAlsPDF(f), art:'foto',
+                 name:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf'}))});
+    card.append(neu);
+
     const fuss=document.createElement('div'); fuss.className='row'; fuss.style.marginTop='12px';
     const weiter=document.createElement('span'); weiter.className='link';
     weiter.textContent='Im Content öffnen';
@@ -3270,6 +3394,83 @@ function titelBearbeiten(titelId){
     const ok=document.createElement('button'); ok.className='btn'; ok.textContent='Fertig';
     ok.onclick=closeSheet;
     fuss.append(weiter, luft, ok); card.append(fuss); a11y(card);
+  });
+}
+
+/* ================================================================
+   Schritt 2: der Empfang eines einzelnen Titels
+
+   Der Pruefstein aus dem Content-Konzept, Fassung 2: Einen von einem Kollegen
+   geschickten Titel ins richtige Buch zu bekommen, darf nicht mehr Handgriffe
+   kosten, als heute ein Foto hinzuzufuegen.
+
+   Der grosse Import mit Vorschau und Regeln bleibt, wo er ist — er richtet die
+   Bibliothek ein. Was hier steht, ist seine kleine Gestalt: Sie nimmt EINE
+   Sendung an und faellt dabei nicht aus der Liste heraus.
+
+   Ein Eingang, zwei Sorten. Ein nacktes PDF braucht noch ein Buch, und Titel
+   und Stimme werden wie beim grossen Import aus dem Dateinamen gelesen. Ein
+   BandStand-Paket bringt Titel und Kennung mit und fuehrt sich selbst
+   zusammen; weil die Kennungen erhalten bleiben, verdoppelt ein zweites
+   Einlesen nichts. Erkannt wird das an der Datei und nicht vom Nutzer
+   erfragt.
+   ================================================================ */
+async function empfangen(files){
+  const liste=[...(files||[])].filter(Boolean);
+  if(!liste.length) return;
+  const istPaket = f => /\.zip$/i.test(f.name||'') || /zip/i.test(f.type||'');
+  const istPdf   = f => /\.pdf$/i.test(f.name||'') || /pdf$/i.test(f.type||'');
+  const pakete=liste.filter(istPaket);
+  const pdfs  =liste.filter(f=>!istPaket(f) && istPdf(f));
+  const rest  =liste.filter(f=>!istPaket(f) && !istPdf(f));
+  if(rest.length)
+    alert('Nicht angenommen: '+rest.map(f=>f.name||'eine Datei').join(', ')
+      +'\n\nDer Empfang nimmt Notenblätter als PDF und BandStand-Pakete. '
+      +'Ein Foto legst Du über „Bearbeiten" an den Titel, zu dem es gehört.');
+  for(const p of pakete) await importPackage(p);
+  if(pdfs.length) empfangenBuchFlow(pdfs);
+}
+/* Wohin gehoert die Sendung? Gefragt wird einmal und nur nach dem Buch — den
+   Titel liest der Import aus dem Dateinamen, und ob er an einen vorhandenen
+   Titel andockt, fragt `importPdfs` selbst. */
+function empfangenBuchFlow(pdfs){
+  openSheet(card=>{
+    const n=pdfs.length;
+    card.innerHTML='<h2>'+n+(n===1?' Blatt empfangen':' Blätter empfangen')+'</h2>'
+      +'<div class="muted" style="margin:-6px 0 12px">'
+      +esc(pdfs.map(f=>f.name||'Blatt').slice(0,4).join(', '))
+      +(n>4?' und '+(n-4)+' weitere':'')
+      +'<br>Titel und Stimme werden aus dem Dateinamen gelesen. In welches Buch?</div>';
+    const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
+    if(!USERBOOKS.length) wrap.innerHTML='<div class="muted">Noch kein Buch. Lege unten eines an.</div>';
+    USERBOOKS.forEach(b=>{
+      const c=document.createElement('div'); c.className='chip';
+      c.textContent=b.name;
+      c.onclick=async()=>{ closeSheet();
+        const z=await importPdfs(b.bid, pdfs, true);
+        await loadLibrary(); render();
+        alert(z+(z===1?' Blatt':' Blätter')+' in „'+b.name+'" aufgenommen.'); };
+      wrap.append(c);
+    });
+    card.append(wrap);
+    const nr=document.createElement('div'); nr.className='row newrow'; nr.style.marginTop='10px';
+    nr.innerHTML='<input class="txt" id="nb" placeholder="Neues Buch…"><button class="btn" id="mkb">Anlegen</button>';
+    card.append(nr);
+    const anlegen=async()=>{
+      const v=nr.querySelector('#nb').value.trim(); if(!v) return;
+      let buch; try{ buch=await BS.buchAnlegen({name:v}); }
+      catch(e){ alert('Buch anlegen fehlgeschlagen: '+(e&&e.message||e)); return; }
+      closeSheet();
+      const bid=buch.id||buch;
+      const z=await importPdfs(bid, pdfs, true);
+      await loadLibrary(); render();
+      alert(z+(z===1?' Blatt':' Blätter')+' in „'+v+'" aufgenommen.');
+    };
+    nr.querySelector('#mkb').onclick=anlegen;
+    const close=document.createElement('div'); close.className='row'; close.style.marginTop='12px';
+    close.innerHTML='<button class="btn ghost" id="ab" style="flex:1">Abbrechen</button>';
+    close.querySelector('#ab').onclick=closeSheet; card.append(close);
+    a11y(card);
   });
 }
 
@@ -3956,23 +4157,11 @@ function printCurrent(t){
     try{ w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
   });
 }
-/* Diese beiden werden seit dem 2. August von niemandem mehr gerufen: Ihre
-   Knoepfe sind aus dem Setlist-Kopf gefallen, weil die Auswahl-Leiste dasselbe
-   fuer eine Auswahl leistet. Ein Unterschied bleibt und ist mit Jens noch zu
-   klaeren — `printSetlist` druckt ein nummeriertes Programm mit Namen der
-   Setliste voran, `bulkPrint` nur die Blaetter. Bis das entschieden ist,
-   bleiben sie stehen. */
-async function shareSetlist(st){
-  const items=st.items.map(k=>byKey[k]).filter(Boolean); if(!items.length) return;
-  try{
-    const files=[];
-    for(const t of items){ if(t.isEdit) continue;
-      const f=await fetchAsFile(t); if(f) files.push(f); }
-    if(files.length && navigator.canShare && navigator.canShare({files})){ await navigator.share({files, title:st.name}); return; }
-    if(navigator.share){ await navigator.share({title:st.name, text:st.name}); return; }
-  }catch(e){ if(e && e.name==='AbortError') return; }
-  printSetlist(st);
-}
+/* `shareSetlist` und `printSetlist` sind am 2. August entfallen. Sie taten fuer
+   die ganze Liste, was `bulkShare` und `bulkPrint` fuer eine Auswahl tun, und
+   das Programm der Setliste ist in `bulkPrint` aufgegangen. „Alle auswählen"
+   steht unmittelbar ueber der Liste; damit kostet die ganze Liste einen Tipp
+   mehr und keine zwei Knoepfe ueber der Liste. */
 
 /* ---------- Tags: assign to a tune ---------- */
 /* Beide Bestandteile hatten Millisekunden-Aufloesung, und damit lieferte `uid`
@@ -4302,17 +4491,6 @@ function onDragEnd(){if(!drag)return;const li=drag.li,ul=li.parentElement;
    ohnehin, sobald die Liste dasteht. Der Knopf ersetzte also nur den Tipp auf
    die erste Zeile und versprach mit seinem Play-Zeichen etwas, das er nicht
    hielt. Geblaettert wird immer durch die Liste, die in der Mitte steht. */
-async function printSetlist(st){
-  const items=st.items.map(k=>byKey[k]).filter(Boolean);
-  const w=window.open('','_blank'); if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return; }
-  w.document.write('<html><head><title>'+esc(st.name)+'</title></head><body style="font:14px system-ui;color:#222"><p style="padding:16px">Blätter werden geholt…</p></body></html>');
-  await urlSichernViele(items);
-  const list=items.map((t,i)=>`<div style="padding:4px 0"><b>${i+1}. ${esc(t.t)}</b> — ${t.c?esc(t.c)+', ':''}${esc(t.b)}, S. ${esc(t.pg)}</div>`).join('');
-  const embeds=items.filter(t=>t.f).map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
-  w.document.open();
-  w.document.write(`<html><head><title>${esc(st.name)}</title></head><body style="font-family:sans-serif"><h2>${esc(st.name)}</h2>${list}<hr>${embeds}<script>setTimeout(()=>window.print(),900)<\/script></body></html>`);
-  w.document.close();
-}
 
 /* ---------- sheet / events ---------- */
 function openSheet(b){const s=document.getElementById('sheet');b(document.getElementById('sheetCard'));s.classList.add('open');document.body.dataset.sheet='open';a11y(document.getElementById('sheetCard'));}
@@ -4537,7 +4715,7 @@ async function deleteBook(bid){ const ub=userBook(bid); if(!ub) return;
    Gehoeren die Blaetter zu Stuecken, die im Buch schon stehen, wird EINMAL
    gefragt. Stillschweigend zusammengelegt wird nichts — dieselbe Regel wie in
    der Vorschau des Bandbuch-Imports. */
-async function importPdfs(bid, files){
+async function importPdfs(bid, files, stumm){
   const liste=[...files].filter(f=>/pdf$/i.test(f.type||'') || /\.pdf$/i.test(f.name||''));
   if(!liste.length) return 0;
 
@@ -4546,7 +4724,13 @@ async function importPdfs(bid, files){
     let z=nameZerlegen(name, ' - ');
     if(z.rest){ if(stimmeAmAnfang(z.titel) && !stimmeAmAnfang(z.rest)) z={titel:z.rest, rest:z.titel}; }
     else { const t=titelVorStimme(name); if(t) z=t; }
-    const auto = blattArt(z.rest) || ((voiceAusText(z.rest)||{}).name) || '';
+    /* Unerkanntes bekommt „Not Assigned" und geht mit — dieselbe Regel wie im
+       grossen Import seit dem 1. August. Ohne sie bleibt das Blatt ganz ohne
+       Stimme, und ein Blatt ohne Stimme bildet in der Liste eine eigene Zeile:
+       Ein empfangenes „Blue Bossa - Bariton" stand dann als zweites „Blue
+       Bossa" da, obwohl es am richtigen Titel hing. Am 2. August beim Bauen
+       des Empfangs aufgefallen. */
+    const auto = blattArt(z.rest) || ((voiceAusText(z.rest)||{}).name) || OHNE_STIMME;
     return { file, pfad:name, name, kennung:name, titel:z.titel||name.replace(/\.pdf$/i,''),
              rest:z.rest||'', auto, hand:'', gruppe:'t:'+titelSchluessel(z.titel||name),
              voice:auto };
@@ -4567,7 +4751,9 @@ async function importPdfs(bid, files){
   }
 
   const n=await importBandbuch(bid, saetze);
-  openLibrarySheet();
+  /* Aus dem Empfang heraus wird das Buecher-Blatt NICHT aufgeschlagen: Wer in
+     der Liste steht und ein Blatt vom Kollegen annimmt, will dort bleiben. */
+  if(!stumm) openLibrarySheet();
   return n;
 }
 /* Ein Bandbuch schreiben. Erst hier, nach der Vorschau — vorher wird nichts
@@ -4798,7 +4984,15 @@ function openLibrarySheet(){
     close.querySelector('#libDone').onclick=closeSheet;
   });
 }
-document.getElementById('libBtn').onclick=openLibrarySheet;
+/* Der Knopf im Fuss der Seitenleiste war bis zum 30. Juli das „＋" fuer eigene
+   Noten und stand seither versteckt im Baum. Er nimmt jetzt die Sendung eines
+   Kollegen an — das ist der Nachfolger derselben Absicht, und der Platz neben
+   dem Zahnrad ist der einzige in der Seitenleiste, der keine Sicht traegt. */
+document.getElementById('libBtn').onclick=()=>{
+  if(!window.dateiWaehlen){ alert('Der Empfang steht erst nach dem vollständigen Laden bereit.'); return; }
+  window.dateiWaehlen(fs=>empfangen(fs),
+    'application/pdf,.pdf,application/zip,.zip', true);
+};
 
 /* ---------- Baustein 3a: Metadaten-Korrektur der Großsammlung ---------- */
 function resetOverride(key){ const t=byKey[key]; if(!t) return; delete OVERRIDES[key]; t.t=t._ot; t.c=t._oc; saveOverrides(); rebuildByKey(); render(); }
@@ -6439,7 +6633,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Tags, Setliste und eine Leiste, die sich schieben laesst';
+const APP_BUILD='2026-08-02 · Programm drucken und Blaetter empfangen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -7434,7 +7628,9 @@ loadLibrary().then(render).catch(()=>{});
   /* Das Plus entfaellt: Die Verwaltung der eigenen Noten sitzt jetzt im Setup
      unter „Bücher". Der Knoten bleibt versteckt im Baum, damit vorhandener
      Code ihn weiter findet. */
-  $('libBtn').style.display='none';
+  /* Der Knopf ist seit dem 2. August wieder sichtbar: Er nimmt jetzt die
+     Sendung eines Kollegen an, statt die alte Noten-Verwaltung zu oeffnen. */
+  $('libBtn').style.display='';
   $('settingsBtn').innerHTML='<i class="i ic-settings"></i>';
   $('settingsBtn').title='Setup';
   /* Die beiden Zahlen standen unter der Wortmarke und machten den Kopf
@@ -10272,6 +10468,10 @@ loadLibrary().then(render).catch(()=>{});
   function zu(){ unter=null; kopfSetzen(); delete document.body.dataset.page; if(window.layout) window.layout(); }
   /* Mit einem Thema aufgerufen springt das Setup gleich dorthin. Der Knopf in
      der Kopfzeile fuehrt so unmittelbar zur Instrumentenwahl. */
+  /* Die Dateiwahl traegt die Ruecksicht, die das iPad verlangt: Das Feld haengt
+     dauerhaft im Dokument und wird nie entfernt. Deshalb wird sie geteilt und
+     nicht nachgebaut. */
+  window.dateiWaehlen = dateiWaehlen;
   window.openSetup = function(t){ if(t && THEMEN.some(x=>x[0]===t)) thema=t; auf(); };
 
   /* Löschen, Importieren und Buch-Löschen rufen am Ende openLibrarySheet auf.
