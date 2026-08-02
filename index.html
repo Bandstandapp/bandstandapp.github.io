@@ -3722,34 +3722,59 @@ function empfangenBuchFlow(pdfs){
       +esc(pdfs.map(f=>f.name||'Blatt').slice(0,4).join(', '))
       +(n>4?' und '+(n-4)+' weitere':'')
       +'<br>Titel und Stimme werden aus dem Dateinamen gelesen. In welches Buch?</div>';
-    const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
-    if(!USERBOOKS.length) wrap.innerHTML='<div class="muted">Noch kein Buch. Lege unten eines an.</div>';
-    USERBOOKS.forEach(b=>{
-      const c=document.createElement('div'); c.className='chip';
-      c.textContent=b.name;
-      c.onclick=async()=>{ closeSheet();
-        const z=await importPdfs(b.bid, pdfs, true);
-        await loadLibrary(); const eng=nachImportZeigen();
-        alert(z+(z===1?' Blatt':' Blätter')+' in „'+b.name+'" aufgenommen.'
-          +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
-          +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : '')); };
-      wrap.append(c);
-    });
-    card.append(wrap);
-    const nr=document.createElement('div'); nr.className='row newrow'; nr.style.marginTop='10px';
-    nr.innerHTML='<input class="txt" id="nb" placeholder="Neues Buch…"><button class="btn" id="mkb">Anlegen</button>';
+    /* Ein Weg fuer beide Faelle: Das vorhandene Buch und das eben angelegte
+       unterscheiden sich nur in der Kennung. */
+    const hinein=async(bid, name)=>{
+      closeSheet();
+      const z=await importPdfs(bid, pdfs, true);
+      await loadLibrary(); const eng=nachImportZeigen();
+      alert(z+(z===1?' Blatt':' Blätter')+' in „'+name+'" aufgenommen.'
+        +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
+        +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
+    };
+
+    /* Die vorhandenen Buecher standen schon zur Wahl, aber ohne Ueberschrift
+       und ohne Zahl — und wer noch kein Buch hat, las die eine graue Zeile als
+       „geht nicht". Jens hat am 2. August berichtet, er koenne nur neu
+       anlegen. Jetzt sagen zwei Ueberschriften, dass es zwei Wege gibt, und
+       jedes Buch nennt, wie viele Titel schon darin stehen. */
+    const kopf=(text)=>{ const d=document.createElement('div'); d.className='lbl';
+      d.style.margin='14px 0 6px'; d.textContent=text; card.append(d); };
+
+    if(USERBOOKS.length){
+      kopf('In ein vorhandenes Buch');
+      const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
+      USERBOOKS.forEach(b=>{
+        const zahl=(BS_KATALOG.titel||[]).filter(t=>t.buchId===b.bid).length;
+        const c=document.createElement('div'); c.className='chip';
+        c.innerHTML=esc(b.name)+' <span class="muted">('+zahl+')</span>';
+        c.onclick=()=>hinein(b.bid, b.name);
+        wrap.append(c);
+      });
+      card.append(wrap);
+      kopf('Oder ein neues Buch anlegen');
+    } else {
+      kopf('Ein neues Buch anlegen');
+      const h=document.createElement('div'); h.className='muted';
+      h.style.margin='0 2px 8px';
+      h.textContent='Es gibt noch kein Buch. Sobald eines da ist, steht es hier zur Wahl.';
+      card.append(h);
+    }
+
+    const nr=document.createElement('div'); nr.className='row newrow'; nr.style.margin='0';
+    nr.innerHTML='<input class="txt" id="nb" placeholder="Name des Buchs, z. B. Blauton"><button class="btn" id="mkb">Anlegen</button>';
     card.append(nr);
     const anlegen=async()=>{
       const v=nr.querySelector('#nb').value.trim(); if(!v) return;
+      /* Traegt schon ein Buch diesen Namen, wird es weiterbenutzt, statt ein
+         zweites gleichen Namens danebenzustellen. Dieselbe Regel wie beim
+         gepackten Ordner. */
+      const da=USERBOOKS.find(b=>b.name.toLowerCase()===v.toLowerCase());
+      if(da) return hinein(da.bid, da.name);
       let buch; try{ buch=await BS.buchAnlegen({name:v}); }
       catch(e){ alert('Buch anlegen fehlgeschlagen: '+(e&&e.message||e)); return; }
-      closeSheet();
-      const bid=buch.id||buch;
-      const z=await importPdfs(bid, pdfs, true);
-      await loadLibrary(); const eng=nachImportZeigen();
-      alert(z+(z===1?' Blatt':' Blätter')+' in „'+v+'" aufgenommen.'
-        +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
-        +(eng ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
+      await loadLibrary();
+      hinein(buch.id||buch, v);
     };
     nr.querySelector('#mkb').onclick=anlegen;
     const close=document.createElement('div'); close.className='row'; close.style.marginTop='12px';
@@ -7029,7 +7054,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Ablegen geht im ganzen Fenster';
+const APP_BUILD='2026-08-02 · Dateiwahl ohne Filter, Buch zur Wahl';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10892,10 +10917,22 @@ setTimeout(ablageAnmelden, 0);
   /* `kamera` setzt `capture` und schickt damit direkt in die Kamera statt in
      die Dateiauswahl. Auf dem Schreibtisch bleibt es wirkungslos. */
   function dateiWaehlen(tu, arten, mehrere, kamera){
-    dateiFeld(i=>{ i.accept=arten||'application/json,.json';
-                   if(mehrere) i.multiple=true;
-                   if(kamera) i.setAttribute('capture','environment'); },
-      fs=>{ if(!fs.length) return; tu(mehrere ? fs : fs[0]); });
+    dateiFeld(i=>{
+      /* `arten` weggelassen heisst: der alte Vorgabewert fuer die
+         Einstellungs-Dateien. Ein LEERER String heisst ausdruecklich OHNE
+         Filter — und das ist etwas anderes.
+
+         Am 2. August teuer gelernt: Hier stand `arten||'…json'`, und ein
+         leerer String ist falsch. Der Empfangs-Knopf uebergab ihn, um alles
+         anzubieten, und bekam stattdessen den JSON-Filter. Im Dateien-Dialog
+         des iPads war daraufhin JEDE Datei ausgegraut — auch das ZIP mit dem
+         Bandbestand. Der Weg, auf dem ein ganzes Buch hereinkommt, war damit
+         zu, und zwar durch die Zeile, die ihn oeffnen sollte. */
+      const a = (arten===undefined || arten===null) ? 'application/json,.json' : arten;
+      if(a) i.accept=a; else i.removeAttribute('accept');
+      if(mehrere) i.multiple=true;
+      if(kamera) i.setAttribute('capture','environment');
+    }, fs=>{ if(!fs.length) return; tu(mehrere ? fs : fs[0]); });
   }
   function alleNotizenLoeschen(){
     const notizen=USER.filter(t=>t.isEdit);
