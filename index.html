@@ -481,6 +481,13 @@
      der uebliche Weg. Die Auswahl bleibt stehen und kommt beim Schliessen
      zurueck; nur die Leiste tritt beiseite. */
   body[data-page="setup"] .selbar.open{display:none}
+  /* Dieselbe Ruecksicht gegenueber einem offenen Blatt. Die Leiste lag mit
+     z-index 95 ueber dem Blatt (85) und verdeckte dessen Fuss — bei „Titel
+     bearbeiten" waren „Im Content öffnen" und „Fertig" nicht erreichbar.
+     Das galt vorher schon fuer Tags und Setlist, fiel dort aber nicht auf,
+     weil deren Blaetter kuerzer sind. Die Auswahl bleibt stehen und die
+     Leiste kommt beim Schliessen zurueck. */
+  body[data-sheet="open"] .selbar.open{display:none}
   .selbar-head{display:flex;align-items:center;gap:12px}
   .selbar-head .cnt{font:700 13.5px/1.3 var(--font-sans);color:var(--text)}
   .selbar-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -2911,6 +2918,14 @@ function renderSelBar(){
      so festgelegt: eine Regel, zwei Tueren. */
   const titelIds=[...new Set([...S.selection].map(k=>byKey[k])
                    .filter(t=>t&&t.titelId).map(t=>t.titelId))];
+  /* Der haeufigste Griff kommt an die Liste, der seltene bleibt in Content.
+     Das entscheidet nicht der Geschmack, sondern die Haeufigkeitstabelle des
+     Content-Konzepts: Eine Zuordnung richtigstellen faellt oft an und immer
+     einzeln; umbenennen, verschieben und aufraeumen faellt gelegentlich an
+     und in Schueben. Deshalb steht „Bearbeiten" nur bei genau EINEM Titel —
+     bei mehreren gibt es nichts zu benennen, was fuer alle gilt. */
+  if(titelIds.length===1)
+    mk(sym('pencil')+'Bearbeiten', ()=>titelBearbeiten(titelIds[0]));
   if(titelIds.length && window.contentZeigen)
     mk(sym('book-open')+'Im Content', ()=>window.contentZeigen(titelIds));
   /* Das Loeschen steht zuletzt, abgesetzt und rot — dieselbe Vorsicht wie bei
@@ -2998,6 +3013,128 @@ async function bulkPrint(){
   const embeds=items.filter(t=>t.f).map(t=>`<div style="page-break-after:always"><embed src="${encodeURI(t.f)}" type="application/pdf" width="100%" height="1000px"></div>`).join('');
   w.document.open();
   w.document.write(`<html><head><title>Auswahl (${items.length})</title></head><body style="margin:0">${embeds}<script>setTimeout(()=>window.print(),900)<\/script></body></html>`); w.document.close();
+}
+
+/* ================================================================
+   Titel bearbeiten — der haeufigste Griff, ohne die Liste zu verlassen
+
+   Schritt 1 des Content-Konzepts in der Fassung 2. Eine Zuordnung
+   richtigzustellen ist der haeufigste Griff im laufenden Betrieb: ein
+   Etikett stimmt nicht, eine Stimme wurde falsch erkannt, ein Foto
+   braucht einen Namen. Der Weg dorthin fuehrte bis hierher ueber „Im
+   Content", zwei Ebenen hinein und wieder zurueck — genau der Umweg, den
+   das Konzept als das eigentliche Aergernis benennt.
+
+   Hier steht ausschliesslich das Ungefaehrliche: umbenennen und
+   zuordnen. Verschieben, Kopieren und Entfernen bleiben in Content, und
+   zwar nicht aus Vorsicht, sondern weil sie gelegentlich und in Schueben
+   anfallen und dort Platz haben. Weil nichts davon verlieren kann,
+   braucht dieses Blatt auch keine Rueckfrage.
+
+   Der Listenbauer wird nicht angefasst. Das hier ist ein eigenes Blatt
+   ueber der Liste und kein Umbau der Zeile.
+   ================================================================ */
+function titelBearbeiten(titelId){
+  openSheet(card=>{
+    card.innerHTML='<h2>Titel bearbeiten</h2>';
+    const ti=(BS_KATALOG.titel||[]).find(x=>x.id===titelId);
+    if(!ti){
+      const w=document.createElement('div'); w.className='muted';
+      w.textContent='Dieser Titel steht nicht mehr im Bestand.';
+      card.append(w); return;
+    }
+    const buch=(BS_KATALOG.buecher||[]).find(b=>b.id===ti.buchId);
+    const hinweis=document.createElement('div'); hinweis.className='muted';
+    hinweis.style.margin='-6px 0 12px';
+    hinweis.textContent='Umbenennen und Stimmen zuordnen, ohne die Liste zu verlassen. '
+      +'Verschieben und Entfernen stehen weiter in Content.';
+    card.append(hinweis);
+
+    const feld=(label, wert, platzhalter)=>{
+      const l=document.createElement('div'); l.className='lbl'; l.style.margin='0 0 6px';
+      l.textContent=label;
+      const i=document.createElement('input'); i.className='txt'; i.value=wert||'';
+      if(platzhalter) i.placeholder=platzhalter;
+      card.append(l,i); return i;
+    };
+
+    /* Titel und Komponist haengen am Titel und gelten fuer alle seine
+       Blaetter. Ein Schreibvorgang, nicht acht — das war der zweite Grund,
+       aus dem der Titel am 29. Juli eine eigene Sache geworden ist. */
+    const tf=feld('Titel', ti.titel);
+    tf.onchange=async()=>{
+      const v=tf.value.trim(); if(!v || v===ti.titel){ tf.value=ti.titel||''; return; }
+      try{ await BS.aendern('titel', titelId, {titel:v}); }
+      catch(e){ alert('Umbenennen fehlgeschlagen: '+(e&&e.message||e)); return; }
+      ti.titel=v; await loadLibrary(); render();
+    };
+    const kf=feld('Komponist', ti.komponist, 'Komponist');
+    kf.style.marginTop='0';
+    kf.onchange=async()=>{
+      const v=kf.value.trim(); if(v===(ti.komponist||'')) return;
+      try{ await BS.aendern('titel', titelId, {komponist:v}); }
+      catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); return; }
+      ti.komponist=v; await loadLibrary(); render();
+    };
+
+    const bz=document.createElement('div'); bz.className='muted'; bz.style.margin='10px 2px 0';
+    bz.textContent='Buch: '+((buch&&buch.name)||'ohne Buch');
+    card.append(bz);
+
+    /* Die Blaetter des Titels. Auf dem Schalter steht das Etikett,
+       verglichen wird das Instrument — geaendert wird also das Instrument,
+       und das Etikett folgt, solange keines von Hand gesetzt ist. */
+    const els=(BS_KATALOG.elemente||[]).filter(e=>e.titelId===titelId)
+      .sort((a,b)=>(a.reihung||0)-(b.reihung||0));
+    const kopf=document.createElement('div'); kopf.className='lbl';
+    kopf.style.margin='14px 0 6px';
+    kopf.textContent=els.length ? ('Blätter ('+els.length+')') : 'Blätter';
+    card.append(kopf);
+    if(!els.length){
+      const e=document.createElement('div'); e.className='muted';
+      e.textContent='Noch nichts an diesem Titel.'; card.append(e);
+    }
+    const zeigName = e => zeigStimme(e.etikett, e.instrument) || BS.ARTEN[e.art].name;
+    els.forEach(e=>{
+      const r=document.createElement('div'); r.className='row';
+      r.style.cssText='margin:0 0 8px;gap:8px;align-items:center;flex-wrap:wrap';
+      const nf=document.createElement('input'); nf.className='txt';
+      nf.value=zeigName(e); nf.style.cssText='flex:1 1 150px;min-width:0';
+      nf.title=BS.ARTEN[e.art].name+' · '+(e.dateiname||'ohne Datei');
+      nf.onchange=async()=>{
+        const neu=nf.value.trim();
+        /* Wer das Feld nur verlaesst, darf den Anzeigenamen nicht als eigenes
+           Etikett festschreiben. Sonst waere „Alto" ploetzlich von Hand
+           getippt und liesse sich nie wieder glattziehen. Dieselbe Vorsicht
+           wie in Content. */
+        if(!neu || neu===zeigName(e)){ nf.value=zeigName(e); return; }
+        try{ await BS.aendern('element', e.id, {etikett:neu}); }
+        catch(err){ alert('Umbenennen fehlgeschlagen: '+(err&&err.message||err)); return; }
+        await loadLibrary(); render(); titelBearbeiten(titelId);
+      };
+      r.append(nf);
+      r.append(AWAHL.knopf(()=>{
+        const jetzt=(BS_KATALOG.elemente||[]).find(x=>x.id===e.id) || e;
+        const wert=jetzt.instrument||'';
+        const eintraege=stimmenAuswahlBestand();
+        const tr=eintraege.find(x=>x.wert===wert)||eintraege[0];
+        return { wert, eintraege, text:tr.text, ton:tr.ton };
+      }, async neu=>{
+        await saveLibMeta(e.id, {voice:neu});   /* laedt und zeichnet selbst neu */
+        titelBearbeiten(titelId);
+      }, 'Stimme festlegen'));
+      card.append(r);
+    });
+
+    const fuss=document.createElement('div'); fuss.className='row'; fuss.style.marginTop='12px';
+    const weiter=document.createElement('span'); weiter.className='link';
+    weiter.textContent='Im Content öffnen';
+    weiter.onclick=()=>{ closeSheet(); if(window.contentZeigen) window.contentZeigen([titelId]); };
+    const luft=document.createElement('span'); luft.style.flex='1';
+    const ok=document.createElement('button'); ok.className='btn'; ok.textContent='Fertig';
+    ok.onclick=closeSheet;
+    fuss.append(weiter, luft, ok); card.append(fuss); a11y(card);
+  });
 }
 
 function render(){
@@ -4011,8 +4148,8 @@ async function printSetlist(st){
 }
 
 /* ---------- sheet / events ---------- */
-function openSheet(b){const s=document.getElementById('sheet');b(document.getElementById('sheetCard'));s.classList.add('open');a11y(document.getElementById('sheetCard'));}
-function closeSheet(){document.getElementById('sheet').classList.remove('open');}
+function openSheet(b){const s=document.getElementById('sheet');b(document.getElementById('sheetCard'));s.classList.add('open');document.body.dataset.sheet='open';a11y(document.getElementById('sheetCard'));}
+function closeSheet(){document.getElementById('sheet').classList.remove('open');delete document.body.dataset.sheet;}
 document.getElementById('sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet();});
 document.getElementById('q').addEventListener('input',e=>{S.q=e.target.value;render();});
 
@@ -6135,7 +6272,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Fotos werden Blätter';
+const APP_BUILD='2026-08-02 · Umbenennen und Stimme in der Liste';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
