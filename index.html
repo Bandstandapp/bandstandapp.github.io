@@ -1895,6 +1895,99 @@ function restNachTitel(dateiname, titel){
 }
 window.restNachTitel = restNachTitel;
 
+/* ================================================================
+   Ein Foto wird ein Blatt
+
+   In Workshops und Proben schreibt jemand etwas an die Tafel, und man
+   fotografiert es ab. Das Bild gehoert an das Stueck, zu dem es entstanden
+   ist, und nicht in die Foto-App.
+
+   Die Buehne zeigt PDF ueber PDF.js, und der Safari-Betrachter gehoert zu den
+   Bereichen, die nicht angefasst werden. Ein JPEG dorthin zu reichen hiesse,
+   genau diesen Code zu beruehren. Statt dessen wird das Bild beim Anlegen in
+   ein einseitiges PDF gelegt. Danach ist das Foto fuer den Rest der App ein
+   Blatt wie jedes andere: Betrachter, Notizen darueber, Drucken, Export, Paket
+   und Abgleich funktionieren unveraendert, und der Betrachter bleibt
+   unberuehrt.
+
+   Der Weg fuehrt ueber die Zeichenflaeche, obwohl sich ein JPEG auch OHNE
+   Neucodierung einbetten liesse — PDF kennt es als Bildformat direkt. Den
+   Ausschlag gibt die Ausrichtung: Kameras schreiben sie als EXIF-Marke NEBEN
+   das Bild, nicht ins Bild. Ein roh eingebettetes Foto laege im PDF quer.
+   `createImageBitmap` mit `imageOrientation:'from-image'` dreht es richtig,
+   und derselbe Weg nimmt HEIC und PNG gleich mit. Der Preis ist eine einzige
+   Neucodierung, und die sieht man einem Tafelbild nicht an.
+
+   Die lange Kante wird auf 2400 Punkte begrenzt. Handschrift bleibt lesbar,
+   und ein Paket bleibt handlich: rund ein halbes Megabyte je Foto statt drei.
+   ================================================================ */
+const FOTO_KANTE = 2400;
+async function fotoAlsPDF(datei, kante){
+  const max = kante || FOTO_KANTE;
+  let bild=null;
+  try{ bild = await createImageBitmap(datei, {imageOrientation:'from-image'}); }
+  catch(e){
+    /* Aeltere Browser kennen die Option nicht. Ein `<img>` dreht nach EXIF
+       von selbst — es ist der langsamere, aber gleichwertige Weg. */
+    bild = await new Promise((ja,nein)=>{
+      const u=URL.createObjectURL(datei), i=new Image();
+      i.onload =()=>{ URL.revokeObjectURL(u); ja(i); };
+      i.onerror=()=>{ URL.revokeObjectURL(u); nein(new Error('Bild nicht lesbar')); };
+      i.src=u; });
+  }
+  const bw=bild.width||bild.naturalWidth, bh=bild.height||bild.naturalHeight;
+  if(!bw || !bh) throw new Error('Das Bild hat keine Maße.');
+  const f = Math.min(1, max/Math.max(bw,bh));
+  const w = Math.max(1,Math.round(bw*f)), h = Math.max(1,Math.round(bh*f));
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx=c.getContext('2d');
+  /* Weiss darunter: Ein PNG mit durchsichtigem Grund wuerde sonst schwarz. */
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+  ctx.drawImage(bild,0,0,w,h);
+  if(bild.close){ try{ bild.close(); }catch(e){} }
+  const jpg = await new Promise(ja=>c.toBlob(ja,'image/jpeg',0.9));
+  if(!jpg) throw new Error('Das Bild ließ sich nicht umwandeln.');
+  return pdfMitBild(new Uint8Array(await jpg.arrayBuffer()), w, h);
+}
+/* Ein einseitiges PDF, das genau ein JPEG traegt — fuenf Objekte, von Hand
+   gebaut. Eine Bibliothek dafuer einzubinden waere ein Vielfaches an Gewicht,
+   und die Regel des Projekts verbietet ohnehin, etwas nachzuladen. Das JPEG
+   liegt als DCTDecode-Strom darin und wird dabei NICHT noch einmal codiert. */
+function pdfMitBild(jpg, w, h){
+  const enc=new TextEncoder();
+  const teile=[]; let laenge=0;
+  const schreib=x=>{ const b=(typeof x==='string')?enc.encode(x):x;
+    teile.push(b); laenge+=b.length; };
+  const versatz=[];
+  const obj=(n, kopf, strom)=>{
+    versatz[n]=laenge;
+    schreib(n+' 0 obj\n'+kopf+'\n');
+    if(strom!==undefined){ schreib('stream\n'); schreib(strom); schreib('\nendstream\n'); }
+    schreib('endobj\n');
+  };
+  schreib('%PDF-1.4\n');
+  /* Die Marke, die eine Datei als binaer ausweist — als rohe Bytes, nicht als
+     Text: Ueber UTF-8 wuerden daraus andere Bytes. */
+  schreib(new Uint8Array([0x25,0xE2,0xE3,0xCF,0xD3,0x0A]));
+  obj(1,'<</Type/Catalog/Pages 2 0 R>>');
+  obj(2,'<</Type/Pages/Kids[3 0 R]/Count 1>>');
+  obj(3,'<</Type/Page/Parent 2 0 R/MediaBox[0 0 '+w+' '+h+']'
+       +'/Resources<</XObject<</Im0 4 0 R>>>>/Contents 5 0 R>>');
+  obj(4,'<</Type/XObject/Subtype/Image/Width '+w+'/Height '+h
+       +'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+jpg.length+'>>', jpg);
+  /* Das Bild fuellt die Seite genau aus. */
+  const inhalt='q '+w+' 0 0 '+h+' 0 0 cm /Im0 Do Q';
+  obj(5,'<</Length '+inhalt.length+'>>', inhalt);
+  const xref=laenge;
+  let x='xref\n0 6\n0000000000 65535 f \n';
+  for(let i=1;i<=5;i++) x += String(versatz[i]).padStart(10,'0')+' 00000 n \n';
+  schreib(x);
+  schreib('trailer\n<</Size 6/Root 1 0 R>>\nstartxref\n'+xref+'\n%%EOF\n');
+  return new Blob(teile,{type:'application/pdf'});
+}
+window.fotoAlsPDF = fotoAlsPDF;
+window.pdfMitBild = pdfMitBild;
+
 /* Ein Dateiname ohne Trennzeichen: „Bienentanz Alt 1.pdf". Wo hoert das Stueck
    auf und wo faengt die Stimme an?
 
@@ -5230,6 +5323,14 @@ const BS = (function(){
     midi:      { name:'MIDI',       bytes:true,  oeffnen:'player',  austausch:'zuruf',  endung:'.mid' },
     musicxml:  { name:'MusicXML',   bytes:true,  oeffnen:'extern',  austausch:'immer',  endung:'.musicxml' },
     notizblatt:{ name:'Notizblatt', bytes:true,  oeffnen:'buehne',  austausch:'immer',  endung:'.pdf' },
+    /* Ein abfotografiertes Tafelbild. Es liegt als PDF vor — siehe
+       `fotoAlsPDF` — und verhaelt sich damit ueberall wie ein Blatt: auf der
+       Buehne, beim Drucken, im Export, im Paket. Als eigene ART bleibt es
+       trotzdem erkennbar, und beim Weitergeben laesst es sich eigens
+       ab- oder anwaehlen. Deshalb `zuruf` und nicht `immer`: Ein Tafelbild aus
+       einem Workshop gibt man einem Bandkollegen vielleicht gern, dem Rest der
+       Welt eher nicht. Am 1. August von Jens verlangt. */
+    foto:      { name:'Foto',       bytes:true,  oeffnen:'buehne',  austausch:'zuruf',  endung:'.pdf' },
     verweis:   { name:'Verweis',    bytes:false, oeffnen:'extern',  austausch:'immer',  endung:'' },
   };
   const artOk = a => Object.prototype.hasOwnProperty.call(ARTEN,a);
@@ -6034,7 +6135,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Symbole statt Emoji';
+const APP_BUILD='2026-08-02 · Fotos werden Blätter';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -8574,6 +8675,33 @@ loadLibrary().then(render).catch(()=>{});
         alert(n+(n===1?' Blatt':' Blätter')+' hinzugefügt.');
       }, 'application/pdf,.pdf', true)));
       zeilen.push(neu);
+
+      /* Ein Tafelbild gehoert an das Stueck, zu dem es entstanden ist. Die
+         Kamera geht ohne Umweg ueber die Foto-App auf: `capture` sagt dem
+         Geraet, dass es unmittelbar aufnehmen soll. Am 1. August von Jens
+         verlangt, mit Blick auf den Gitarren-Workshop. */
+      const fotoZeile=zeile('＋ Foto aufnehmen…',
+        'Ein Tafelbild oder ein Zettel — wird als Blatt abgelegt und verhält sich wie eines');
+      fotoZeile.classList.add('crow');
+      const fotoHinzu = kamera => dateiWaehlen(async fs=>{
+        const t=cTitel(); if(!t) return;
+        let n=0; const schief=[];
+        for(const f of [].concat(fs)){
+          try{
+            const pdf=await fotoAlsPDF(f);
+            await BS.elementAnlegen({ titelId:t.id, art:'foto',
+              dateiname:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf',
+              blob:pdf, np:1 });
+            n++;
+          }catch(e){ schief.push(f.name||'ein Bild'); }
+        }
+        await loadLibrary(); render(); zeichne();
+        alert(n+(n===1?' Foto':' Fotos')+' hinzugefügt.'
+          + (schief.length ? '\n\nNicht lesbar: '+schief.join(', ') : ''));
+      }, 'image/*', !kamera, kamera);
+      fotoZeile._ctl.append(knopf('Kamera', ()=>fotoHinzu(true)),
+                            knopf('Aus der Fotos-App', ()=>fotoHinzu(false)));
+      zeilen.push(fotoZeile);
     }
 
     const reihen=cReihen();
@@ -9335,6 +9463,9 @@ loadLibrary().then(render).catch(()=>{});
     i.value=''; i.multiple=false; i.accept='';
     try{ i.webkitdirectory=false; }catch(e){}
     i.removeAttribute('webkitdirectory');
+    /* `capture` schickt direkt in die Kamera. Bliebe es stehen, oeffnete
+       der naechste Griff nach einer PDF-Datei die Kamera. */
+    i.removeAttribute('capture');
     bau(i);
     i.onchange=()=>{ i.onchange=null; fertig([...i.files]); };
     i.click();
@@ -9809,8 +9940,12 @@ loadLibrary().then(render).catch(()=>{});
 
   /* Dieselbe Falle wie bei der Ordnerwahl: Das Feld muss im Dokument haengen,
      sonst oeffnet Safari auf dem iPad den Dialog nicht. */
-  function dateiWaehlen(tu, arten, mehrere){
-    dateiFeld(i=>{ i.accept=arten||'application/json,.json'; if(mehrere) i.multiple=true; },
+  /* `kamera` setzt `capture` und schickt damit direkt in die Kamera statt in
+     die Dateiauswahl. Auf dem Schreibtisch bleibt es wirkungslos. */
+  function dateiWaehlen(tu, arten, mehrere, kamera){
+    dateiFeld(i=>{ i.accept=arten||'application/json,.json';
+                   if(mehrere) i.multiple=true;
+                   if(kamera) i.setAttribute('capture','environment'); },
       fs=>{ if(!fs.length) return; tu(mehrere ? fs : fs[0]); });
   }
   function alleNotizenLoeschen(){
