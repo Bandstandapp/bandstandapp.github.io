@@ -44,6 +44,10 @@
     --bg-panel-sel:#1e2936;        /* Zielwert des Entwurfs, seit Schritt 7 */
     --bg-panel-open:#25344a;       /* das offene Stueck in der Liste */
     --bg-elev:#16202b;             /* Zielwert des Entwurfs, seit Schritt 7 */
+    /* Die Auswahl-Leiste schwebt ueber der Liste und muss sich von ihr
+       absetzen. Mit --bg-elev war sie der Liste zu aehnlich und las sich wie
+       ein Teil von ihr. Am 2. August von Jens verlangt. */
+    --bg-selbar:#243546;
     --bg-input:#17222e;
     /* Der Suchschlitz ueber der Liste: heller als die Knoepfe daneben,
        damit er als Eingabe erkennbar bleibt und nicht als dritter Knopf. */
@@ -295,11 +299,27 @@
   li.tune .meta{display:flex;flex-wrap:wrap;align-items:center;gap:3px 5px;margin-top:2px;
     padding-right:2px;font:500 12.5px/1.5 var(--font-sans);color:var(--text-muted);white-space:normal}
   li.tune .meta .book{color:var(--book)}
+  /* Das Wort vor dem Namen der Setliste. Es sagt, worauf man sieht, und tritt
+     farblich zurueck, damit der Name die Zeile traegt. */
+  .setlbl{color:var(--accent-bright)}
+  /* Die Setlisten-Zeile traegt seit dem 2. August dieselben vier Symbole wie
+     die Hauptliste, dazu weiterhin den Ziehgriff und das Kreuz. Im Hochformat
+     wurde dem Titel dadurch so wenig Platz gelassen, dass „Autumn Leaves" als
+     „1. Autum…" dastand. Deshalb behaelt der Titel hier eine Mindestbreite und
+     schiebt die Symbole notfalls in die naechste Zeile, statt selbst zu
+     verschwinden. Der Name ist das, wonach man in der Probe sucht. */
+  #setUL li.tune .tline{flex-wrap:wrap}
+  #setUL li.tune .title{min-width:11em}
   /* Tag-Pille, Variante D: Schriftfarbe ist die Tag-Farbe, die Haarlinie fuer
      alle Tags gleich, keine Fuellung. Die bunten gefuellten Pillen ergaben ein
      unruhiges Gesamtbild. */
   .pill{font:700 10px/1.5 var(--font-sans);border-radius:var(--r-pill);padding:1px 8px;
     border:1px solid var(--pill-line);background:none;white-space:nowrap}
+  /* Die eigene Zeile der Tags. `nowrap` auf der Pille sorgt dafuer, dass ein
+     Tag nie in sich umbricht; `wrap` auf der Zeile dafuer, dass viele Tags eine
+     zweite Zeile bekommen statt aus der Spalte zu laufen. */
+  li.tune .tagrow{display:flex;flex-wrap:wrap;align-items:center;gap:3px 5px;
+    margin-top:3px;padding-right:2px}
   .pill[data-tag]{cursor:pointer}
   .iconbtn{background:var(--bg-control);border:1px solid var(--border);border-radius:var(--r-11);
     width:var(--tap);height:var(--tap);min-width:var(--tap);display:flex;align-items:center;justify-content:center;
@@ -473,9 +493,25 @@
      schwebendes Fenster wie die Dialoge — im Querformat ueber den Noten. */
   .selbar{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));
     transform:translateX(-50%);z-index:95;width:440px;max-width:calc(100vw - 32px);
-    background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--r-16);
+    background:var(--bg-selbar);border:1px solid var(--border-strong);border-radius:var(--r-16);
     box-shadow:var(--shadow-dlg);padding:12px 14px 13px;display:none;flex-direction:column;gap:10px}
   .selbar.open{display:flex}
+  /* Geschoben wird am Kopf, nicht an der ganzen Leiste: Sonst faenge ein Zug
+     ueber den Knoepfen an, und ein Fehlgriff verschoebe das Fenster, statt zu
+     tun, was daraufsteht. `touch-action:none`, damit der Finger nicht
+     stattdessen die Liste rollt. */
+  .selbar-head{cursor:grab;touch-action:none}
+  .selbar-head .cnt,.selbar-head .link{cursor:inherit}
+  .selbar-head .link{cursor:pointer}
+  body[data-selbar-zieht] .selbar-head{cursor:grabbing}
+  body[data-selbar-zieht] .selbar{box-shadow:var(--shadow-dock-drag)}
+  /* Die Fangflaeche haelt den Zug fest. Ohne sie verliert der Zeiger die Spur,
+     sobald die Leiste im Querformat ueber das Notenblatt wandert — der
+     Betrachter ist ein Iframe und schluckt die Ereignisse. Dieselbe Loesung wie
+     beim schwebenden PDF-Fenster, und aus demselben Grund ohne
+     `setPointerCapture`. Sie liegt ueber dem Betrachter und unter der Leiste. */
+  .selbar-fang{position:fixed;inset:0;z-index:94;display:none}
+  body[data-selbar-zieht] .selbar-fang{display:block}
   /* Die Auswahl-Leiste gehoert der Hauptliste. Steht Setup offen, verdeckte
      sie dessen Werkzeugleiste — und seit „Im Content zeigen" ist genau das
      der uebliche Weg. Die Auswahl bleibt stehen und kommt beim Schliessen
@@ -1453,6 +1489,7 @@
     <button class="dlgclose" id="selClose" title="Schließen"><i class="i ic-x"></i></button></div>
   <div class="selbar-actions" id="selActions"></div>
 </div>
+<div class="selbar-fang" id="selbarFang"></div>
 
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 
@@ -2672,7 +2709,8 @@ function tuneRow(t, stimmen){
         <div class="title">${esc(t.t)}</div>
         ${aktionenHTML(hasTags,prac,star)}
       </div>
-      <div class="meta">${metaHTML}${pillenHTML(tt)}</div>
+      <div class="meta">${metaHTML}</div>
+      ${tagZeile(tt)}
       ${stimmenZeile(stimmen,t)}
     </div>`;
   /* Titel und Komponist korrigiert man mit langem Tippen auf den Titel. Das
@@ -2735,7 +2773,20 @@ function verdrahteStimmen(li){
 }
 function pillenHTML(tagIds){
   return (tagIds||[]).map(id=>{ const tg=tagById(id);
-    return tg ? `<span class="pill" data-tag="${esc(id)}" title="Alle Stücke mit diesem Tag" style="color:${tg.color}">${esc(tg.name)}</span>` : ''; }).join('');
+    return tg ? `<span class="pill" data-tag="${esc(id)}" title="Alle Titel mit diesem Tag" style="color:${tg.color}">${esc(tg.name)}</span>` : ''; }).join('');
+}
+/* Die Tags stehen seit dem 2. August in einer eigenen Zeile unter den Angaben
+   zum Stueck. Vorher liefen sie im selben Fluss wie Komponist, Buch und
+   Seitenzahl und brachen mitten im Satz um; bei sechs Tags wuchs die Angabe auf
+   drei Zeilen, und man sah der Zeile nicht mehr an, wo die Angaben aufhoeren
+   und die Tags anfangen.
+
+   Jetzt beansprucht die Tag-Zeile eine Zeile. Erst wenn die Pillen darin nicht
+   mehr nebeneinander passen, kommt eine zweite dazu. Ohne Tags entsteht kein
+   leerer Kasten. Am 2. August von Jens verlangt. */
+function tagZeile(tagIds){
+  const h=pillenHTML(tagIds);
+  return h ? '<div class="tagrow">'+h+'</div>' : '';
 }
 /* Ein Tipp auf eine Tag-Pille zeigt alle Stuecke mit diesem Tag. Der Klick
    darf nicht weiterlaufen, sonst ginge zugleich das Stueck auf. */
@@ -2877,7 +2928,9 @@ function selectAllRow(keys){
 function hasSelectedNotes(){ return [...S.selection].some(k=>byKey[k]&&byKey[k].isEdit); }
 function renderSelBar(){
   const bar=document.getElementById('selbar'), n=S.selection.size;
-  document.getElementById('selCnt').textContent = n+' '+(n===1?'Stück':'Stücke')+' ausgewählt';
+  /* „Titel" und nicht „Stück": In der App heisst ein Stueck durchgehend Titel,
+     und die Zeile darueber sagt es auch schon so. */
+  document.getElementById('selCnt').textContent = n+' Titel ausgewählt';
   const zu=document.getElementById('selClose');
   if(zu && !zu._verdrahtet){ zu._verdrahtet=true;
     zu.onclick=()=>{ S.selection.clear(); refreshSelUI(); }; }
@@ -2894,13 +2947,17 @@ function renderSelBar(){
   const mk=(html,fn,art)=>{ const b=document.createElement('button');
     b.className='btn ghost sm'+(art?' '+art:''); b.innerHTML=html; b.onclick=fn; act.append(b); return b; };
   const sym=n=>'<i class="i ic-'+n+'"></i> ';
-  /* Ein Paar aus Hinzufuegen und Wegnehmen, als eine Einheit gelesen. */
+  /* Ein Paar aus Wegnehmen und Hinzufuegen, als eine Einheit gelesen. Seit dem
+     2. August steht das Wort ZWISCHEN den beiden Zeichen: „− Üben ＋". Vorher
+     lagen Plus und Minus unmittelbar nebeneinander am rechten Rand, und auf dem
+     iPad greift man dort mit einem Finger daneben. Jetzt trennt sie die
+     Beschriftung. */
   const paar=(icon, wort, ein, aus)=>{
     const g=document.createElement('span'); g.className='selpaar';
-    g.innerHTML='<span class="lbl">'+sym(icon)+esc(wort)+'</span>';
-    const a=document.createElement('button'); a.className='btn ghost sm'; a.textContent='＋'; a.title=wort+' hinzufügen';
     const b=document.createElement('button'); b.className='btn ghost sm'; b.textContent='−'; b.title=wort+' wegnehmen';
-    a.onclick=ein; b.onclick=aus; g.append(a,b); act.append(g);
+    const l=document.createElement('span'); l.className='lbl'; l.innerHTML=sym(icon)+esc(wort);
+    const a=document.createElement('button'); a.className='btn ghost sm'; a.textContent='＋'; a.title=wort+' hinzufügen';
+    a.onclick=ein; b.onclick=aus; g.append(b,l,a); act.append(g);
   };
   mk(sym('list-plus')+'Setlist', bulkSetlistFlow);
   paar('metronome','Üben', ()=>bulkSet(S.prac,true), ()=>bulkSet(S.prac,false));
@@ -2933,7 +2990,86 @@ function renderSelBar(){
   if(hasSelectedNotes())
     mk(sym('trash-2')+'Notiz löschen', bulkDeleteNotes, 'warn');
   bar.classList.add('open'); a11y(bar);
+  /* Erst jetzt, mit sichtbarer Leiste: Vorher hat sie keine Masse, und das
+     Einpassen rechnete mit null Breite. */
+  selbarPosAnwenden();
 }
+/* ================================================================
+   Die Auswahl-Leiste laesst sich schieben
+
+   Sie schwebt ueber der Liste und steht damit zwangslaeufig irgendwo im Weg.
+   Wo genau, weiss nur der, der gerade arbeitet: am Mac ueber dem unteren Rand,
+   auf dem iPad im Querformat vielleicht ueber den Noten, im Hochformat lieber
+   weiter oben. Deshalb entscheidet Jens das und nicht die App — und BandStand
+   merkt sich, wofuer er sich entschieden hat. Am 2. August verlangt.
+
+   Solange nichts geschoben wurde, gilt die Vorgabe aus dem Stilblatt: unten,
+   mittig. Erst der erste Zug schreibt eine Stelle fest.
+   ================================================================ */
+const SELBAR_POS='bs_selbar_pos';
+function selbarPosLesen(){
+  try{ const p=JSON.parse(localStorage.getItem(SELBAR_POS)||'null');
+    return (p && typeof p.x==='number' && typeof p.y==='number') ? p : null; }
+  catch(e){ return null; }
+}
+/* Eine gemerkte Stelle kann falsch werden, ohne dass jemand etwas tut: Das
+   iPad wird gedreht, das Fenster am Mac kleiner gezogen. Deshalb wird beim
+   Anlegen IMMER eingepasst und nie blind gesetzt. */
+function selbarEinpassen(x, y){
+  const b=document.getElementById('selbar'); if(!b) return {x,y};
+  const r=b.getBoundingClientRect(), luft=8;
+  const maxX=Math.max(luft, innerWidth  - r.width  - luft);
+  const maxY=Math.max(luft, innerHeight - r.height - luft);
+  return { x:Math.min(Math.max(luft,x), maxX), y:Math.min(Math.max(luft,y), maxY) };
+}
+function selbarStellen(x, y, merken){
+  const b=document.getElementById('selbar'); if(!b) return;
+  const p=selbarEinpassen(x,y);
+  b.style.left=p.x+'px'; b.style.top=p.y+'px';
+  b.style.right='auto'; b.style.bottom='auto'; b.style.transform='none';
+  if(merken){ try{ localStorage.setItem(SELBAR_POS, JSON.stringify(p)); }catch(e){} }
+}
+/* Beim Oeffnen die gemerkte Stelle wieder einnehmen. Wird gerufen, nachdem die
+   Leiste sichtbar ist — vorher hat sie keine Masse, und das Einpassen rechnete
+   mit null. */
+function selbarPosAnwenden(){
+  const p=selbarPosLesen(); if(!p) return;
+  selbarStellen(p.x, p.y, false);
+}
+(function selbarZiehen(){
+  const kopf=document.querySelector('.selbar-head'); if(!kopf) return;
+  kopf.addEventListener('pointerdown', e=>{
+    if(e.button!==undefined && e.button!==0) return;
+    /* „Auswahl aufheben" und das Kreuz bleiben Knoepfe. */
+    if(e.target.closest('button, .link')) return;
+    const b=document.getElementById('selbar'); if(!b) return;
+    e.preventDefault();
+    const r=b.getBoundingClientRect();
+    const dx=e.clientX-r.left, dy=e.clientY-r.top;
+    document.body.dataset.selbarZieht='1';
+    let letzte={x:r.left, y:r.top};
+    const bewegen=ev=>{ letzte=selbarEinpassen(ev.clientX-dx, ev.clientY-dy);
+      selbarStellen(letzte.x, letzte.y, false); };
+    const loslassen=()=>{
+      document.removeEventListener('pointermove', bewegen);
+      document.removeEventListener('pointerup', loslassen);
+      document.removeEventListener('pointercancel', loslassen);
+      delete document.body.dataset.selbarZieht;
+      selbarStellen(letzte.x, letzte.y, true);
+    };
+    document.addEventListener('pointermove', bewegen);
+    document.addEventListener('pointerup', loslassen);
+    document.addEventListener('pointercancel', loslassen);
+  });
+  /* Nach einer Drehung oder einer Groessenaenderung neu einpassen, damit die
+     Leiste nicht halb ausserhalb steht. Gemerkt wird dabei nichts: Die Stelle,
+     die Jens gewaehlt hat, soll beim Zurueckdrehen wieder gelten. */
+  window.addEventListener('resize', ()=>{
+    if(!document.getElementById('selbar').classList.contains('open')) return;
+    const p=selbarPosLesen(); if(!p) return;
+    selbarStellen(p.x, p.y, false);
+  });
+})();
 document.getElementById('selClear').onclick=()=>{ S.selection.clear(); refreshSelUI(); };
 function bulkSet(ref,add){ [...S.selection].forEach(k=> add?ref.add(k):ref.delete(k)); save(); render(); }
 function bulkRemoveFromSet(){ const st=S.sets.find(s=>s.id===S.openSet); if(!st)return;
@@ -2949,7 +3085,7 @@ function bulkDeleteNotes(){
 function bulkSetlistFlow(){
   const keys=[...S.selection]; if(!keys.length)return;
   openSheet(card=>{
-    card.innerHTML=`<h2>${keys.length} Stücke zu Setlist</h2>`;
+    card.innerHTML=`<h2>${keys.length} Titel zu Setlist</h2>`;
     const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
     if(!S.sets.length) wrap.innerHTML='<div class="muted">Noch keine Setlist. Unten neue anlegen.</div>';
     S.sets.forEach(st=>{ const c=document.createElement('div'); c.className='chip';
@@ -2970,7 +3106,7 @@ function bulkSetlistFlow(){
 function bulkTagsFlow(){
   const keys=[...S.selection]; if(!keys.length)return;
   openSheet(card=>{
-    card.innerHTML=`<h2>Tags für ${keys.length} Stücke</h2><div class="muted" style="margin:-6px 0 12px">Tippe einen Tag zum <b>Hinzufügen</b> zu allen; das „−" <b>entfernt</b> ihn von allen.</div>`;
+    card.innerHTML=`<h2>Tags für ${keys.length} Titel</h2><div class="muted" style="margin:-6px 0 12px">Tippe einen Tag zum <b>Hinzufügen</b> zu allen; das „−" <b>entfernt</b> ihn von allen.</div>`;
     if(!S.tags.length) card.insertAdjacentHTML('beforeend','<div class="muted">Noch keine Tags – unten anlegen.</div>');
     const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
     S.tags.forEach(tag=>{ const c=document.createElement('div'); c.className='chip'; c.style.borderColor=tag.color;
@@ -3820,6 +3956,12 @@ function printCurrent(t){
     try{ w.addEventListener('load',()=>{try{w.print();}catch(e){}}); }catch(e){}
   });
 }
+/* Diese beiden werden seit dem 2. August von niemandem mehr gerufen: Ihre
+   Knoepfe sind aus dem Setlist-Kopf gefallen, weil die Auswahl-Leiste dasselbe
+   fuer eine Auswahl leistet. Ein Unterschied bleibt und ist mit Jens noch zu
+   klaeren — `printSetlist` druckt ein nummeriertes Programm mit Namen der
+   Setliste voran, `bulkPrint` nur die Blaetter. Bis das entschieden ist,
+   bleiben sie stehen. */
 async function shareSetlist(st){
   const items=st.items.map(k=>byKey[k]).filter(Boolean); if(!items.length) return;
   try{
@@ -3833,7 +3975,18 @@ async function shareSetlist(st){
 }
 
 /* ---------- Tags: assign to a tune ---------- */
-function uid(p){return (p||'x')+Math.abs(Date.now()%1e7)+Math.floor(performance.now()%1000);}
+/* Beide Bestandteile hatten Millisekunden-Aufloesung, und damit lieferte `uid`
+   bei mehreren Aufrufen in derselben Millisekunde denselben Wert. Am 2. August
+   nachgemessen: sechs Aufrufe hintereinander ergaben sechsmal dieselbe Kennung.
+
+   Von Hand ist das kaum zu erreichen — man tippt keine zwei Tags in einer
+   Millisekunde. Trifft es doch zu, ist der Schaden still und unangenehm: Zwei
+   Tags mit derselben Kennung sind fuer die App ein Tag, und wer den einen
+   vergibt, vergibt den anderen mit. Der Zaehler schliesst das aus, ohne an
+   vorhandenen Kennungen etwas zu aendern. */
+let uidZaehler=0;
+function uid(p){return (p||'x')+Math.abs(Date.now()%1e7)+Math.floor(performance.now()%1000)
+  +'_'+(++uidZaehler).toString(36);}
 function assignTagsFlow(t){
   openSheet(card=>{
     card.innerHTML=`<h2>Tags für „${esc(t.t)}"</h2>`;
@@ -3992,7 +4145,8 @@ function recentRow(t,ts){
         <div class="title">${esc(t.t)}</div>
         ${aktionenHTML(hasTags,prac,star)}
       </div>
-      <div class="meta">${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>${t.isEdit?'':`<span class="book">· S.&nbsp;${esc(t.pg)}</span>`}${setsHTML}${pillenHTML(tt)}<span style="color:var(--text-faint)">· <i class="i ic-clock"></i> ${dateStr}</span></div>
+      <div class="meta">${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>${t.isEdit?'':`<span class="book">· S.&nbsp;${esc(t.pg)}</span>`}${setsHTML}<span style="color:var(--text-faint)">· <i class="i ic-clock"></i> ${dateStr}</span></div>
+      ${tagZeile(tt)}
     </div>`;
   langesTippen(li.querySelector('.title'), ()=>openMetaSheet(t));
   li.querySelector('.main').onclick=()=>{ if(li._langGetippt){ li._langGetippt=false; return; }
@@ -4045,16 +4199,15 @@ function renderSets(main){
 function renderOneSet(main){
   const st=S.sets.find(s=>s.id===S.openSet); if(!st){S.openSet=null;return render();}
   const head=document.createElement('div'); head.className='controls'; head.style.padding='12px 8px';
+  /* Der Kopf ist am 2. August auf eine Zeile zusammengezogen worden. Vorher
+     standen darunter „Weitergeben" und „Drucken" und ein Hinweis auf den
+     Ziehgriff — zusammen gut hundert Pixel ueber der Liste, auf die es
+     ankommt. Die beiden Knoepfe stehen mit einer Auswahl ohnehin in der
+     Auswahl-Leiste, und der Griff erklaert sich beim Anfassen. */
   head.innerHTML=`<div class="row"><span class="link" id="back">‹ Setlists</span></div>
-    <h2 style="margin:4px 2px;font-size:20px">${esc(st.name)} <span class="muted">(${st.items.length})</span></h2>
-    <div class="row">
-      <button class="btn ghost" id="shareAll" ${st.items.length?'':'disabled'}><i class="i ic-share"></i> Weitergeben</button>
-      <button class="btn ghost" id="printAll" ${st.items.length?'':'disabled'}><i class="i ic-printer"></i> Drucken</button>
-    </div><div class="muted" style="padding:0 2px">Zum Sortieren am Griff ⣿ ziehen.</div>`;
+    <h2 style="margin:4px 2px;font-size:20px"><span class="setlbl">Setlist:</span> ${esc(st.name)} <span class="muted">(${st.items.length})</span></h2>`;
   main.append(head);
   head.querySelector('#back').onclick=()=>{S.openSet=null;render();};
-  head.querySelector('#shareAll').onclick=()=>shareSetlist(st);
-  head.querySelector('#printAll').onclick=()=>printSetlist(st);
   /* „Setlist löschen" steht ganz unten und in Rot. Im Kopf lag es einen
      Fingerbreit neben Drucken und Weitergeben — ein Fehlgriff dort ist teuer,
      und Jens hat das am 31. Juli als gefaehrlich gemeldet. Ans Ende zu gehen
@@ -4098,15 +4251,29 @@ function renderOneSet(main){
           (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
           || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}))
       : [t];
+    /* Die vier Symbole der Hauptliste fehlten hier bis zum 2. August, und das
+       hat wie ein Fehler ausgesehen: Wer in der Setliste „Favorit ＋" in der
+       Auswahl-Leiste antippte, aenderte den Zustand tatsaechlich — nur sah man
+       davon in der Zeile nichts, weil sie keinen Stern trug. Jens hat es als
+       „funktioniert nicht" gemeldet, und aus seiner Sicht stimmte das.
+       Nachgemessen: `S.fav` bekam den Schluessel, die Zeile zeigte ihn nur nie.
+
+       Derselbe Baustein wie in der Hauptliste, dieselben Marken: Traegt
+       irgendeine Stimme des Stuecks den Stern, ist die Zeile ein Favorit. */
+    const star=gruppeHat(S.fav,t), prac=gruppeHat(S.prac,t);
+    const tt=gruppeTagIds(t);
     li.innerHTML=`<div class="handle" title="Ziehen zum Sortieren">⣿</div>
-      <div class="main"><div class="title">${i+1}. ${esc(t.t)}</div>
+      <div class="main">
+      <div class="tline"><div class="title">${i+1}. ${esc(t.t)}</div>
+      ${aktionenHTML(tt.length>0,prac,star)}</div>
       <div class="meta">${t.c?esc(t.c)+' · ':''}${esc(bookName(t))} · S. ${esc(t.pg)}</div>
+      ${tagZeile(tt)}
       ${stimmenZeile(grp, t)}</div>
       <div class="iconbtn" data-a="rm" title="Aus der Setliste nehmen"><i class="i ic-x"></i></div>`;
     /* Ein Tipp auf die Zeile waehlt das STUECK, ein Tipp auf eine Stimme genau
        diese — wie in der Hauptliste. */
     li.querySelector('.main').onclick=()=>{ STIMMWUNSCH=''; openViewer(t); };
-    verdrahteStimmen(li);
+    verdrahteAktionen(li,t); verdrahtePillen(li); verdrahteStimmen(li);
     li.querySelector('[data-a=rm]').onclick=()=>{st.items.splice(i,1);st.updatedAt=Date.now();save();render();};
     li.prepend(selBox(k)); if(S.selection.has(k)) li.classList.add('selected');
     enableDrag(li, st); ul.append(li);
@@ -6272,7 +6439,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Umbenennen und Stimme in der Liste';
+const APP_BUILD='2026-08-02 · Tags, Setliste und eine Leiste, die sich schieben laesst';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
