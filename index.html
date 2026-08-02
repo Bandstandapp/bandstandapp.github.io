@@ -1145,6 +1145,21 @@
   .srow .lb{font:600 13.5px/1.35 var(--font-sans)}
   .srow .sb{font:400 12px/1.45 var(--font-sans);color:var(--text-faint);margin-top:2px;max-width:380px}
   .srow .ctl{margin-left:auto;flex:none;display:flex;gap:8px;align-items:center}
+  /* Die Werkzeugleiste von Content. Seit die Knoepfe ihre Ebene mitnennen —
+     „2 Titel verschieben" statt „Verschieben" — brauchen sie mehr Breite, und
+     `flex:none` auf den Knoepfen quetschte die Beschriftung links auf vier
+     Zeilen. Diese eine Zeile darf deshalb umbrechen, und der Text behaelt eine
+     Mindestbreite. Nur hier: In den uebrigen Setup-Zeilen steht rechts ein
+     einzelner Schalter, dort ist die eine Zeile richtig. */
+  .srow.werkzeuge{flex-wrap:wrap;row-gap:10px}
+  .srow.werkzeuge>div:first-child{flex:1 1 190px;min-width:0}
+  /* `flex:none` liess die Knoepfe im Hochformat aus dem Bild laufen: Sie
+     nahmen ihre volle Breite und schrumpften nicht. Mit einer Grundbreite von
+     260 px rutscht die Knopfgruppe stattdessen unter den Text, sobald es eng
+     wird, und bricht dort selbst um. */
+  .srow.werkzeuge .ctl{flex:1 1 260px;min-width:0;flex-wrap:wrap;row-gap:8px;
+    justify-content:flex-end}
+  .srow.werkzeuge .sb{max-width:none}
   .srow .btn{height:auto;padding:8px 13px;font-size:12.5px;border-radius:var(--r-9);font-weight:600}
   /* Der Haken zum Mehrfachwaehlen im Notenbestand. Groesser als der im
      Dialog: Hier zielt ein Finger darauf, kein Mauszeiger. */
@@ -1297,8 +1312,16 @@
   /* Die eigene, unterste Zeile der Listenzeile. Sie bricht um, wenn viele
      Stimmen zusammenkommen, faengt aber immer an derselben Stelle an. */
   .stimmzeile{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:5px}
-  .stimmen{display:inline-flex;gap:4px;margin:0;vertical-align:middle}
-  .stimme{all:unset;box-sizing:border-box;cursor:pointer;
+  /* `.stimmen` hielt alle Schalter in EINER nicht umbrechenden Reihe. Die
+     umgebende Zeile durfte zwar umbrechen, konnte diese eine Reihe aber nicht
+     teilen — also wurde sie gestaucht, und der Text brach INNERHALB der
+     Schalter um: „Not Assigned" stand drei Zeilen hoch. Aufgefallen, seit die
+     Setlisten-Zeile durch die vier Symbole schmaler geworden ist.
+
+     Dieselbe Regel wie bei den Tags: Ein Schalter bricht nie in sich um, die
+     Reihe bricht statt seiner. Am 2. August von Jens verlangt. */
+  .stimmen{display:inline-flex;flex-wrap:wrap;gap:4px;margin:0;min-width:0;vertical-align:middle}
+  .stimme{all:unset;box-sizing:border-box;cursor:pointer;white-space:nowrap;
      font:700 11px/1.45 var(--font-sans);padding:1px 7px;border-radius:var(--r-6);
      color:var(--text-dim);border:1px solid var(--voice-chip-line);background:var(--voice-chip)}
   .stimme.an{color:var(--accent-bright);border-color:var(--pill-line);background:var(--accent-wash)}
@@ -3166,6 +3189,18 @@ function druckStil(){
     @page{ size:auto; margin:0 }
     html,body{ margin:0; padding:0 }
     body{ font:14px/1.45 system-ui,-apple-system,sans-serif; color:#111 }
+    /* Der Rueckweg. Bricht man den Druck ab, bleibt man in diesem Fenster und
+       sieht die Blaetter — und kommt ohne diesen Streifen nicht mehr zurueck.
+       Jens ist am 2. August genau darin haengengeblieben. Auf Papier ist er
+       nicht dabei. */
+    .bs-leiste{ position:fixed; top:0; left:0; right:0; z-index:9; display:flex;
+      align-items:center; gap:12px; padding:9px 14px; background:#111; color:#fff;
+      font:600 14px/1.2 system-ui,-apple-system,sans-serif }
+    .bs-leiste button{ font:inherit; padding:7px 14px; border-radius:9px;
+      border:0; background:#fff; color:#111; cursor:pointer }
+    .bs-leiste .hinweis{ font-weight:400; opacity:.75; font-size:12.5px }
+    @media screen{ body{ padding-top:48px } }
+    @media print{ .bs-leiste{ display:none } body{ padding-top:0 } }
     .bs-seite{ height:100vh; overflow:hidden; box-sizing:border-box;
                break-after:page; page-break-after:always }
     .bs-seite.letzte{ break-after:auto; page-break-after:auto }
@@ -3215,9 +3250,16 @@ function druckSchreiben(w, titel, programm, items){
   const prog = programm && !mitBytes.length
     ? programm.replace('class="bs-seite bs-programm"','class="bs-seite bs-programm letzte"')
     : (programm||'');
+  /* Nach dem Drucken schliesst sich das Fenster von selbst; bricht man ab,
+     traegt der Streifen oben den Weg zurueck. `window.close()` gilt fuer ein
+     Fenster, das ein Skript geoeffnet hat — und dieses hier ist eines. */
+  const leiste='<div class="bs-leiste"><button onclick="window.close()">‹ Zurück zu BandStand</button>'
+    + '<span class="hinweis">Dieser Streifen wird nicht mitgedruckt.</span></div>';
   w.document.open();
   w.document.write('<html><head><title>'+esc(titel)+'</title>'+druckStil()+'</head><body>'
-    + prog + blaetter + '<script>setTimeout(()=>window.print(),900)<\/script></body></html>');
+    + leiste + prog + blaetter
+    + '<script>window.onafterprint=()=>window.close();'
+    + 'setTimeout(()=>window.print(),900)<\/script></body></html>');
   w.document.close();
 }
 /* In einer offenen Setliste druckt „Drucken" das Programm voran: erst der Name
@@ -3429,6 +3471,35 @@ async function empfangen(files){
       +'Ein Foto legst Du über „Bearbeiten" an den Titel, zu dem es gehört.');
   for(const p of pakete) await importPackage(p);
   if(pdfs.length) empfangenBuchFlow(pdfs);
+}
+/* Der zweite Eingang: das Teilen-Blatt des Geraets.
+
+   Das Manifest meldet BandStand als Ziel an; waehlt man die App dort aus,
+   nimmt der Service Worker die Dateien entgegen, legt sie in ein eigenes
+   Cache-Fach und oeffnet die App mit `?geteilt=1`. Hier werden sie abgeholt
+   und dasselbe `empfangen` gerufen wie beim Knopf — ein Weg herein, zwei
+   Tueren davor.
+
+   Ob iOS das je ausloest, weiss ich nicht: Safari kennt Web Share Target nach
+   meinem Kenntnisstand nicht. Es kostet wenig, es anzubieten, und der Knopf
+   bleibt unabhaengig davon der sichere Weg. */
+async function geteiltesAbholen(){
+  if(!/[?&]geteilt=1/.test(location.search)) return;
+  /* Die Adresse gleich saeubern: Ein Neuladen soll nicht zweimal einlesen. */
+  try{ history.replaceState(null, '', location.pathname); }catch(e){}
+  try{
+    const cache=await caches.open('geteilt-bs');
+    const schluessel=await cache.keys();
+    const files=[];
+    for(const k of schluessel){
+      const r=await cache.match(k); if(!r) continue;
+      const blob=await r.blob();
+      const name=decodeURIComponent((new URL(k.url).pathname.split('/').pop())||'Datei');
+      files.push(new File([blob], name, {type:blob.type||''}));
+      await cache.delete(k);
+    }
+    if(files.length) await empfangen(files);
+  }catch(e){}
 }
 /* Wohin gehoert die Sendung? Gefragt wird einmal und nur nach dem Buch — den
    Titel liest der Import aus dem Dateinamen, und ob er an einen vorhandenen
@@ -4730,7 +4801,13 @@ async function importPdfs(bid, files, stumm){
        Ein empfangenes „Blue Bossa - Bariton" stand dann als zweites „Blue
        Bossa" da, obwohl es am richtigen Titel hing. Am 2. August beim Bauen
        des Empfangs aufgefallen. */
-    const auto = blattArt(z.rest) || ((voiceAusText(z.rest)||{}).name) || OHNE_STIMME;
+    /* Dieselbe Kette wie in der Vorschau des grossen Imports, einschliesslich
+       der nackten Tonart: „Autumn Leaves - C" ist die C-Ausgabe. Sie fehlte
+       hier und ist am 2. August beim Einlesen eines gepackten Ordners
+       aufgefallen — dasselbe Blatt wurde im grossen Import erkannt und hier
+       nicht. Gerechnet wird sie zuletzt, damit „Flöte in C" eine Flöte bleibt. */
+    const auto = blattArt(z.rest) || ((voiceAusText(z.rest)||{}).name)
+               || ausgabeAusText(z.rest) || OHNE_STIMME;
     return { file, pfad:name, name, kennung:name, titel:z.titel||name.replace(/\.pdf$/i,''),
              rest:z.rest||'', auto, hand:'', gruppe:'t:'+titelSchluessel(z.titel||name),
              voice:auto };
@@ -4750,7 +4827,30 @@ async function importPdfs(bid, files, stumm){
     if(andocken) saetze.forEach(s=>{ const id=imBuch[titelSchluessel(s.titel)]; if(id) s.andockAn=id; });
   }
 
-  const n=await importBandbuch(bid, saetze);
+  /* Ein Paket traegt Kennungen und fuehrt sich deshalb von selbst zusammen.
+     Lose PDFs tragen keine: Wer denselben Ordner ein zweites Mal einliest,
+     bekaeme jedes Blatt ein zweites Mal, und niemand saehe es. Deshalb wird
+     ueber den Dateinamen nachgesehen und gefragt. Am 2. August beim Bauen des
+     ZIP-Empfangs aufgefallen: Ein zweites Einlesen machte aus vier Blaettern
+     acht. */
+  const titelDesBuchs=new Set((BS_KATALOG.titel||[]).filter(t=>t.buchId===bid).map(t=>t.id));
+  const namenImBuch=new Set((BS_KATALOG.elemente||[])
+    .filter(e=>titelDesBuchs.has(e.titelId) && e.dateiname)
+    .map(e=>e.dateiname.toLowerCase()));
+  const doppelt=saetze.filter(s=>namenImBuch.has((s.name||'').toLowerCase()));
+  let zuSchreiben=saetze;
+  if(doppelt.length){
+    const ueberspringen=confirm(
+      doppelt.length+' der Blätter '+(doppelt.length===1?'trägt':'tragen')
+      +' einen Dateinamen, der in diesem Buch schon vorkommt:\n\n'
+      +doppelt.slice(0,8).map(s=>'· '+s.name).join('\n')
+      +(doppelt.length>8 ? '\n… und '+(doppelt.length-8)+' weitere' : '')
+      +'\n\nOK: diese überspringen\nAbbrechen: trotzdem hinzufügen (sie stehen dann doppelt)');
+    if(ueberspringen) zuSchreiben=saetze.filter(s=>!doppelt.includes(s));
+  }
+  if(!zuSchreiben.length){ if(!stumm) openLibrarySheet(); return 0; }
+
+  const n=await importBandbuch(bid, zuSchreiben);
   /* Aus dem Empfang heraus wird das Buecher-Blatt NICHT aufgeschlagen: Wer in
      der Liste steht und ein Blatt vom Kollegen annimmt, will dort bleiben. */
   if(!stumm) openLibrarySheet();
@@ -5055,6 +5155,75 @@ async function exportPackage(){
       +(zahl.bytes/1048576).toFixed(1)+' MB.');
   }catch(e){ alert('Export fehlgeschlagen: '+(e&&e.message||e)); }
 }
+/* ================================================================
+   Ein gepackter Ordner: ein Ordner wird ein Buch
+
+   Ein ZIP von einem Kollegen ist meistens kein BandStand-Paket, sondern
+   einfach ein gepackter Ordner. Bis zum 2. August lehnte der Empfang das ab.
+
+   Jetzt gilt dieselbe Regel wie beim Ordner-Import am Mac, den es seit Wochen
+   gibt: **Ein Ordner ist ein Buch.** Am 2. August von Jens so entschieden.
+   Dateien, die lose in der Wurzel liegen, kommen in ein Buch, das nach der
+   ZIP-Datei heisst. Traegt ein Buch dieses Namens schon Titel, wird es
+   weiterbenutzt statt ein zweites daneben anzulegen.
+
+   Geschrieben wird durch dieselbe Maschine wie beim Empfang einzelner
+   Blaetter: Titel und Stimme kommen aus dem Dateinamen, und ob ein Blatt an
+   einem vorhandenen Titel andockt, fragt `importPdfs` je Buch einmal.
+   ================================================================ */
+async function zipAlsOrdner(zip, zipName){
+  /* Ordner sammeln. Massgeblich ist der OBERSTE Ordner: „Blauton/Balladen/x.pdf"
+     gehoert zu „Blauton". Tiefere Ebenen zu eigenen Buechern zu machen, ergaebe
+     bei einem verschachtelten Archiv ein Dutzend Buecher fuer eine Band. */
+  const wurzelName=(zipName||'Empfangen').replace(/\.zip$/i,'').trim() || 'Empfangen';
+  const nachOrdner=new Map();
+  const pfade=[];
+  zip.forEach((pfad, eintrag)=>{ if(!eintrag.dir && /\.pdf$/i.test(pfad)) pfade.push(pfad); });
+  if(!pfade.length){
+    alert('Das ist kein BandStand-Paket: Es enthält keinen Katalog und keine Notenblätter.');
+    return;
+  }
+  for(const pfad of pfade){
+    /* Ordner, die Packprogramme mitliefern, gehoeren nicht dazu. */
+    if(/(^|\/)__MACOSX\//.test(pfad) || /(^|\/)\._/.test(pfad)) continue;
+    const teile=pfad.split('/').filter(Boolean);
+    const datei=teile.pop();
+    const buch = teile.length ? teile[0] : wurzelName;
+    if(!nachOrdner.has(buch)) nachOrdner.set(buch, []);
+    nachOrdner.get(buch).push({pfad, datei});
+  }
+  if(!nachOrdner.size){ alert('Im Archiv steht kein lesbares Notenblatt.'); return; }
+
+  const ordner=[...nachOrdner.entries()];
+  const zahl=ordner.reduce((n,[,d])=>n+d.length,0);
+  if(!confirm('Gepackter Ordner mit '+zahl+(zahl===1?' Notenblatt':' Notenblättern')+' in '
+    +ordner.length+(ordner.length===1?' Ordner.':' Ordnern.')+'\n\n'
+    +ordner.map(([b,d])=>'· '+b+' ('+d.length+')').slice(0,8).join('\n')
+    +(ordner.length>8 ? '\n… und '+(ordner.length-8)+' weitere' : '')
+    +'\n\nJeder Ordner wird ein Buch. Fortfahren?')) return;
+
+  let gesamt=0; const bericht=[];
+  for(const [buchName, dateien] of ordner){
+    /* Ein Buch dieses Namens weiterbenutzen, statt ein zweites anzulegen. */
+    let bid=(USERBOOKS.find(b=>b.name===buchName)||{}).bid;
+    if(!bid){
+      try{ const b=await BS.buchAnlegen({name:buchName}); bid=b.id||b; }
+      catch(e){ bericht.push(buchName+': Buch anlegen fehlgeschlagen'); continue; }
+      await loadLibrary();
+    }
+    const files=[];
+    for(const {pfad, datei} of dateien){
+      try{ const blob=await zip.file(pfad).async('blob');
+           files.push(new File([blob], datei, {type:'application/pdf'})); }
+      catch(e){ bericht.push(datei+': nicht lesbar'); }
+    }
+    if(!files.length) continue;
+    const n=await importPdfs(bid, files, true);
+    gesamt+=n; bericht.push(buchName+': '+n+(n===1?' Blatt':' Blätter'));
+  }
+  await loadLibrary(); render();
+  alert('Eingelesen: '+gesamt+(gesamt===1?' Blatt':' Blätter')+'\n\n'+bericht.join('\n'));
+}
 /* Einlesen. Es kennt zwei Formen: den neuen Katalog und das alte
    Sammlungspaket, damit frueher erzeugte Pakete nicht verloren sind.
 
@@ -5063,7 +5232,7 @@ async function exportPackage(){
 async function importPackage(file){
   let zip; try{ zip=await JSZip.loadAsync(file); }catch(e){ alert('Kein gültiges Paket.'); return; }
   const neu=zip.file('katalog.json'), alt=zip.file('manifest.json');
-  if(!neu && !alt){ alert('Das Paket enthält weder katalog.json noch manifest.json.'); return; }
+  if(!neu && !alt) return zipAlsOrdner(zip, file && file.name);
   let kat;
   try{ kat=JSON.parse(await (neu||alt).async('string')); }
   catch(e){ alert('Der Katalog im Paket ist nicht lesbar.'); return; }
@@ -6633,7 +6802,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Programm drucken und Blaetter empfangen';
+const APP_BUILD='2026-08-02 · Ordner werden Buecher, Werkzeuge nennen ihre Ebene';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -6687,7 +6856,7 @@ if('serviceWorker' in navigator){
 
 render();
 /* eigene importierte Noten aus IndexedDB nachladen und Liste aktualisieren */
-loadLibrary().then(render).catch(()=>{});
+loadLibrary().then(render).then(geteiltesAbholen).catch(()=>{});
 
 /* ============================================================================
    Cloud-Abgleich (Dropbox) — Phase 4, Baustein „Cloud-Abgleich"
@@ -8845,28 +9014,76 @@ loadLibrary().then(render).catch(()=>{});
   /* Die Werkzeugleiste. „Neu" solange nichts gewählt ist; sobald etwas
      angehakt ist, nennt sie die Zahl und bietet die Werkzeuge. Jedes wirkt
      auf die ganze Auswahl. */
+  /* ---- Schritt 3: die Werkzeuge sagen, worauf sie wirken --------------
+     „Entfernen" hiess auf allen drei Ebenen gleich und meinte dreierlei
+     Reichweite: ein Buch samt allem darin, einen Titel samt seinen Blaettern,
+     ein einzelnes Blatt. Der Bestaetigungstext sagte es, der Knopf nicht. Wer
+     den Text ueberliest — und man ueberliest ihn —, loescht ein Buch im
+     Glauben, ein Blatt zu entfernen.
+
+     Jetzt steht die Ebene und die Zahl auf dem Knopf, und was daran haengt,
+     steht ueber der Leiste, bevor man tippt. Das ist die erste der drei
+     Bedingungen aus dem Content-Konzept: Es muss erkennbar sein, was
+     geschehen wird.
+
+     Das Konzept hatte dafuer den Notenbereich vorgesehen, der beim Auswaehlen
+     ohnehin leer steht. Der Blick in den Code widerlegt das: Bei offenem Setup
+     ist die Buehne auf `display:none` gesetzt, und Content IST das Setup. Die
+     Vorschau steht deshalb dort, wo die Auswahl steht, und gilt damit in
+     beiden Lagen statt nur im Querformat. */
+  const EBENE_WORT = { buch:['Buch','Bücher'], titel:['Titel','Titel'],
+                       element:['Element','Elemente'] };
+  function cMenge(eb, n){
+    return n===1 ? EBENE_WORT[eb][0] : n+' '+EBENE_WORT[eb][1];
+  }
+  /* Was haengt an der Auswahl? Ein Buch nimmt seine Titel und deren Blaetter
+     mit; genau das macht eine irrtuemliche Mehrfachauswahl teuer. */
+  function cFolgen(eb, ids){
+    const K=BS_KATALOG, menge=new Set(ids);
+    if(eb==='buch'){
+      const tt=(K.titel||[]).filter(t=>menge.has(t.buchId));
+      const ids2=new Set(tt.map(t=>t.id));
+      return { titel:tt.length, elemente:(K.elemente||[]).filter(e=>ids2.has(e.titelId)).length };
+    }
+    if(eb==='titel')
+      return { elemente:(K.elemente||[]).filter(e=>menge.has(e.titelId)).length };
+    return {};
+  }
+  function cFolgenText(eb, ids){
+    const f=cFolgen(eb, ids), teile=[];
+    if(f.titel)    teile.push(f.titel+(f.titel===1?' Titel':' Titel'));
+    if(f.elemente) teile.push(f.elemente+(f.elemente===1?' Element':' Elemente'));
+    if(!teile.length) return '';
+    /* „Daran hängt 1 Element", nicht „hängen". Ein einzelner Posten mit der
+       Zahl eins ist der einzige Fall, in dem das Verb in den Singular geht. */
+    const einzahl = teile.length===1 && (f.titel===1 || f.elemente===1);
+    return 'Daran '+(einzahl?'hängt ':'hängen ')+teile.join(' und ');
+  }
   function cWerkzeuge(){
     const eb=cEbene(), n=cWahl.size;
-    const z=zeile(n ? (n+' gewählt') : 'Nichts gewählt',
-      n ? 'Jedes Werkzeug wirkt auf die ganze Auswahl'
+    const ids=[...cWahl];
+    const folgen = n ? cFolgenText(eb, ids) : '';
+    const z=zeile(n ? (cMenge(eb,n)+' gewählt') : 'Nichts gewählt',
+      n ? (folgen || 'Jedes Werkzeug wirkt auf die ganze Auswahl')
         : 'Hake an, was Du bewegen, umbenennen oder weitergeben willst');
+    z.classList.add('werkzeuge');
+    if(folgen) z.classList.add('warnrow');
     const reihen=cReihen();
     if(reihen.length) z._ctl.append(knopf(n===reihen.length?'Auswahl aufheben':'Alle auswählen', ()=>{
       if(n===reihen.length) cWahl=new Set(); else cWahl=new Set(reihen.map(r=>r.id));
       zeichne(); }));
     if(!n) return z;
-    const ids=[...cWahl];
     if(eb!=='buch'){
       z._ctl.append(
-        knopf('Verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
-        knopf('Kopieren',    ()=>{ cAktion={art:'kopieren',    ebene:eb, ids}; zeichne(); }));
+        knopf(cMenge(eb,n)+' verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
+        knopf(cMenge(eb,n)+' kopieren',    ()=>{ cAktion={art:'kopieren',    ebene:eb, ids}; zeichne(); }));
     }
     /* „Als Paket teilen" und nicht „Teilen": Hier entsteht ein BandStand-Paket
        fuer ein anderes BandStand. Die Hauptliste reicht mit „Weitergeben" lose
        PDFs an das Teilen-Blatt des Geraets — zwei verschiedene Dinge, die bis
        zum 30. Juli beide „Teilen" hiessen. */
     if(eb==='titel') z._ctl.append(knopf('Als Paket teilen', ()=>cTeilen(ids)));
-    z._ctl.append(knopf('Entfernen', ()=>cEntfernen(eb, ids), 'warn'));
+    z._ctl.append(knopf(cMenge(eb,n)+' entfernen', ()=>cEntfernen(eb, ids), 'warn'));
     return z;
   }
 
@@ -8874,6 +9091,9 @@ loadLibrary().then(render).catch(()=>{});
     const was = eb==='buch' ? (ids.length===1?'dieses Buch':ids.length+' Bücher')
               : eb==='titel'? (ids.length===1?'diesen Titel':ids.length+' Titel')
               :               (ids.length===1?'dieses Element':ids.length+' Elemente');
+    /* Dieselbe Zahl wie ueber der Leiste, damit die Rueckfrage nichts Neues
+       behauptet und nichts verschweigt. */
+    const folgen = cFolgenText(eb, ids);
     /* Auf der Element-Ebene heisst Entfernen genau das, was Jens am 30. Juli
        mit „Löschen" gemeint hat: die Verbindung zwischen Blatt und Titel wird
        geloest, die Datei bleibt liegen. Das steht jetzt da, statt dass man es
@@ -8886,7 +9106,7 @@ loadLibrary().then(render).catch(()=>{});
         + 'lässt sich aus dem Papierkorb zurückholen.\n\n'
         + 'Hängt sie nur am falschen Titel, ist Verschieben der kürzere Weg.'
       : was+' entfernen?\n\n'
-        + (eb==='buch' ? 'Die Titel und Elemente darin gehen mit.\n\n' : '')
+        + (folgen ? folgen+', und alles davon geht mit.\n\n' : '')
         + 'Es wandert in den Papierkorb; die Dateien bleiben liegen. '
         + 'Endgültig gelöscht wird erst dort.';
     if(!confirm(text)) return;

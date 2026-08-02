@@ -10,7 +10,7 @@
    Der Noten-Cache bleibt davon ausgenommen. Er heißt weiterhin 'tunes-rb-v1'; das Kürzel ist
    historisch und ohne Bedeutung, ein Umbenennen brächte nichts und riskierte nur, dass jemand
    seine offline gespeicherten Noten verliert. */
-const SHELL = 'shell-bs-20';
+const SHELL = 'shell-bs-22';
 const MINE  = /^shell-/;         // es gibt nur noch eine App auf dieser Adresse
 const TUNES = 'tunes-rb-v1';
 const SHELL_ASSETS = [
@@ -31,9 +31,43 @@ self.addEventListener('activate', e => {
   );
 });
 
+/* Das Teilen-Blatt des Geräts.
+   Das Manifest meldet BandStand als Ziel für PDFs, ZIPs und Bilder an. Wählt
+   jemand die App dort aus, schickt das System einen POST auf './geteilt' —
+   eine Adresse, die es auf dem Server nicht gibt und auch nicht geben kann:
+   GitHub Pages liefert nur Dateien aus. Beantwortet wird er deshalb hier.
+
+   Die Dateien wandern in einen eigenen Cache und die App wird mit
+   '?geteilt=1' geöffnet; sie holt sie dort ab und leert das Fach.
+
+   Ob iOS das je auslöst, ist offen — Safari kennt Web Share Target nach
+   meinem Kenntnisstand nicht. Auf Android und im Chrome-Umfeld tut es das.
+   Der Weg über den Empfangs-Knopf bleibt davon unberührt. */
+const GETEILT = 'geteilt-bs';
+
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
+
+  if (e.request.method === 'POST' && url.pathname.endsWith('/geteilt')) {
+    e.respondWith((async () => {
+      try {
+        const form = await e.request.formData();
+        const dateien = form.getAll('dateien').filter(f => f && f.name);
+        const cache = await caches.open(GETEILT);
+        for (const k of await cache.keys()) await cache.delete(k);
+        let i = 0;
+        for (const f of dateien) {
+          await cache.put(new Request('/geteilt/' + (i++) + '/' + encodeURIComponent(f.name)),
+                          new Response(f, { headers: { 'Content-Type': f.type || 'application/octet-stream' } }));
+        }
+      } catch (_) {}
+      return Response.redirect('./index.html?geteilt=1', 303);
+    })());
+    return;
+  }
+
+  if (e.request.method !== 'GET') return;
 
   if (url.pathname.includes('/tunes/')) {
     // Noten: cache-first (offline-fest)
