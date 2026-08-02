@@ -516,6 +516,45 @@
      bis zum 2. August auf der Listenspalte — in der geteilten Ansicht des
      iPads ist die aber gar nicht zu sehen, wenn ein Blatt offen ist. Deshalb
      ein Streifen ueber allem, der sagt, was beim Loslassen geschieht. */
+  /* ================================================================
+     Drucken aus dem eigenen Dokument
+
+     Das Fach `#druckRaum` ist am Bildschirm unsichtbar. Beim Drucken kehrt
+     sich das um: Alles Uebrige verschwindet, nur das Fach bleibt. So braucht
+     es kein zweites Fenster — und damit auch keine Drosselung im Hintergrund,
+     keinen Pop-up-Blocker und keinen Rueckweg.
+     ================================================================ */
+  #druckRaum{display:none}
+  #druckLauf{position:fixed;inset:0;z-index:98;display:none;
+    align-items:center;justify-content:center;background:var(--scrim-dlg)}
+  #druckLauf .kasten{background:var(--bg-elev);border:1px solid var(--border-strong);
+    border-radius:var(--r-16);box-shadow:var(--shadow-dlg);padding:20px 24px;
+    display:flex;flex-direction:column;gap:12px;align-items:center;
+    font:600 14px/1.4 var(--font-sans);color:var(--text);max-width:80vw;text-align:center}
+  @media print{
+    @page{ size:auto; margin:0 }
+    html,body{ margin:0 !important; padding:0 !important; background:#fff !important }
+    body>*{ display:none !important }
+    body>#druckRaum{ display:block !important }
+    #druckRaum{ font:14px/1.45 system-ui,-apple-system,sans-serif; color:#111 }
+    #druckRaum .bs-seite{ height:100vh; overflow:hidden; box-sizing:border-box;
+      break-after:page; page-break-after:always }
+    #druckRaum .bs-seite.letzte{ break-after:auto; page-break-after:auto }
+    #druckRaum .bs-blatt{ display:flex; align-items:center; justify-content:center;
+      background:#fff }
+    #druckRaum .bs-blatt img{ max-width:100%; max-height:100%; width:auto; height:auto;
+      display:block; border:0 }
+    #druckRaum .bs-programm{ padding:20mm 18mm }
+    #druckRaum .bs-programm h1{ font-size:22pt; margin:0 0 2mm }
+    #druckRaum .bs-programm .unter{ color:#555; font-size:10pt; margin:0 0 8mm }
+    #druckRaum .bs-programm ol{ margin:0; padding-left:8mm; font-size:12pt }
+    #druckRaum .bs-programm li{ margin:0 0 3.5mm; break-inside:avoid }
+    #druckRaum .bs-programm .wer{ color:#555; font-size:10pt }
+    #druckRaum .bs-programm .tags{ margin-top:1mm }
+    #druckRaum .bs-programm .tag{ font-size:8.5pt; border:1px solid #999;
+      border-radius:9px; padding:0 6px; margin-right:4px; display:inline-block;
+      white-space:nowrap }
+  }
   #ablageZeichen{position:fixed;inset:0;z-index:97;display:none;
     align-items:center;justify-content:center;pointer-events:none;
     background:var(--accent-wash-strong)}
@@ -2285,6 +2324,30 @@ function zeigStimme(etikett, instrument){
 window.anzeigeStimme = anzeigeStimme;
 window.zeigStimme = zeigStimme;
 
+/* Wie nah steht eine Stimme an der gewaehlten Voice? 0 ist der eigene Name,
+   0.5 die eigene Notation, 1 alles andere. Damit laesst sich sortieren.
+
+   Am 2. August von Jens verlangt: Wer Gitarre gewaehlt hat, will „Git" als
+   erste Marke der Zeile sehen und nicht an achter Stelle zwischen Bass und
+   Keys. Die Reihenfolge der Voice-Liste bestimmt weiter alles Uebrige. */
+function stimmenNaehe(t){
+  const ich=(typeof meinInstrument==='function') ? meinInstrument() : null;
+  if(!ich) return 1;
+  const w=instrNorm(stimmWert(t));
+  const namen=[ich.name, ich.en].filter(Boolean).map(instrNorm);
+  if(namen.includes(w)) return 0;
+  if(ich.notation && stimmWert(t)===ich.notation) return 0.5;
+  return 1;
+}
+/* Die eine Ordnung fuer alle Zeilenbauer: eigene Stimme zuerst, danach die
+   Voice-Liste, bei gleichem Instrument das Etikett. */
+function stimmenOrdnen(arr){
+  return arr.sort((a,b)=>
+    (stimmenNaehe(a)-stimmenNaehe(b))
+    || (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
+    || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}));
+}
+window.stimmenOrdnen = stimmenOrdnen;
 function waehleStimme(stimmen){
   if(!stimmen || !stimmen.length) return null;
   const ich=meinInstrument();
@@ -3228,47 +3291,78 @@ async function bulkShare(){
    Das letzte Blatt bekommt keinen Umbruch mehr, sonst faellt hinten eine leere
    Seite heraus.
    ================================================================ */
-function druckStil(){
-  return `<style>
-    @page{ size:auto; margin:0 }
-    html,body{ margin:0; padding:0 }
-    body{ font:14px/1.45 system-ui,-apple-system,sans-serif; color:#111 }
-    /* Der Rueckweg. Bricht man den Druck ab, bleibt man in diesem Fenster und
-       sieht die Blaetter — und kommt ohne diesen Streifen nicht mehr zurueck.
-       Jens ist am 2. August genau darin haengengeblieben. Auf Papier ist er
-       nicht dabei. */
-    .bs-leiste{ position:fixed; top:0; left:0; right:0; z-index:9; display:flex;
-      align-items:center; gap:12px; padding:9px 14px; background:#111; color:#fff;
-      font:600 14px/1.2 system-ui,-apple-system,sans-serif }
-    .bs-leiste button{ font:inherit; padding:7px 14px; border-radius:9px;
-      border:0; background:#fff; color:#111; cursor:pointer }
-    .bs-leiste .hinweis{ font-weight:400; opacity:.75; font-size:12.5px }
-    @media screen{ body{ padding-top:48px } }
-    @media print{ .bs-leiste{ display:none } body{ padding-top:0 } }
-    .bs-seite{ height:100vh; overflow:hidden; box-sizing:border-box;
-               break-after:page; page-break-after:always }
-    .bs-seite.letzte{ break-after:auto; page-break-after:auto }
-    /* Ein Bild je Seite, in die Druckseite eingepasst und nie beschnitten.
-       Frueher stand hier ein embed mit dem PDF; siehe pdfAlsSeitenbilder.
-       ACHTUNG: Dieser Block steht in einer Vorlagen-Zeichenkette. Ein
-       rueckwaerts geneigtes Anfuehrungszeichen schliesst sie hier mitten im
-       Kommentar — genau daran ist der erste Anlauf gescheitert. */
-    .bs-blatt{ display:flex; align-items:center; justify-content:center; background:#fff }
-    .bs-blatt img{ max-width:100%; max-height:100%; width:auto; height:auto;
-                   display:block; border:0 }
-    .bs-programm{ padding:20mm 18mm }
-    .bs-programm h1{ font-size:22pt; margin:0 0 2mm }
-    .bs-programm .unter{ color:#555; font-size:10pt; margin:0 0 8mm }
-    .bs-programm ol{ margin:0; padding-left:8mm; font-size:12pt }
-    .bs-programm li{ margin:0 0 3.5mm; break-inside:avoid }
-    .bs-programm .wer{ color:#555; font-size:10pt }
-    .bs-programm .tags{ margin-top:1mm }
-    .bs-programm .tag{ font-size:8.5pt; border:1px solid #999; border-radius:9px;
-                       padding:0 6px; margin-right:4px; display:inline-block; white-space:nowrap }
-  </style>`;
+/* ================================================================
+   Gedruckt wird IM Dokument, nicht in einem zweiten Fenster
+
+   Der zweite Anlauf hat einen Fehler eingebaut, der erst auf dem iPad
+   sichtbar wurde: Das Druckfenster ging zuerst auf — wegen des
+   Pop-up-Blockers muss das im Griff des Nutzers geschehen —, und danach
+   wurde in BandStand gezeichnet. Nur liegt BandStand dann im HINTERGRUND.
+   Dort feuert `requestAnimationFrame` nicht, und PDF.js wartet ewig. Jens
+   stand nach Minuten immer noch bei „Blatt 1 von 5 wird gezeichnet".
+
+   Das ist dieselbe Falle, die den Pruefstand schon zweimal gekostet hat,
+   nur diesmal im Betrieb. Sie verschwindet, wenn es kein zweites Fenster
+   mehr gibt.
+
+   Gedruckt wird deshalb aus dem eigenen Dokument. Ein verstecktes Fach
+   nimmt die Seiten auf; beim Drucken blendet das Stilblatt alles andere
+   aus. Das loest drei Dinge auf einmal: keine Drosselung, kein
+   Pop-up-Blocker, und kein Fenster, aus dem man nicht mehr zurueckfindet.
+   ================================================================ */
+function druckFortschritt(text){
+  let k=document.getElementById('druckLauf');
+  if(!k){
+    k=document.createElement('div'); k.id='druckLauf';
+    k.innerHTML='<div class="kasten"><div class="text"></div>'
+      +'<button class="btn ghost sm" id="druckAb">Abbrechen</button></div>';
+    document.body.append(k);
+    k.querySelector('#druckAb').onclick=()=>{ druckAbbruch=true; };
+  }
+  k.querySelector('.text').textContent=text;
+  k.style.display='flex';
+}
+function druckFortschrittWeg(){
+  const k=document.getElementById('druckLauf'); if(k) k.style.display='none';
+}
+let druckAbbruch=false;
+/* Ein Blatt wird zum Drucken gezeichnet, nicht eingebettet.
+
+   Ein `<embed>` zeigt nur den Anfang eines Dokuments — ein mehrseitiges
+   Stueck kam ab Seite zwei nicht mit, und Drucken scrollt nicht. Und ueber
+   Massstab und Ausschnitt entscheidet der PDF-Betrachter des Browsers
+   selbst; auf dem iPad hat er die Blaetter rechts und unten abgeschnitten.
+
+   Gezeichnet wird mit derselben Bibliothek wie die Buehne, aber ueber einen
+   eigenen Weg — der Safari-Betrachter wird nicht angefasst. */
+async function pdfAlsSeitenbilder(url){
+  if(!window.pdfjsLib) throw new Error('PDF.js steht nicht bereit.');
+  const buf=await (await fetch(encodeURI(url))).arrayBuffer();
+  const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+  const bilder=[];
+  for(let n=1; n<=doc.numPages; n++){
+    if(druckAbbruch) break;
+    const s=await doc.getPage(n);
+    const eins=s.getViewport({scale:1});
+    /* 1400 Bildpunkte auf der langen Kante: rund 170 dpi, fein genug fuer
+       Notensatz und Handschrift, und ein Blatt wiegt als JPEG ein paar
+       hundert Kilobyte statt einiger Megabyte. */
+    const lang=Math.max(eins.width, eins.height);
+    const vp=s.getViewport({scale:1400/lang});
+    const c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round(vp.width)); c.height=Math.max(1,Math.round(vp.height));
+    const ctx=c.getContext('2d');
+    /* Weisser Grund: Ein gescanntes Blatt ist weiss, eine Leinwand ist
+       durchsichtig. Ohne das kaeme Schwarz auf Schwarz aus dem Drucker. */
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+    await s.render({canvasContext:ctx, viewport:vp}).promise;
+    bilder.push(c.toDataURL('image/jpeg',0.85));
+  }
+  try{ doc.destroy(); }catch(e){}
+  return bilder;
 }
 /* Das erste Blatt: der Name der Liste, darunter die Titel in ihrer Reihenfolge
-   mit Komponist, Buch und den vergebenen Tags. Am 2. August von Jens verlangt. */
+   mit Komponist, Buch und den vergebenen Tags. */
 function programmHTML(name, items){
   const zeilen=items.map(t=>{
     const tags=gruppeTagIds(t).map(id=>{ const g=tagById(id); return g?g.name:null; }).filter(Boolean);
@@ -3279,97 +3373,43 @@ function programmHTML(name, items){
       + '</li>';
   }).join('');
   return '<div class="bs-seite bs-programm"><h1>'+esc(name)+'</h1>'
-    + '<div class="unter">'+items.length+(items.length===1?' Titel':' Titel')+'</div>'
+    + '<div class="unter">'+items.length+' Titel</div>'
     + '<ol>'+zeilen+'</ol></div>';
 }
-/* Das Fenster wird VOR dem Warten geoeffnet. Nach einem `await` gilt der Klick
-   nicht mehr als Nutzerhandlung, und der Pop-up-Blocker haelt es zurueck. */
-function druckFenster(titel){
-  const w=window.open('','_blank');
-  if(!w){ alert('Bitte Pop-ups erlauben, um zu drucken.'); return null; }
-  w.document.write('<html><head><title>'+esc(titel)+'</title></head><body style="margin:0;font:14px system-ui;color:#222">'
-    +'<p id="fort" style="padding:16px">Blätter werden geholt…</p></body></html>');
-  return w;
-}
-function druckFortschritt(w, text){
-  try{ const p=w.document.getElementById('fort'); if(p) p.textContent=text; }catch(e){}
-}
-/* ================================================================
-   Ein Blatt wird zum Drucken gezeichnet, nicht eingebettet
-
-   Bis zum 2. August stand je Stueck ein `<embed>` mit dem PDF im
-   Druckdokument. Das war an zwei Stellen nicht zu retten.
-
-   Erstens zeigt ein `<embed>` nur den Anfang des Dokuments. Ein mehrseitiges
-   Stueck wurde ab Seite zwei weder angezeigt noch gedruckt — man haette
-   scrollen muessen, und Drucken scrollt nicht.
-
-   Zweitens entscheidet der PDF-Betrachter des Browsers selbst ueber Massstab
-   und Ausschnitt. Auf Jens' iPad hat er die Blaetter rechts und unten
-   abgeschnitten, und dagegen half keine Angabe im Stilblatt: Was in dem
-   Rahmen geschieht, gehoert dem Betrachter und nicht der Seite.
-
-   Gezeichnet wird jetzt mit PDF.js, ein Bild je SEITE. Dieselbe Bibliothek,
-   die auch die Buehne benutzt, aber ein eigener Weg — der Safari-Betrachter
-   wird nicht angefasst. Dasselbe Vorgehen wie beim Foto, das als eigenes PDF
-   gebaut wird, statt den Betrachter zu biegen.
-   ================================================================ */
-async function pdfAlsSeitenbilder(url){
-  if(!window.pdfjsLib) throw new Error('PDF.js steht nicht bereit.');
-  const buf=await (await fetch(encodeURI(url))).arrayBuffer();
-  const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
-  const bilder=[];
-  for(let n=1; n<=doc.numPages; n++){
-    const s=await doc.getPage(n);
-    const eins=s.getViewport({scale:1});
-    /* 1400 Bildpunkte auf der langen Kante ergeben bei A4 rund 170 dpi:
-       fein genug fuer Notensatz und Handschrift, und ein Blatt wiegt als
-       JPEG ein paar hundert Kilobyte statt einiger Megabyte. */
-    const lang=Math.max(eins.width, eins.height);
-    const vp=s.getViewport({scale:1400/lang});
-    const c=document.createElement('canvas');
-    c.width=Math.max(1,Math.round(vp.width)); c.height=Math.max(1,Math.round(vp.height));
-    const ctx=c.getContext('2d');
-    /* Weisser Grund: Ein gescanntes Blatt ist weiss, und eine Leinwand ist
-       durchsichtig. Ohne das kaeme Schwarz auf Schwarz aus dem Drucker. */
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
-    await s.render({canvasContext:ctx, viewport:vp}).promise;
-    bilder.push(c.toDataURL('image/jpeg',0.85));
-  }
-  try{ doc.destroy(); }catch(e){}
-  return bilder;
-}
-function druckSchreiben(w, titel, programm, seitenbilder){
-  const bilder=seitenbilder||[];
-  const blaetter=bilder.map((src,i)=>
+/* Die Seiten in das Fach legen und drucken. Aufgeraeumt wird danach. */
+function druckImDokument(titel, programm, bilder){
+  let raum=document.getElementById('druckRaum');
+  if(!raum){ raum=document.createElement('div'); raum.id='druckRaum'; document.body.append(raum); }
+  const seiten=(bilder||[]).map((src,i)=>
     '<div class="bs-seite bs-blatt'+(i===bilder.length-1?' letzte':'')+'">'
     + '<img src="'+src+'" alt=""></div>').join('');
-  /* Gibt es keine Blaetter, traegt das Programm das Ende — sonst faellt hinter
-     ihm eine leere Seite heraus. */
-  const prog = programm && !bilder.length
+  const prog = programm && !(bilder||[]).length
     ? programm.replace('class="bs-seite bs-programm"','class="bs-seite bs-programm letzte"')
     : (programm||'');
-  /* Nach dem Drucken schliesst sich das Fenster von selbst; bricht man ab,
-     traegt der Streifen oben den Weg zurueck. `window.close()` gilt fuer ein
-     Fenster, das ein Skript geoeffnet hat — und dieses hier ist eines. */
-  const leiste='<div class="bs-leiste"><button onclick="window.close()">‹ Zurück zu BandStand</button>'
-    + '<span class="hinweis">Dieser Streifen wird nicht mitgedruckt.</span></div>';
-  /* Gedruckt wird erst, wenn alle Seitenbilder da sind. Ein `setTimeout` auf
-     gut Glueck druckte sonst leere Seiten, sobald ein Blatt laenger brauchte.
-     Die Notbremse nach acht Sekunden sorgt dafuer, dass ein einzelnes
-     stummes Bild den Druck nicht ganz verhindert. */
-  const anstoss = '<script>(function(){var g=false;'
-    + 'function los(){if(g)return;g=true;setTimeout(function(){window.print();},250);}'
-    + 'window.onafterprint=function(){window.close();};'
-    + 'var b=[].slice.call(document.images),n=b.length,f=0;'
-    + 'if(!n){los();return;}'
-    + 'b.forEach(function(i){if(i.complete){if(++f===n)los();return;}'
-    + 'i.onload=i.onerror=function(){if(++f===n)los();};});'
-    + 'setTimeout(los,8000);})()<\/script>';
-  w.document.open();
-  w.document.write('<html><head><title>'+esc(titel)+'</title>'+druckStil()+'</head><body>'
-    + leiste + prog + blaetter + anstoss + '</body></html>');
-  w.document.close();
+  raum.innerHTML = prog + seiten;
+  /* Der Fenstertitel wird beim „In PDF sichern" zum Dateinamen. */
+  const alterTitel=document.title;
+  document.title=titel;
+  const aufraeumen=()=>{ raum.innerHTML=''; document.title=alterTitel;
+    window.removeEventListener('afterprint', aufraeumen); };
+  window.addEventListener('afterprint', aufraeumen);
+  /* Erst drucken, wenn die Bilder geladen sind — sonst druckt Safari leere
+     Seiten.
+
+     NICHT ueber `decode()`: Das Fach steht auf `display:none`, und fuer ein
+     Bild, das nicht gezeichnet wird, loest `decode()` in manchen Browsern nie
+     auf. Am 3. August gemessen: Alle Bilder waren fertig, `window.print` wurde
+     trotzdem nie gerufen. `load` feuert dagegen auch im verborgenen Fach. */
+  const bl=[...raum.querySelectorAll('img')];
+  const fertig=new Promise(res=>{
+    let offen=bl.filter(i=>!(i.complete && i.naturalWidth>0)).length;
+    if(!offen) return res();
+    bl.forEach(i=>{ if(i.complete && i.naturalWidth>0) return;
+      i.addEventListener('load', ()=>{ if(--offen<=0) res(); }, {once:true});
+      i.addEventListener('error',()=>{ if(--offen<=0) res(); }, {once:true}); });
+    setTimeout(res, 6000);            /* Notbremse */
+  });
+  fertig.then(()=>setTimeout(()=>{ try{ window.print(); }catch(e){} }, 150));
 }
 /* In einer offenen Setliste druckt „Drucken" das Programm voran: erst der Name
    der Liste und die Titel in ihrer Reihenfolge, dann die Blaetter. Sonst nur
@@ -3383,15 +3423,18 @@ async function bulkPrint(){
   if(st){ const drin=new Set(S.selection);
     items=st.items.filter(k=>drin.has(k)).map(k=>byKey[k]).filter(t=>t&&!t.isEdit); }
   const name = st ? st.name : ('Auswahl ('+items.length+')');
-  const w=druckFenster(name); if(!w) return;
   await urlSichernViele(items);
   const bilder=[], schief=[];
   const mitBytes=items.filter(t=>t.f);
+  druckAbbruch=false;
   try{
     let n=0;
     for(const t of mitBytes){
+      if(druckAbbruch) break;
       n++;
-      druckFortschritt(w, 'Blatt '+n+' von '+mitBytes.length+' wird gezeichnet…');
+      druckFortschritt('Blatt '+n+' von '+mitBytes.length+' wird gezeichnet…');
+      /* Dem Bildschirm eine Runde lassen, sonst steht die Zahl still. */
+      await new Promise(r=>requestAnimationFrame(()=>r()));
       try{ bilder.push(...await pdfAlsSeitenbilder(t.f)); }
       catch(e){ schief.push(t.t||'ein Blatt'); }
     }
@@ -3399,8 +3442,10 @@ async function bulkPrint(){
     /* Die geliehenen Verweise gleich zurueckgeben: Die Seitenbilder tragen
        ihre Daten selbst, das Druckdokument braucht die Dateien nicht mehr. */
     urlFreigebenViele(items);
+    druckFortschrittWeg();
   }
-  druckSchreiben(w, name, st?programmHTML(st.name, items):null, bilder);
+  if(druckAbbruch){ druckAbbruch=false; return; }
+  druckImDokument(name, st?programmHTML(st.name, items):null, bilder);
   if(schief.length)
     alert('Nicht gezeichnet: '+schief.join(', ')
       +'\n\nDie übrigen Blätter sind im Druck.');
@@ -4172,11 +4217,10 @@ function zuZeilen(blaetter){
     z.stimmen.push(t);
   });
   zeilen.forEach(z=>{
-    /* Nach dem Instrument ordnen, bei gleichem Instrument nach dem Etikett —
-       sonst stehen „Alt 2" und „Alt 1" in zufaelliger Reihenfolge. */
-    if(z.stimmen.length>1) z.stimmen.sort((a,b)=>
-      (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
-      || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}));
+    /* Eigene Stimme zuerst, dann nach der Voice-Liste, bei gleichem Instrument
+       nach dem Etikett — sonst stehen „Alt 2" und „Alt 1" in zufaelliger
+       Reihenfolge. */
+    if(z.stimmen.length>1) stimmenOrdnen(z.stimmen);
     z.zeige=waehleStimme(z.stimmen);
   });
   return zeilen;
@@ -4746,9 +4790,7 @@ function renderOneSet(main){
        aendert, soll das Ergebnis sofort sehen und nicht erst nach einem
        Neustart. Dieselbe Rechnung wie in `zuZeilen`. */
     const grp = (t.gid && GRUPPEN[t.gid] && GRUPPEN[t.gid].length>1)
-      ? GRUPPEN[t.gid].slice().sort((a,b)=>
-          (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b)))
-          || (a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}))
+      ? stimmenOrdnen(GRUPPEN[t.gid].slice())
       : [t];
     /* Die vier Symbole der Hauptliste fehlten hier bis zum 2. August, und das
        hat wie ein Fehler ausgesehen: Wer in der Setliste „Favorit ＋" in der
@@ -7054,7 +7096,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-02 · Dateiwahl ohne Filter, Buch zur Wahl';
+const APP_BUILD='2026-08-03 · Drucken ohne zweites Fenster, eigene Stimme zuerst';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
