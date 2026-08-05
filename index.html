@@ -3711,6 +3711,17 @@ function titelInDerListe(){
   try{ return zuZeilen(ALL().filter(matches)).length; }
   catch(e){ return (BS_KATALOG.titel||[]).length; }
 }
+/* Wie viele lose Blaetter noch als „kurzer Fall" gelten.
+
+   Der Pruefstein aus dem Content-Konzept lautet: Einen vom Kollegen
+   geschickten Titel ins richtige Buch zu bekommen, darf nicht mehr Handgriffe
+   kosten als ein Foto. Ein einzelnes Blatt durch die Vorschau zu schicken
+   waere genau der Umweg, den der Pruefstein verbietet.
+
+   Bei einem groesseren Stapel kippt das Verhaeltnis: Dort will man vorher
+   sehen, was entsteht. Die Grenze ist gesetzt und nicht gemessen — sie
+   trennt „ein Kollege schickt etwas" von „ich richte etwas ein". */
+const EMPFANG_KURZ = 5;
 async function empfangen(files){
   const liste=[...(files||[])].filter(Boolean);
   if(!liste.length) return;
@@ -3724,7 +3735,16 @@ async function empfangen(files){
       +'\n\nDer Empfang nimmt Notenblätter als PDF und BandStand-Pakete. '
       +'Ein Foto legst Du über „Bearbeiten" an den Titel, zu dem es gehört.');
   for(const p of pakete) await importPackage(p);
-  if(pdfs.length) empfangenBuchFlow(pdfs);
+  if(!pdfs.length) return;
+  /* Lose Blaetter tragen keine Ordner. Es gibt also nichts zu deuten, und der
+     kurze Weg verliert nichts — er fragt nach dem Buch und liest Titel und
+     Stimme aus dem Dateinamen. Erst ein groesserer Stapel geht durch die
+     Vorschau, wo man ihn vorher nachzaehlen kann. */
+  if(pdfs.length<=EMPFANG_KURZ){ empfangenBuchFlow(pdfs); return; }
+  window.importVorschau(pdfs.map(f=>({file:f, pfad:f.name})),
+    pdfs.length+' Blätter empfangen.\n\n'
+    +'Es ist noch nichts geschrieben. Titel und Stimme werden aus den '
+    +'Dateinamen gelesen — prüfe die Vorschau und schreib dann.');
 }
 /* Der zweite Eingang: das Teilen-Blatt des Geraets.
 
@@ -5176,7 +5196,7 @@ async function importPdfs(bid, files, stumm){
   }
   if(!zuSchreiben.length){ if(!stumm) openLibrarySheet(); return 0; }
 
-  const n=await importBandbuch(bid, zuSchreiben);
+  const n=await importStapel(bid, zuSchreiben);
   /* Aus dem Empfang heraus wird das Buecher-Blatt NICHT aufgeschlagen: Wer in
      der Liste steht und ein Blatt vom Kollegen annimmt, will dort bleiben. */
   if(!stumm) openLibrarySheet();
@@ -5193,7 +5213,7 @@ async function importPdfs(bid, files, stumm){
    Das Etikett ist Jens' Schreibweise, das Instrument das Erkannte. Beide
    werden getrennt mitgeschrieben — damit ist Schritt 3 des Import-Konzepts
    erledigt, und auf dem Schalter steht „Alt 1" statt zweimal „Alt-Sax". */
-async function importBandbuch(bid, saetze, fortschritt){
+async function importStapel(bid, saetze, fortschritt){
   const gueltig=(saetze||[]).filter(s=>s && s.file &&
     (/pdf$/i.test(s.file.type||'') || /\.pdf$/i.test(s.file.name||'')));
   if(!gueltig.length) return 0;
@@ -5261,7 +5281,12 @@ async function importBandbuch(bid, saetze, fortschritt){
   window._letzterImport = Object.assign({}, ber, {glatt});
   return ber.elemente;
 }
-window.importBandbuch = importBandbuch;
+window.importStapel = importStapel;
+/* Der alte Name bleibt als Rueckweg, damit Prueflatten und Notizen aus
+   frueheren Sitzungen weiter funktionieren. Ein Buch ist seit dem 5. August
+   eine Sammlung von Titeln und sonst nichts — „Bandbuch" war nie ein eigener
+   Typ im Datenmodell, nur ein Wort. */
+window.importBandbuch = importStapel;
 
 /* ---- Adapter auf die neue Ablage ----------------------------------------
    Die Oberflaeche ruft weiter `saveLibMeta(libId, patch)`. Nur wandern die
@@ -5476,87 +5501,162 @@ function openMetaSheet(t){
 async function exportPackage(){
   const z=await BS.zahlen();
   if(!z.elemente){ alert('Es sind keine eigenen Noten zum Sichern vorhanden.'); return; }
-  const alle=confirm('Bestand exportieren.\n\n'+z.titel+' Stücke, '+z.elemente+' Elemente.\n\n'
-    +'OK: mit Tonaufnahmen (größer)\nAbbrechen: nur Noten');
-  try{
-    const zahl=await BS.exportAlsDatei(alle?{arten:Object.keys(BS.ARTEN)}:undefined);
-    alert('Export erstellt.\n'+zahl.titel+' Stücke, '+zahl.elemente+' Elemente, '
-      +(zahl.bytes/1048576).toFixed(1)+' MB.');
-  }catch(e){ alert('Export fehlgeschlagen: '+(e&&e.message||e)); }
+  exportBlatt(z);
+}
+/* Die Form des Archivs, vor dem Schreiben und mit Beispiel.
+
+   Der Export beantwortet dieselben zwei Fragen wie der Import, nur
+   rueckwaerts: Welche Ebene wird ein Ordner? Vier Kombinationen, und alle
+   vier sind sinnvoll. Voreingestellt bleibt die alte Form, damit ein
+   gewohnter Ablauf sich nicht ohne Ansage aendert. */
+let EXP_FORM={ buchOrdner:true, stueckOrdner:false }, EXP_TON=false;
+function exportBeispiel(f){
+  return (f.buchOrdner ? 'Real Book Vol. 1/' : '')
+       + (f.stueckOrdner ? 'Blue Bossa/Alt 1.pdf' : 'Blue Bossa - Alt 1.pdf');
+}
+function exportBlatt(z){
+  openSheet(card=>{
+    card.innerHTML='<h2>Bestand exportieren</h2>'
+      +'<div class="muted" style="margin:-6px 0 14px">'+z.titel+' Titel, '+z.elemente
+      +' Elemente. Das Archiv lässt sich auch ohne BandStand lesen.</div>'
+      +'<div class="lbl" style="margin:0 0 6px">Wie das Archiv aufgebaut wird</div>'
+      +'<div class="row" id="expWahl" style="flex-wrap:wrap"></div>'
+      +'<div class="lbl" style="margin:14px 0 6px">So sieht es aus</div>'
+      +'<div class="muted" id="expBsp" style="font-family:ui-monospace,monospace"></div>'
+      +'<div class="muted" id="expWarn" style="margin-top:10px"></div>';
+    const wahl=card.querySelector('#expWahl'), bsp=card.querySelector('#expBsp'),
+          warn=card.querySelector('#expWarn');
+    /* Ein Chip je Ja-Nein-Frage. Das Haekchen ist die eine erlaubte
+       Ausnahme von der Emoji-Regel — es steht in einem Auswahl-Kaestchen. */
+    const chips=[
+      {schl:'buchOrdner',   text:'Jedes Buch ein Ordner'},
+      {schl:'stueckOrdner', text:'Jeder Titel ein Ordner'},
+      {schl:'ton',          text:'Tonaufnahmen mitnehmen'},
+    ];
+    const zeichne=()=>{
+      wahl.innerHTML='';
+      chips.forEach(c=>{
+        const an = c.schl==='ton' ? EXP_TON : EXP_FORM[c.schl];
+        const el=document.createElement('div');
+        el.className='chip'+(an?' on':'');
+        el.setAttribute('role','checkbox');
+        el.setAttribute('aria-checked', an?'true':'false');
+        el.tabIndex=0;
+        el.textContent=(an?'✓ ':'')+c.text;
+        const um=()=>{ if(c.schl==='ton') EXP_TON=!EXP_TON;
+                       else EXP_FORM[c.schl]=!EXP_FORM[c.schl]; zeichne(); };
+        el.onclick=um;
+        el.onkeydown=e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); um(); } };
+        wahl.append(el);
+      });
+      bsp.textContent=exportBeispiel(EXP_FORM);
+      /* Gemessen am 5. August: Ohne Buch-Ordner kommen Titel und Blätter
+         vollständig zurück, aber alles landet in einem Buch — die Zuordnung
+         steht dann nirgends im Ordner. Mit dem Katalog im Paket bleibt sie
+         erhalten. Wer das Archiv auspackt, verliert sie. Das gehört gesagt,
+         bevor jemand es für eine vollständige Sicherung hält. */
+      warn.innerHTML = EXP_FORM.buchOrdner ? '' :
+        'Ohne Buch-Ordner steht die Buchzuordnung nur noch im Katalog des Pakets. '
+        +'Wer das Archiv auspackt und die Ordner einzeln hereingibt, bekommt '
+        +'<b>alles in einem Buch</b> zurück. Titel und Blätter bleiben vollständig.';
+    };
+    zeichne();
+    const fuss=document.createElement('div'); fuss.className='row'; fuss.style.marginTop='18px';
+    fuss.innerHTML='<button class="btn wichtig" id="expGo" style="flex:2">Exportieren</button>'
+                  +'<button class="btn ghost" id="expAb" style="flex:1">Abbrechen</button>';
+    card.append(fuss);
+    fuss.querySelector('#expAb').onclick=closeSheet;
+    const los=fuss.querySelector('#expGo');
+    los.onclick=async()=>{
+      los.disabled=true; los.textContent='Schreibe …';
+      try{
+        const zahl=await BS.exportAlsDatei({ form:Object.assign({},EXP_FORM),
+          arten: EXP_TON ? Object.keys(BS.ARTEN) : undefined });
+        closeSheet();
+        alert('Export erstellt.\n'+zahl.buecher+' Bücher, '+zahl.titel+' Titel, '
+          +zahl.elemente+' Elemente, '+(zahl.bytes/1048576).toFixed(1)+' MB.\n\n'
+          +'Aufbau: '+exportBeispiel(EXP_FORM)+'\n\n'
+          +'BandStand liest dieses Archiv ohne Rückfrage wieder ein — die Lesart '
+          +'steht darin.');
+      }catch(e){ los.disabled=false; los.textContent='Exportieren';
+                 alert('Export fehlgeschlagen: '+(e&&e.message||e)); }
+    };
+    a11y(card);
+  });
 }
 /* ================================================================
-   Ein gepackter Ordner: ein Ordner wird ein Buch
+   Ein gepackter Ordner geht in die Vorschau
 
    Ein ZIP von einem Kollegen ist meistens kein BandStand-Paket, sondern
-   einfach ein gepackter Ordner. Bis zum 2. August lehnte der Empfang das ab.
+   einfach ein gepackter Ordner.
 
-   Jetzt gilt dieselbe Regel wie beim Ordner-Import am Mac, den es seit Wochen
-   gibt: **Ein Ordner ist ein Buch.** Am 2. August von Jens so entschieden.
-   Dateien, die lose in der Wurzel liegen, kommen in ein Buch, das nach der
-   ZIP-Datei heisst. Traegt ein Buch dieses Namens schon Titel, wird es
-   weiterbenutzt statt ein zweites daneben anzulegen.
+   Bis zum 5. August schrieb der Empfang ihn sofort und machte aus jedem
+   Ordner ein Buch. Das war fuer ein Bandbuch richtig und fuer ein Real Book
+   nicht zu gebrauchen: Vier Ausgaben als vier Archive ergaben vier Buecher,
+   und ueber Buchgrenzen hinweg fuehrt der Import nie zusammen. Genau daran
+   ist Jens' Real-Book-Import am 3. August gescheitert.
 
-   Geschrieben wird durch dieselbe Maschine wie beim Empfang einzelner
-   Blaetter: Titel und Stimme kommen aus dem Dateinamen, und ob ein Blatt an
-   einem vorhandenen Titel andockt, fragt `importPdfs` je Buch einmal.
+   Jetzt wird hier nichts mehr geschrieben. Das Archiv wird ausgepackt und mit
+   seinen vollen Pfaden an die Vorschau uebergeben; dort gelten alle Regeln,
+   die es ohnehin gibt — was die Ordner bedeuten, wohin es geht, was andockt.
+   Aus zwei Wegen mit zwei Verhaltensweisen wird ein Weg mit drei Tueren.
+
+   Ein Nebeneffekt, der mehr wiegt, als er klingt: Safari auf dem iPad kann
+   keine Ordner auswaehlen. Ueber ein Archiv kommt die Ordnerstruktur trotzdem
+   auf das Geraet — damit steht der Real-Book-Weg dort zum ersten Mal offen.
    ================================================================ */
+const ARCHIV_ENDUNG=/\.(pdf|mp3|m4a|wav|aac|aif|aiff)$/i;
 async function zipAlsOrdner(zip, zipName){
-  /* Ordner sammeln. Massgeblich ist der OBERSTE Ordner: „Blauton/Balladen/x.pdf"
-     gehoert zu „Blauton". Tiefere Ebenen zu eigenen Buechern zu machen, ergaebe
-     bei einem verschachtelten Archiv ein Dutzend Buecher fuer eine Band. */
   const wurzelName=(zipName||'Empfangen').replace(/\.zip$/i,'').trim() || 'Empfangen';
-  const nachOrdner=new Map();
   const pfade=[];
-  zip.forEach((pfad, eintrag)=>{ if(!eintrag.dir && /\.pdf$/i.test(pfad)) pfade.push(pfad); });
+  zip.forEach((pfad, eintrag)=>{ if(!eintrag.dir && ARCHIV_ENDUNG.test(pfad)) pfade.push(pfad); });
   if(!pfade.length){
-    alert('Das ist kein BandStand-Paket: Es enthält keinen Katalog und keine Notenblätter.');
+    alert('In diesem Archiv stehen keine Notenblätter und kein Katalog.\n\n'
+      +'BandStand nimmt PDF-Dateien und Tonaufnahmen an, einzeln, in Ordnern '
+      +'oder als BandStand-Paket.');
     return;
   }
-  for(const pfad of pfade){
-    /* Ordner, die Packprogramme mitliefern, gehoeren nicht dazu. */
-    if(/(^|\/)__MACOSX\//.test(pfad) || /(^|\/)\._/.test(pfad)) continue;
-    const teile=pfad.split('/').filter(Boolean);
-    const datei=teile.pop();
-    const buch = teile.length ? teile[0] : wurzelName;
-    if(!nachOrdner.has(buch)) nachOrdner.set(buch, []);
-    nachOrdner.get(buch).push({pfad, datei});
-  }
-  if(!nachOrdner.size){ alert('Im Archiv steht kein lesbares Notenblatt.'); return; }
+  /* Verstecktes und Packer-Beiwerk faellt hier schon weg. Es spaeter zu
+     uebergehen ginge auch, aber dann stuenden „__MACOSX" und „.DS_Store" als
+     Ordner in der Ebenen-Karte und wuerden die Zahlen verfaelschen, an denen
+     man ablesen soll, ob die Rollen stimmen. */
+  const echte=pfade.filter(p=>!/(^|\/)__MACOSX\//.test(p)
+                           && !p.split('/').some(t=>t.startsWith('.')));
+  if(!echte.length){ alert('Im Archiv steht nur Verborgenes — kein lesbares Blatt.'); return; }
 
-  const ordner=[...nachOrdner.entries()];
-  const zahl=ordner.reduce((n,[,d])=>n+d.length,0);
-  if(!confirm('Gepackter Ordner mit '+zahl+(zahl===1?' Notenblatt':' Notenblättern')+' in '
-    +ordner.length+(ordner.length===1?' Ordner.':' Ordnern.')+'\n\n'
-    +ordner.map(([b,d])=>'· '+b+' ('+d.length+')').slice(0,8).join('\n')
-    +(ordner.length>8 ? '\n… und '+(ordner.length-8)+' weitere' : '')
-    +'\n\nJeder Ordner wird ein Buch. Fortfahren?')) return;
-
-  let gesamt=0; const bericht=[];
-  for(const [buchName, dateien] of ordner){
-    /* Ein Buch dieses Namens weiterbenutzen, statt ein zweites anzulegen. */
-    let bid=(USERBOOKS.find(b=>b.name===buchName)||{}).bid;
-    if(!bid){
-      try{ const b=await BS.buchAnlegen({name:buchName}); bid=b.id||b; }
-      catch(e){ bericht.push(buchName+': Buch anlegen fehlgeschlagen'); continue; }
-      await loadLibrary();
-    }
-    const files=[];
-    for(const {pfad, datei} of dateien){
-      try{ const blob=await zip.file(pfad).async('blob');
-           files.push(new File([blob], datei, {type:'application/pdf'})); }
-      catch(e){ bericht.push(datei+': nicht lesbar'); }
-    }
-    if(!files.length) continue;
-    const n=await importPdfs(bid, files, true);
-    gesamt+=n; bericht.push(buchName+': '+n+(n===1?' Blatt':' Blätter'));
+  /* Liegen alle Dateien lose in der Wurzel, traegt das ZIP selbst den einzigen
+     Namen, den es gibt. Er wird zur obersten Ebene, damit die Ebenen-Karte
+     etwas zu zeigen hat und der Stapel benennbar bleibt. */
+  const ohneOrdner = echte.every(p=>!p.includes('/'));
+  const eintraege=[];
+  for(const pfad of echte){
+    try{
+      const blob=await zip.file(pfad).async('blob');
+      const datei=pfad.split('/').pop();
+      const typ = /\.pdf$/i.test(datei) ? 'application/pdf' : '';
+      eintraege.push({ file:new File([blob], datei, {type:typ}),
+                       pfad: ohneOrdner ? (wurzelName+'/'+pfad) : pfad });
+    }catch(e){ /* eine unlesbare Datei haelt das Archiv nicht auf */ }
   }
-  await loadLibrary();
-  const engeWar=nachImportZeigen();
-  alert('Eingelesen: '+gesamt+(gesamt===1?' Blatt':' Blätter')+'\n\n'+bericht.join('\n')
-    +'\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.'
-    +(engeWar ? '\n\nDie Liste war eingeschränkt — auf bestimmte Bücher, einen '
-              + 'Anfangsbuchstaben, eine Suche oder eine andere Ansicht. Sie steht '
-              + 'jetzt auf „Alle", damit Du das Eingelesene siehst.' : ''));
+  if(!eintraege.length){ alert('Keine Datei des Archivs liess sich lesen.'); return; }
+
+  /* Stammt das Archiv aus einem BandStand-Export, steht seine Lesart darin.
+     Dann wird nicht gefragt — der Rundlauf soll ohne Rueckfrage schliessen. */
+  let vorgabe=null;
+  try{
+    const s=zip.file('struktur.json');
+    if(s){ const j=JSON.parse(await s.async('string'));
+           if(j && j.rollen && Object.keys(j.rollen).length) vorgabe=j.rollen; }
+  }catch(e){}
+
+  window.importVorschau(eintraege,
+    eintraege.length+(eintraege.length===1?' Datei':' Dateien')+' aus „'+wurzelName+'" gelesen.\n\n'
+    +(vorgabe
+      ? 'Das Archiv stammt aus einem BandStand-Export und sagt selbst, was seine '
+        +'Ordner bedeuten. Die Ebenen stehen schon richtig — prüfe die Zahlen und schreib.'
+      : 'Es ist noch nichts geschrieben. Sag oben, was die Ordner bedeuten — '
+        +'ein Buch, ein Stück oder eine Stimme —, prüfe die Zahlen und schreib dann.'),
+    wurzelName, vorgabe);
 }
 /* Einlesen. Es kennt zwei Formen: den neuen Katalog und das alte
    Sammlungspaket, damit frueher erzeugte Pakete nicht verloren sind.
@@ -6830,7 +6930,24 @@ const BS = (function(){
   /* `titelIds` schraenkt den Export auf eine Auswahl ein — der Weg, auf dem
      man eine Sammlung ueber Buchgrenzen hinweg weitergibt. Ohne die Angabe
      geht der ganze Bestand hinaus. */
-  async function exportieren({arten, titelIds, fortschritt}={}){
+  /* ---- Der Export als Spiegelbild des Imports -------------------------
+     Der Import fragt, was eine Ordnerebene bedeutet. Der Export beantwortet
+     dieselbe Frage rueckwaerts: Welche Ebene wird ein Ordner?
+
+     Bis zum 5. August war die Form fest — ein Ordner je Buch, das Stueck im
+     Dateinamen. Genau diese Form las der eigene Import als „ein Stueck je
+     Ordner", und ein exportiertes Buch mit vierhundert Titeln kam als ein
+     Titel mit vierhundert Blaettern zurueck. Aufgefallen ist das nie, weil
+     der Katalog im Paket liegt und der Import sich an die Kennungen haelt.
+     Wer das Archiv auspackte und den nackten Ordner hereingab, verlor die
+     Struktur.
+
+     Jetzt ist die Form waehlbar, und sie wird mitgeschrieben. `struktur.json`
+     steht neben dem Katalog und sagt, wie der Ordner zu lesen ist; der Import
+     findet sie und fragt nicht. */
+  const EXPORT_FORM = { buchOrdner:true, stueckOrdner:false };
+  async function exportieren({arten, titelIds, fortschritt, form}={}){
+    const F = Object.assign({}, EXPORT_FORM, form||{});
     if(typeof JSZip==='undefined') throw new Error('JSZip fehlt.');
     const kAlles=await katalog();
     const nurDiese = titelIds && titelIds.length ? new Set(titelIds) : null;
@@ -6859,9 +6976,18 @@ const BS = (function(){
           const blob=await bytes(e.id);
           if(blob){
             const endung = ARTEN[e.art].endung || ('.'+((e.dateiname||'').split('.').pop()||'dat')).replace('..','.');
-            const teil = _sauber(t.titel) + (e.etikett ? ' - '+_sauber(e.etikett) : '');
-            let name=_sauber(b?b.name:'Ohne Buch')+'/'+teil+endung, n=2;
-            while(belegt.has(name)){ name=_sauber(b?b.name:'Ohne Buch')+'/'+teil+' ('+(n++)+')'+endung; }
+            /* Die vier Formen entstehen aus zwei Ja-Nein-Fragen. Bekommt ein
+               Stueck einen eigenen Ordner, traegt die Datei nur noch das
+               Etikett; sonst steht der Titel im Dateinamen davor. */
+            const ordner=[];
+            if(F.buchOrdner) ordner.push(_sauber(b?b.name:'Ohne Buch'));
+            if(F.stueckOrdner) ordner.push(_sauber(t.titel));
+            const teil = F.stueckOrdner
+              ? (_sauber(e.etikett||'') || _sauber(t.titel))
+              : (_sauber(t.titel) + (e.etikett ? ' - '+_sauber(e.etikett) : ''));
+            const vorn = ordner.length ? ordner.join('/')+'/' : '';
+            let name=vorn+teil+endung, n=2;
+            while(belegt.has(name)){ name=vorn+teil+' ('+(n++)+')'+endung; }
             belegt.add(name); pfad=name;
             zip.file(name, blob);
             bytesGesamt+=blob.size;
@@ -6872,16 +6998,35 @@ const BS = (function(){
       }
     }
     const kat={ schema:VER, app:'BandStand', art:'bestand', erzeugt:new Date().toISOString(),
-                geraet:geraet(), buecher:k.buecher, titel:k.titel, elemente:katEl };
+                geraet:geraet(), form:F, buecher:k.buecher, titel:k.titel, elemente:katEl };
     zip.file('katalog.json', JSON.stringify(kat,null,1));
+
+    /* Die Lesart, als eigene Datei neben dem Katalog.
+
+       Warum nicht nur im Katalog: Wer das Archiv auspackt und den Ordner
+       hereingibt, hat den Katalog vielleicht nicht mehr — aber die
+       Struktur-Datei liegt daneben und ist klein genug, um mitzukommen. Sie
+       sagt in derselben Sprache wie die Import-Karte, was die Ebenen
+       bedeuten. Damit muss beim eigenen Export nie gefragt werden. */
+    const rollen={}; let n=1;
+    if(F.buchOrdner)   rollen[n++]='buch';
+    if(F.stueckOrdner) rollen[n++]='stueck';
+    zip.file('struktur.json', JSON.stringify(
+      { app:'BandStand', art:'struktur', schema:1, rollen,
+        hinweis:'Was die Ordnerebenen bedeuten. BandStand liest das beim Import.' },null,1));
+
+    const wieGebaut = F.buchOrdner
+      ? (F.stueckOrdner ? 'Buch / Stueck / Stimme.pdf' : 'Buch / Stueck - Stimme.pdf')
+      : (F.stueckOrdner ? 'Stueck / Stimme.pdf'        : 'Stueck - Stimme.pdf');
     zip.file('LIESMICH.txt',
       'BandStand — Export vom '+new Date().toLocaleString('de-DE')+'\n\n'
-      +'Die Ordner tragen die Namen der Buecher, die Dateien die Namen der Stuecke\n'
-      +'und ihrer Stimmen. Sie lassen sich mit jedem PDF-Betrachter oeffnen; BandStand\n'
-      +'wird dafuer nicht gebraucht.\n\n'
+      +'Aufbau dieses Archivs:\n    '+wieGebaut+'\n\n'
+      +'Die Dateien lassen sich mit jedem PDF-Betrachter oeffnen; BandStand wird\n'
+      +'dafuer nicht gebraucht.\n\n'
       +'katalog.json enthaelt denselben Bestand mit seinen Kennungen. Beim\n'
       +'Wiedereinlesen haelt sich BandStand an diese Datei, damit Stuecke sich\n'
-      +'nicht verdoppeln.\n\n'
+      +'nicht verdoppeln. struktur.json sagt, was die Ordner bedeuten — sie wird\n'
+      +'gebraucht, wenn nur die Ordner hereingegeben werden und der Katalog fehlt.\n\n'
       +'Buecher: '+k.buecher.length+'\nStuecke: '+k.titel.length+'\nElemente: '+katEl.length+'\n');
     const out=await zip.generateAsync({type:'blob', compression:'STORE'});
     return {blob:out, zahl:{buecher:k.buecher.length, titel:k.titel.length, elemente:katEl.length, bytes:bytesGesamt}};
@@ -7139,7 +7284,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-03 · Etiketten ohne Katalognummer, Seitenzahl in der Setliste';
+const APP_BUILD='2026-08-06 · Ordner sagen, was sie sind';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -8869,7 +9014,7 @@ setTimeout(ablageAnmelden, 0);
   const UNTERTITEL = { einzeln:'Einzeln sichern und teilen',
                        offline:'Noten offline speichern',
                        instrumente:'Voices verwalten',
-                       bandbuch:'Noten hinzufügen' };
+                       import:'Noten hinzufügen' };
   let thema='content', unter=null;
 
   /* ================================================================
@@ -9001,7 +9146,7 @@ setTimeout(ablageAnmelden, 0);
     if(unter==='einzeln')     return zeichneEinzeln(w);
     if(unter==='offline')     return zeichneOffline(w);
     if(unter==='instrumente') return zeichneInstrumente(w);
-    if(unter==='bandbuch')    return zeichneBandbuch(w);
+    if(unter==='import')    return zeichneImport(w);
     ({ content:themaContent, instrument:themaInstrument, darstellung:themaDarstellung,
        werkzeug:themaWerkzeug, listen:themaListen, sicherung:themaSicherung,
        ueber:themaUeber }[thema])(w);
@@ -9028,7 +9173,7 @@ setTimeout(ablageAnmelden, 0);
 
     const stufe=(n,txt)=>zeile(n+'. Stufe', txt);
     w.append(karte('So wird die Stimme gewählt',[
-      stufe(1,'Eine Stimme, die so heißt wie die Voice — deutsch oder englisch. Das trifft bei Bandnoten zu.'),
+      stufe(1,'Eine Stimme, die so heißt wie die Voice — deutsch oder englisch.'),
       stufe(2,'Sonst eine Stimme in der Notation der Voice — das trifft in den Real Books zu.'),
       stufe(3,'Sonst die C-Ausgabe, und gibt es die nicht, die erste vorhandene.'),
     ]));
@@ -9672,7 +9817,7 @@ setTimeout(ablageAnmelden, 0);
          Zurueckgesetzt wird nur, wenn ohnehin nichts offen ist; einen neuen
          Stapel beginnt man ueber „Ordner wählen", das die Auswahl ersetzt. */
       z_add._ctl.append(knopf(offeneWahl?'Weiter':'Öffnen', ()=>{
-        unter='bandbuch'; if(!bandDateien.length) bandZustand(); zeichne(); }));
+        unter='import'; if(!bandDateien.length) bandZustand(); zeichne(); }));
       const z_alle=zeile('Alle Titel',
         'Quer über alle Bücher — zum Zusammenstellen und als Paket teilen');
       z_alle._ctl.append(knopf('Öffnen ›', ()=>{ cFlach=true; cZuruecksetzen(); zeichne(); }));
@@ -9866,6 +10011,37 @@ setTimeout(ablageAnmelden, 0);
     else                  { cFlach=true;  cPfad=[]; }
     cWahl=new Set(ids);
     auf();
+  };
+
+  /* ================================================================
+     Ein Stapel geht in die Vorschau — der eine Weg herein
+
+     Bis zum 5. August schrieb der Empfang ein Archiv selbst und machte aus
+     jedem Ordner ein Buch. Er fragte nichts, weil er fuer den kurzen Fall
+     gedacht war. Bei Real Books musste das schiefgehen: Vier Ausgaben als
+     vier Archive ergaben vier Buecher, und ueber Buchgrenzen hinweg wird nie
+     zusammengefuehrt.
+
+     Jetzt gibt es nur noch einen Weg zum Schreiben, und der fuehrt durch die
+     Vorschau. Ordnerwahl, Dateiwahl und Archiv sind drei Tueren davor; was
+     dahinter geschieht, ist in allen drei Faellen dasselbe.               */
+  window.importVorschau = function(eintraege, hinweis, stapelName, rollen){
+    const liste=(eintraege||[]).filter(e=>e && e.file);
+    if(!liste.length){ alert('In diesem Stapel steht keine lesbare Datei.'); return false; }
+    thema='content'; cKorb=false; cAktion=null;
+    bandZustand();
+    /* Erst oeffnen, dann die Unterseite: `auf()` setzt `unter` selbst auf
+       null, und eine vorher gesetzte Unterseite waere damit wieder weg. */
+    auf();
+    unter='import';
+    bandUebernehmen(liste);          /* zeichnet selbst */
+    if(stapelName) bandStapelName=stapelName;
+    /* Eine mitgelieferte Lesart ist keine Vermutung, sondern eine Aussage des
+       Erzeugers. Sie wird gesetzt und bleibt sichtbar aenderbar. */
+    if(rollen && Object.keys(rollen).length) bandRollen=Object.assign({}, rollen);
+    if(stapelName || rollen) zeichne();
+    if(hinweis) setTimeout(()=>alert(hinweis), 60);
+    return true;
   };
 
   /* Prueflatte fuer die Konsole, wie `bandPruef` und `gruppenBericht`. Sie
@@ -10176,6 +10352,22 @@ setTimeout(ablageAnmelden, 0);
   /* Die Ausgabe des Durchgangs — leer heisst „je Datei erkennen". Und die
      Handentscheidung je Stueck, ob es an ein vorhandenes andockt. */
   let bandAusgabe='', bandAndockHand={}, bandGlattAuf=false;
+  /* Was die Ordnerebenen bedeuten, und wohin die Buecher gehen.
+     `bandRollen` ist {1:'buch', 2:'stueck', …}; fehlende Ebenen gelten als
+     „nichts". `bandBuchZiel` bildet einen Ordnernamen auf ein vorhandenes
+     Buch ab; ein leerer Wert heisst „neues Buch dieses Namens". */
+  let bandRollen={}, bandBuchZiel={};
+  /* Welche Zweige der obersten Ebene in diesem Durchgang mitgehen. Leer heisst
+     alle. Gebraucht fuer den gemischten Stapel: Liegen „Real Books" und
+     „Bandnoten" nebeneinander, bedeutet Ebene 2 in dem einen Zweig etwas
+     anderes als im anderen. Eine Rolle je Ebene kann das nicht ausdruecken —
+     zwei Durchgaenge koennen es. */
+  let bandZweige=new Set();
+  /* Woher der Stapel kam — der Name des Archivs oder des Ordners. Er ist der
+     einzige Name, den ein Stapel ohne Buch-Ebene mitbringt, und steht deshalb
+     als Vorschlag im Feld „Neues Buch". Vorbelegen ist kein Raten: Der
+     Vorschlag ist sichtbar und laesst sich ueberschreiben. */
+  let bandStapelName='';
   /* Die Ausgaben eines Buchs sind Stimmen, keine eigenen Buecher. Die Namen
      stimmen mit STIMM_ORDNUNG ueberein, damit die Reihenfolge in der Zeile
      dieselbe ist wie bei den frueher mitgelieferten Real Books. */
@@ -10188,6 +10380,7 @@ setTimeout(ablageAnmelden, 0);
   const bandOffen=new Set();
   function bandZustand(){ bandDateien=[]; bandHand={}; bandTitelHand={}; bandTrenner=' - ';
     bandAusgabe=''; bandAndockHand={}; bandGlattAuf=false;
+    bandRollen={}; bandBuchZiel={}; bandStapelName=''; bandZweige=new Set();
     bandOffen.clear(); bandLetzte=null;
     /* Offene Fenster zeigen sonst Blaetter, die es nicht mehr gibt. */
     if(window.PDFW) PDFW.alleZu();
@@ -10246,27 +10439,68 @@ setTimeout(ablageAnmelden, 0);
   const AUDIO_ENDUNG=/\.(mp3|m4a|wav|aac|aif|aiff)$/i;
   const PDF_ENDUNG=/\.pdf$/i;
 
-  /* Der gemeinsame Stamm aller Pfade — das ist der Ordner, den Jens gewaehlt
-     hat, und der ist kein Stueck. „Blauton/Blue Bossa/x.pdf" soll „Blue Bossa"
-     ergeben, nicht „Blauton".
+  /* ================================================================
+     Was eine Ordnerebene bedeutet — gesagt, nicht geraten
 
-     Ausnahme, und sie ist der Grund fuer die zweite Haelfte: Wird EIN
-     Stueck-Ordner gewaehlt, liegen alle Dateien unmittelbar darin. Dann ist
-     der Stamm sehr wohl das Stueck und darf nicht weg. */
-  function stammKuerzen(eintraege){
-    const pfade=eintraege.map(e=>String(e.pfad||'').split('/').filter(Boolean));
-    if(pfade.length<2 && !(pfade[0]||[]).length) return 0;
-    let n=0;
-    for(;;){
-      const erst=pfade[0]; if(!erst || n>=erst.length-1) break;
-      const teil=erst[n];
-      if(!pfade.every(p=>p.length>n+1 && p[n]===teil)) break;
-      n++;
-    }
-    /* Bliebe danach ueberall nur noch der Dateiname, war der Stamm das
-       Stueck — dann einen Schritt zurueck. */
-    while(n>0 && pfade.every(p=>p.length-n<=1)) n--;
-    return n;
+     Bis zum 5. August rechnete hier `stammKuerzen`: Der gemeinsame Stamm
+     fiel weg, und der Ordner ueber einer Datei galt als das Stueck. Fuer
+     Bandnoten stimmt das. Fuer ein Real Book ist es falsch, und zwar so
+     falsch, dass aus einem Buch mit vierhundert Titeln ein Titel mit
+     vierhundert Blaettern wurde. Genau das ist Jens am 3. August passiert.
+
+     Der Grund laesst sich nicht wegprogrammieren. Beide Bestaende sind eine
+     Ordnerebene tief; in dem einen ist ein Ordner ein Stueck, in dem anderen
+     ein Buch. Dieselbe Form, entgegengesetzte Bedeutung — kein Verfahren kann
+     das aus den Dateien ablesen, weil die Information nicht darin steht.
+
+     Deshalb wird gefragt. Je Ordnerebene eine Rolle, und die Ebenen werden von
+     OBEN gezaehlt. Von oben und nicht von unten, weil ein Zweig tiefer sein
+     kann als sein Nachbar: In Jens' Bestand liegen zehn von 460 Blaettern in
+     einer Zwischenebene ohne Bedeutung. Zaehlt man von oben, tragen sie
+     denselben Stuecknamen wie ihre Nachbarn, ohne dass eine Sonderregel
+     noetig waere.
+
+     Der gemeinsame Stamm wird NICHT abgeschnitten. Bei einem gewaehlten
+     Ordner ist er haeufig genau das Buch; wegzuschneiden hiesse, ihn zu
+     verlieren.                                                              */
+  const ROLLEN=[
+    {wert:'nichts', text:'bedeutet nichts', ton:'wird übersprungen'},
+    {wert:'buch',   text:'ist ein Buch',    ton:'sein Name wird der Buchname'},
+    {wert:'stueck', text:'ist ein Stück',   ton:'sein Name wird der Titel'},
+    {wert:'stimme', text:'ist eine Stimme', ton:'sein Name wird die Stimme aller Blätter darin'},
+  ];
+  const ROLL_TEXT = w => (ROLLEN.find(r=>r.wert===w)||ROLLEN[0]).text;
+
+  /* Die Ordnerebenen eines Stapels: wie viele es gibt, wie viele verschiedene
+     Ordner je Ebene, und ein paar Namen als Beleg. Ebene 1 ist die oberste. */
+  function ebenenLesen(eintraege){
+    const ebenen=[];
+    (eintraege||[]).forEach(e=>{
+      const teile=String(e.pfad||e.file&&e.file.name||'').split('/').filter(Boolean);
+      teile.pop();                              /* der Dateiname zaehlt nicht */
+      teile.forEach((ordner,i)=>{
+        if(!ebenen[i]) ebenen[i]={ nr:i+1, namen:new Set(), dateien:0 };
+        ebenen[i].namen.add(ordner); ebenen[i].dateien++;
+      });
+    });
+    return ebenen.map(e=>({ nr:e.nr, anzahl:e.namen.size, dateien:e.dateien,
+                            namen:[...e.namen], beispiele:[...e.namen].slice(0,3) }));
+  }
+
+  /* Was eine einzelne Datei nach den gesetzten Rollen wird. Liegt sie flacher
+     als die Stueck-Ebene, faellt der Titel auf den Dateinamen zurueck — so
+     bleiben ungleich tiefe Zweige benutzbar. */
+  function dateiLesen(pfad, rollen){
+    const teile=String(pfad||'').split('/').filter(Boolean);
+    const datei=teile.pop()||'';
+    let buch='', stueck=null, stimme='';
+    teile.forEach((name,i)=>{
+      const rolle=(rollen||{})[i+1]||'nichts';
+      if(rolle==='buch')   buch=name;
+      if(rolle==='stueck') stueck=name;
+      if(rolle==='stimme') stimme=name;
+    });
+    return { datei, buch, stueck, stimme };
   }
 
   /* Ordnernamen tragen gelegentlich einen Zusatz, der die Fassung beschreibt
@@ -10286,20 +10520,62 @@ setTimeout(ablageAnmelden, 0);
      Name stehen — dann traegt er die Stimme irgendwo in sich. */
 
   /* Was aus den gewaehlten Dateien wird — gerechnet, nicht gespeichert. */
+  /* Die Stimme aus einem Ordnernamen. Dieselbe Kette wie beim Dateinamen:
+     erst die Ausgabe (C, B♭, E♭, Bass), dann das Instrument. Findet keine
+     etwas, bleibt der Name stehen.
+
+     Gemessen am 6. August an den vier echten Ausgaben von Real Book Vol. 1:
+     „Real Book Vol 1 Bb" ergibt „B♭", nicht den ganzen Ordnernamen. */
+  const _ordnerStimme={};
+  function ordnerStimme(name){
+    if(!name) return '';
+    if(name in _ordnerStimme) return _ordnerStimme[name];
+    /* Zuerst die Ausgaben, und zwar am ENDE des Namens. Ein Ordner, den der
+       Nutzer ausdruecklich als Stimme benannt hat, meint bei einem Real Book
+       fast immer die Ausgabe — „Real Book Vol 1 Bass" ist die
+       Bassschluessel-Ausgabe und nicht der E-Bass. `ausgabeAusText` allein
+       reicht dafuer nicht: Es kennt C, B♭ und E♭, aber nicht „Bass".
+
+       Beim DATEInamen gilt die umgekehrte Reihenfolge, und das bleibt so:
+       „Mardi Gras Flöte in C" ist eine Floete und keine C-Ausgabe. Der
+       Unterschied ist die Absicht — hier hat jemand die Ebene benannt. */
+    const ende=String(name).trim().toLowerCase();
+    const treffer=AUSGABEN.filter(a=>a.wert).find(a=>{
+      const w=a.wert.toLowerCase()
+        .replace('♭','b');                     /* „B♭" auch als „Bb" schreiben */
+      return ende===w || ende.endsWith(' '+w) || ende.endsWith('-'+w)
+          || ende===a.wert.toLowerCase() || ende.endsWith(' '+a.wert.toLowerCase());
+    });
+    const w = (treffer && treffer.wert)
+           || ausgabeAusText(name)
+           || ((voiceAusText(name)||{}).name)
+           || blattArt(name)
+           || name;
+    _ordnerStimme[name]=w;
+    return w;
+  }
+
+  /* Die Dateien dieses Durchgangs — alle, oder nur die angehakten Zweige. */
+  function bandStapel(){
+    if(!bandZweige.size) return bandDateien;
+    return bandDateien.filter(e=>{
+      const t=String(e.pfad||e.file.name).split('/').filter(Boolean);
+      t.pop();
+      return bandZweige.has(t[0]||'');
+    });
+  }
   function bandLesen(){
-    const stamm=stammKuerzen(bandDateien);
     const saetze=[], offen=[], toene=[], uebergangen=[], ausgelassen=[];
     const stuecke=new Map();
-    bandDateien.forEach(e=>{
-      const teile=String(e.pfad||e.file.name).split('/').filter(Boolean).slice(stamm);
-      const name=teile[teile.length-1]||e.file.name;
-      /* Steht ueber der Datei noch ein Ordner, ist DER das Stueck — auch wenn
-         darunter weitere Ordner liegen. Sonst gilt der alte Weg ueber das
-         Trennzeichen im Dateinamen. */
-      const ausOrdner = teile.length>1;
-      /* Ohne Ordner zuerst das Trennzeichen versuchen; traegt der Name keines,
-         die Stelle suchen, an der die Stimme anfaengt. Das ist der Weg auf dem
-         iPad, wo es keine Ordnerwahl gibt. */
+    bandStapel().forEach(e=>{
+      const pfad=String(e.pfad||e.file.name);
+      const gelesen=dateiLesen(pfad, bandRollen);
+      const name=gelesen.datei||e.file.name;
+      /* Traegt keine Ebene die Rolle „Stueck", steht der Titel im Dateinamen.
+         Zuerst das Trennzeichen versuchen; traegt der Name keines, die Stelle
+         suchen, an der die Stimme anfaengt. Das ist der Weg auf dem iPad, wo
+         es keine Ordnerwahl gibt. */
+      const ausOrdner = gelesen.stueck!==null;
       let zerlegt=null;
       if(!ausOrdner){
         zerlegt=nameZerlegen(name, bandTrenner);
@@ -10313,10 +10589,14 @@ setTimeout(ablageAnmelden, 0);
           const t=titelVorStimme(name); if(t) zerlegt=t;
         }
       }
-      const roh = ausOrdner ? teile[0] : zerlegt.titel;
-      const schl = titelSchluessel(roh);
+      const roh = ausOrdner ? gelesen.stueck : zerlegt.titel;
+      /* Der Schluessel traegt das BUCH mit. Zwei Buecher duerfen ein Stueck
+         desselben Namens haben, ohne dass die Vorschau sie zusammenwirft. */
+      const schl = (gelesen.buch ? 'b:'+titelSchluessel(gelesen.buch)+'|' : '')
+                 + titelSchluessel(roh);
       if(!stuecke.has(schl)) stuecke.set(schl,
-        { schl, roh, titel:titelSaeubern(roh), ausOrdner, saetze:[], toene:[] });
+        { schl, roh, titel:titelSaeubern(roh), ausOrdner,
+          buchName:gelesen.buch||'', saetze:[], toene:[] });
       const st=stuecke.get(schl);
       const titel = bandTitelHand[schl]!==undefined ? bandTitelHand[schl] : st.titel;
       st.titel=titel;
@@ -10343,8 +10623,20 @@ setTimeout(ablageAnmelden, 0);
          schlaegt die Erkennung aus dem Dateinamen. Ein Real Book traegt seine
          Ausgabe nicht im Dateinamen — sie steht auf dem Umschlag, und der
          kommt beim Import nicht mit. Deshalb wird sie gesagt und nicht
-         geraten. Eine Handwahl am einzelnen Blatt geht trotzdem vor. */
-      const ausg = bandAusgabe || '';
+         geraten. Eine Handwahl am einzelnen Blatt geht trotzdem vor.
+
+         Seit dem 5. August kann auch ein ORDNER die Stimme tragen. Dann gilt
+         sie nur fuer die Blaetter darin und schlaegt die Ansage fuer den
+         ganzen Durchgang. Damit gehen die vier Ausgaben eines Real Books in
+         EINEM Durchgang herein statt in vieren.
+
+         Der Ordnername wird dabei NICHT roh uebernommen. Er heisst in der
+         Praxis „Real Book Vol 1 Bb" und nicht „B♭"; roh genommen stuende
+         genau das auf dem Schalter, und die Stimme waere unbrauchbar. Er
+         laeuft deshalb durch dieselbe Erkennung wie der Rest eines
+         Dateinamens. Erst wenn die nichts findet, gilt der Name selbst — dann
+         hat der Nutzer ihn vermutlich mit Absicht so gewaehlt. */
+      const ausg = ordnerStimme(gelesen.stimme) || bandAusgabe || '';
       /* `gruppe` ist die Kennung des Stuecks aus dieser Vorschau. Der Import
          buendelt danach — nicht nach dem Titeltext. Zwei Ordner desselben
          Namens bleiben dadurch zwei Stuecke und verschmelzen nicht. */
@@ -10362,39 +10654,50 @@ setTimeout(ablageAnmelden, 0);
     });
     const liste=[...stuecke.values()].filter(x=>x.saetze.length || x.toene.length);
 
+    /* ---- Wohin jedes Stueck geht ---------------------------------------
+       Traegt eine Ebene die Rolle „Buch", hat jedes Stueck sein eigenes Ziel,
+       und es koennen mehrere Buecher zugleich entstehen. Sonst gilt das oben
+       gewaehlte eine Buch, wie bisher. */
+    liste.forEach(st=>{ st.zielBid = zielBuchVon(st.buchName); });
+
     /* ---- Was im Zielbuch schon steht -----------------------------------
-       Gesucht wird nur im gewaehlten Buch und nur nach dem eingedampften
+       Gesucht wird nur im jeweiligen Zielbuch und nur nach dem eingedampften
        Titel. Gefunden heisst NICHT zusammengefuehrt: Es heisst, dass die
-       Vorschau danach fragt. Entschieden wird oben, nicht hier. */
+       Vorschau danach fragt. Entschieden wird oben, nicht hier.
+
+       Der Katalog je Buch wird einmal gerechnet und dann wiederverwendet. Bei
+       vierhundert Stuecken in einem Durchgang ist das der Unterschied zwischen
+       einer Rechnung und vierhundert. */
     let treffer=0;
-    if(bandBid){
+    const katalogJeBuch=new Map();
+    const imBuchVon=bid=>{
+      if(!bid) return null;
+      if(katalogJeBuch.has(bid)) return katalogJeBuch.get(bid);
       const imBuch={};
-      (BS_KATALOG.titel||[]).filter(t=>t.buchId===bandBid).forEach(t=>{
+      const elJeTitel={};
+      (BS_KATALOG.elemente||[]).forEach(e=>{ elJeTitel[e.titelId]=(elJeTitel[e.titelId]||0)+1; });
+      (BS_KATALOG.titel||[]).filter(t=>t.buchId===bid).forEach(t=>{
         const k=titelSchluessel(t.titel||'');
-        if(!(k in imBuch)) imBuch[k]={id:t.id, titel:t.titel,
-          blaetter:(BS_KATALOG.elemente||[]).filter(e=>e.titelId===t.id).length};
+        if(!(k in imBuch)) imBuch[k]={id:t.id, titel:t.titel, blaetter:elJeTitel[t.id]||0};
       });
-      liste.forEach(st=>{
-        const k=titelSchluessel(st.titel||'');
-        st.vorhanden = imBuch[k] || null;
-        if(st.vorhanden) treffer++;
-        /* Andocken ist die Vorgabe, wenn eine Ausgabe angesagt ist — genau
-           dann laedt jemand eine zweite Fassung desselben Buchs nach. Sonst
-           ist die Vorgabe „eigenes Stueck". Beides je Stueck ueberschreibbar. */
-        const vorgabe = !!bandAusgabe;
-        st.andocken = st.vorhanden
-          ? (bandAndockHand[st.schl]!==undefined ? bandAndockHand[st.schl] : vorgabe)
-          : false;
-        if(st.andocken && st.vorhanden){
-          st.saetze.forEach(s=>{ s.andockAn=st.vorhanden.id; });
-        } else {
-          st.saetze.forEach(s=>{ delete s.andockAn; });
-        }
-      });
-    } else {
-      liste.forEach(st=>{ st.vorhanden=null; st.andocken=false;
-        st.saetze.forEach(s=>{ delete s.andockAn; }); });
-    }
+      katalogJeBuch.set(bid, imBuch);
+      return imBuch;
+    };
+    liste.forEach(st=>{
+      const imBuch=imBuchVon(st.zielBid);
+      st.vorhanden = imBuch ? (imBuch[titelSchluessel(st.titel||'')] || null) : null;
+      if(st.vorhanden) treffer++;
+      /* Andocken ist die Vorgabe, wenn eine Ausgabe angesagt ist oder ein
+         Ordner die Stimme traegt — genau dann laedt jemand eine zweite
+         Fassung desselben Buchs nach. Sonst ist die Vorgabe „eigenes Stueck".
+         Beides je Stueck ueberschreibbar. */
+      const vorgabe = !!bandAusgabe || rollenHaben('stimme');
+      st.andocken = st.vorhanden
+        ? (bandAndockHand[st.schl]!==undefined ? bandAndockHand[st.schl] : vorgabe)
+        : false;
+      if(st.andocken && st.vorhanden) st.saetze.forEach(s=>{ s.andockAn=st.vorhanden.id; });
+      else                            st.saetze.forEach(s=>{ delete s.andockAn; });
+    });
 
     /* ---- Die Etiketten, jetzt und nicht erst beim Schreiben -------------
        Erst hier, weil die Rechnung wissen muss, ob angedockt wird: Beim
@@ -10420,58 +10723,63 @@ setTimeout(ablageAnmelden, 0);
       st.glatt = vorhandene
         .map((v,i)=>({ id:vorEl[i].id, alt:vorEl[i].etikett||'', neu:v.etikett }))
         .filter(g=>g.neu!==g.alt);
+
+      /* Kommt ein Blatt herein, das unter demselben Dateinamen schon am Titel
+         haengt, entsteht ein zweites daneben. Bei einem BandStand-Paket kann
+         das nicht passieren — dort fuehren die Kennungen. Ein nackter Ordner
+         hat keine, also ist der Dateiname das einzige Merkmal.
+
+         Am 6. August gemessen: Dasselbe Archiv zweimal eingelesen ergab 240
+         statt 120 Blaetter. Das ist nicht falsch, sondern die einzige
+         Auslegung, die ohne Kennungen moeglich ist — aber es muss vorher
+         dastehen, sonst haelt man es fuer einen Fehler. */
+      const daNamen=new Set(vorEl.map(e=>(e.dateiname||'').toLowerCase()));
+      st.doppelt = daNamen.size
+        ? st.saetze.filter(s=>daNamen.has((s.file.name||'').toLowerCase())).length
+        : 0;
+    });
+
+    /* Die Buecher dieses Durchgangs, in der Reihenfolge ihres Auftretens.
+       Je Buch: der Ordnername, das Ziel und wie viel hineingeht. */
+    const buecher=new Map();
+    liste.forEach(st=>{
+      const k=st.buchName||'';
+      if(!buecher.has(k)) buecher.set(k, {name:k, zielBid:st.zielBid, stuecke:0, saetze:0});
+      const b=buecher.get(k); b.stuecke++; b.saetze+=st.saetze.length;
     });
 
     return { saetze, offen, toene, uebergangen, ausgelassen, stuecke:liste, treffer,
-             ordnerWeg: bandDateien.some(e=>String(e.pfad||'').includes('/')) };
+             buecher:[...buecher.values()],
+             ebenen: ebenenLesen(bandStapel()),
+             hatBuchEbene: rollenHaben('buch'),
+             ordnerWeg: rollenHaben('stueck') };
   }
 
-  function zeichneBandbuch(w){
-    /* 1 — in welches Buch */
-    const buch=userBook(bandBid);
-    const z_buch=zeile('Buch', buch ? ('<b>'+esc(buch.name)+'</b>')
-      : (USERBOOKS.length ? 'Noch keines gewählt' : 'Es gibt noch kein eigenes Buch — lege eines an'));
-    if(USERBOOKS.length){
-      /* Auch diese Wahl im Stil der App. Zwei Dropdowns nebeneinander, eines
-         vom Betriebssystem und eines von BandStand, saehen nach Versehen aus. */
-      z_buch._ctl.append(AWAHL.knopf(()=>{
-        const eintraege=[{wert:'', text:'Noch keines', ton:''}]
-          .concat(USERBOOKS.map((b,n)=>({ wert:b.bid, text:b.name,
-            ton: LIBTUNES.filter(t=>t.bid===b.bid).length+' Sätze',
-            kopf: n===0 ? 'Eigene Bücher' : null })));
-        const jetzt=eintraege.find(x=>x.wert===bandBid) || eintraege[0];
-        return { wert:bandBid, eintraege, text:jetzt.text, ton:'' };
-      }, neu=>{ bandBid=neu; zeichne(); }, 'Buch wählen'));
-    }
-    const inp=document.createElement('input'); inp.className='txt'; inp.placeholder='Neues Buch, z. B. Songbuch Band X';
-    const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
-      bandBid=await createBook(v); inp.value=''; render(); zeichne(); };
-    inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
-    const z_neu=zeile('Neues Buch','Bündelt die Blätter dieses Stapels');
-    z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
+  /* Welches Buch ein Ordnername ansteuert. Leerer Rueckgabewert heisst: ein
+     neues Buch dieses Namens, angelegt erst beim Schreiben. Ohne Buch-Ebene
+     gilt das oben gewaehlte eine Buch. */
+  function zielBuchVon(buchName){
+    if(!buchName) return bandBid||'';
+    if(bandBuchZiel[buchName]!==undefined) return bandBuchZiel[buchName];
+    const da=USERBOOKS.find(b=>b.name===buchName);
+    return da ? da.bid : '';
+  }
+  const rollenHaben = rolle => Object.keys(bandRollen||{})
+    .some(k=>bandRollen[k]===rolle);
 
-    /* Die Ausgabe. Ein Real Book traegt sie auf dem Umschlag und nicht im
-       Dateinamen — sie wird deshalb gesagt und nicht geraten. Gilt sie, ist
-       sie die Stimme aller Blaetter dieses Durchgangs. */
-    const jetztAus=AUSGABEN.find(a=>a.wert===bandAusgabe)||AUSGABEN[0];
-    const z_ausg=zeile('Ausgabe', bandAusgabe
-      ? 'Alle Blätter dieses Durchgangs werden die <b>'+esc(bandAusgabe)+'</b>-Stimme'
-      : 'Für Bandnoten richtig. Bei einem Real Book sag, welche Ausgabe der Stapel ist');
-    z_ausg._ctl.append(AWAHL.knopf(
-      ()=>({ wert:bandAusgabe, eintraege:AUSGABEN, text:jetztAus.text, ton:'' }),
-      neu=>{ bandAusgabe=neu; bandAndockHand={}; zeichne(); }, 'Ausgabe wählen'));
+  function zeichneImport(w){
+    /* Die Reihenfolge der Karten folgt dem Ablauf: erst die Dateien holen,
+       dann sagen, was ihre Ordner bedeuten, dann sagen wohin, dann schreiben.
+       Bis zum 5. August stand „Wohin" oben — das war die Frage, die man ohne
+       die Dateien gar nicht beantworten kann. */
 
-    w.append(karte('Wohin',[z_buch, z_neu, z_ausg]));
-
-    /* 2 — die Dateien. Der Ordner ist der Hauptweg: sein Name ist der Titel,
-       und der ist verlaesslich. Am Bestand gemessen weicht der DATEIname in
-       57 von 450 Faellen vom Ordnernamen ab — wer den Titel aus dem
-       Dateinamen liest, macht aus einem Stueck drei. */
+    /* 1 — die Dateien. Womit ein Ordner gelesen wird, entscheidet die
+       Ordner-Karte darunter; hier wird nur gesammelt. */
     const z_dat=zeile('Noten',
       bandDateien.length ? ('<b>'+bandDateien.length+'</b> Datei'+(bandDateien.length===1?'':'en')+' gelesen')
       : IST_IOS ? 'Auf dem iPad geht nur <b>Dateien wählen</b> — Safari kann hier keine Ordner auswählen. '
-                 +'Der Titel wird dann aus dem Dateinamen gelesen.'
-                : 'Ein Ordner je Stück — sein Name ist der Titel. Oder einzelne Dateien.');
+                 +'Ein gepacktes Archiv bringt die Ordner trotzdem mit.'
+                : 'Ein ganzer Ordner, einzelne Dateien oder ein gepacktes Archiv.');
     /* Auf dem iPad steht die Dateiwahl vorn: Sie ist dort der einzige Weg, der
        traegt. Der Ordner-Knopf bleibt trotzdem stehen — er sagt, wenn nichts
        zurueckkam, statt zu schweigen. */
@@ -10485,15 +10793,95 @@ setTimeout(ablageAnmelden, 0);
                          'application/pdf,.pdf,audio/*', true));
     if(IST_IOS) z_dat._ctl.append(kDatei, kOrdner);
     else        z_dat._ctl.append(kOrdner, kDatei);
-    const z_zieh=zeile('Hineinziehen','Ordner oder Dateien auf diese Seite ziehen — auch ganze Ordnerbäume');
+    const z_zieh=zeile('Hineinziehen','Ordner, Dateien oder ein Archiv auf diese Seite ziehen');
     w.append(karte('Was',[z_dat, z_zieh]));
+
+    /* 2 — was die Ordner bedeuten. Die Karte steht nur da, wenn es Ordner
+       gibt; bei losen Dateien gibt es nichts zu entscheiden. */
+    const alleEbenen=ebenenLesen(bandDateien);
+    const ebenen=ebenenLesen(bandStapel());
+    if(bandDateien.length && alleEbenen.length){
+      const zeilen=[];
+
+      /* Der gemischte Stapel. Liegen oben mehrere Ordner und darunter noch
+         eine Ebene, koennen die Zweige Verschiedenes bedeuten — „Real Books"
+         flach und „Bandnoten" tief. Eine Rolle je Ebene kann das nicht
+         ausdruecken. Dann laesst sich der Stapel aufteilen und in zwei
+         Durchgaengen hereinholen. Die Zeile steht nur da, wo sie zaehlt. */
+      if(alleEbenen.length>1 && alleEbenen[0].anzahl>1){
+        const z_zw=zeile('Nur diese Zweige', bandZweige.size
+          ? '<b>'+bandZweige.size+'</b> von '+alleEbenen[0].anzahl+' — der Rest bleibt liegen '
+            +'und lässt sich danach mit anderen Ebenen holen'
+          : 'Alle '+alleEbenen[0].anzahl+' Zweige gehen mit. Bedeuten sie Verschiedenes, '
+            +'nimm sie einzeln und wiederhole den Durchgang');
+        const wrap=document.createElement('div'); wrap.className='row'; wrap.style.flexWrap='wrap';
+        alleEbenen[0].namen.forEach(n=>{
+          const an = !bandZweige.size || bandZweige.has(n);
+          const c=document.createElement('div');
+          c.className='chip'+(an && bandZweige.size ? ' on' : '');
+          c.setAttribute('role','checkbox'); c.setAttribute('aria-checked', an?'true':'false');
+          c.tabIndex=0;
+          c.textContent=(bandZweige.has(n)?'✓ ':'')+n;
+          const um=()=>{
+            if(!bandZweige.size){ /* aus „alle" wird „nur dieser" */
+              bandZweige=new Set([n]);
+            } else if(bandZweige.has(n)){
+              bandZweige.delete(n);
+              if(!bandZweige.size) bandZweige=new Set();   /* zurueck zu allen */
+            } else bandZweige.add(n);
+            bandAndockHand={}; bandBuchZiel={}; zeichne();
+          };
+          c.onclick=um;
+          c.onkeydown=e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); um(); } };
+          wrap.append(c);
+        });
+        z_zw._ctl.append(wrap);
+        zeilen.push(z_zw);
+      }
+      /* Solange keine Ebene eine Rolle traegt, ist jede Datei ein Stueck und
+         alles geht in ein Buch. Das ist eine gesetzte Annahme, keine erkannte
+         — und die Karte sagt das, statt ein Ergebnis zu behaupten. */
+      const nichtsGesetzt = !Object.keys(bandRollen).length;
+      const kopf=zeile('Was die Ordner bedeuten', nichtsGesetzt
+        ? 'Noch nichts festgelegt. So wie es jetzt steht, ist <b>jede Datei ein Stück</b> '
+          +'und alles geht in ein Buch. Stimmt das nicht, stell die Ebenen um.'
+        : 'Die Zahlen in der Vorschau rechnen sich bei jeder Änderung sofort neu.');
+      if(nichtsGesetzt) kopf.classList.add('warnrow');
+      zeilen.push(kopf);
+
+      ebenen.forEach(eb=>{
+        const jetzt=bandRollen[eb.nr]||'nichts';
+        const bsp=eb.beispiele.map(esc).join(' · ')
+                + (eb.anzahl>eb.beispiele.length ? ' …' : '');
+        const z=zeile('Ebene '+eb.nr,
+          '<b>'+eb.anzahl+'</b> Ordner mit zusammen <b>'+eb.dateien+'</b> Dateien'
+          +'<br><span class="muted">'+bsp+'</span>');
+        z._ctl.append(AWAHL.knopf(()=>{
+          const jetztR=ROLLEN.find(r=>r.wert===jetzt)||ROLLEN[0];
+          return { wert:jetzt, eintraege:ROLLEN, text:jetztR.text, ton:jetztR.ton };
+        }, neu=>{
+          if(neu==='nichts') delete bandRollen[eb.nr]; else bandRollen[eb.nr]=neu;
+          /* Zwei Ebenen duerfen nicht dieselbe Rolle tragen — „zwei Buecher
+             uebereinander" hiesse raten, welches gilt. Die aeltere weicht. */
+          if(neu!=='nichts') Object.keys(bandRollen).forEach(k=>{
+            if(+k!==eb.nr && bandRollen[k]===neu) delete bandRollen[k]; });
+          bandAndockHand={}; bandBuchZiel={}; zeichne();
+        }, 'Was bedeutet Ebene '+eb.nr+'?'));
+        zeilen.push(z);
+      });
+      w.append(karte(null, zeilen));
+    }
+
+    /* 3 — wohin. Traegt eine Ebene die Rolle „Buch", steht hier je Ordner
+       eine Zeile; sonst die eine Buchwahl wie bisher. */
+    w.append(zeichneWohin());
 
     /* Das Trennzeichen wird nur noch gebraucht, wenn keine Ordner im Spiel
        sind. Es steht deshalb erst da, wenn es zaehlt. */
     const halterTr=document.createElement('div'); halterTr.id='bandTrennKasten';
     w.append(halterTr);
 
-    /* 3 — die Vorschau, in einem eigenen Kasten, damit nur sie neu gezeichnet wird */
+    /* 4 — die Vorschau, in einem eigenen Kasten, damit nur sie neu gezeichnet wird */
     const halter=document.createElement('div'); halter.id='bandVorschau';
     w.append(halter);
     /* Die Seite wird losgeloest zusammengebaut — Falle 3 aus CLAUDE.md. `w`
@@ -10501,6 +10889,92 @@ setTimeout(ablageAnmelden, 0);
     w.dataset.zielflaeche='1';
     ziehenAnmelden(w);
     zeichneVorschau();
+  }
+
+  /* ---- Wohin geschrieben wird -----------------------------------------
+     Zwei Gestalten derselben Frage. Ohne Buch-Ebene wird EIN Buch gewaehlt,
+     wie seit jeher. Mit Buch-Ebene bringt jeder Ordner seinen Namen mit, und
+     die Zeile fragt nur noch, ob daraus ein neues Buch wird oder ein
+     vorhandenes weitergefuellt.                                            */
+  function zeichneWohin(){
+    const zeilen=[];
+    const buchEbene = rollenHaben('buch');
+
+    if(buchEbene){
+      /* Die Ordnernamen der Buch-Ebene, in der Reihenfolge des Stapels. */
+      const nr=+Object.keys(bandRollen).find(k=>bandRollen[k]==='buch');
+      const namen=[];
+      bandStapel().forEach(e=>{
+        const t=String(e.pfad||e.file.name).split('/').filter(Boolean);
+        t.pop();
+        const n=t[nr-1];
+        if(n && !namen.includes(n)) namen.push(n);
+      });
+      if(!namen.length) zeilen.push(zeile('Keine Bücher gefunden',
+        'Auf Ebene '+nr+' steht kein Ordner. Stell die Ebene um.'));
+      namen.forEach(n=>{
+        const ziel=zielBuchVon(n);
+        const da=userBook(ziel);
+        const z=zeile(esc(n), da
+          ? 'Geht in das vorhandene Buch <b>'+esc(da.name)+'</b>'
+          : 'Wird ein <b>neues Buch</b> mit diesem Namen');
+        z._ctl.append(AWAHL.knopf(()=>{
+          const eintraege=[{wert:'', text:'Neues Buch „'+n+'"', ton:'wird beim Schreiben angelegt'}]
+            .concat(USERBOOKS.map((b,i)=>({ wert:b.bid, text:b.name,
+              ton:(BS_KATALOG.titel||[]).filter(t=>t.buchId===b.bid).length+' Titel',
+              kopf: i===0 ? 'Oder in ein vorhandenes' : null })));
+          const jetzt=eintraege.find(x=>x.wert===ziel)||eintraege[0];
+          return { wert:ziel, eintraege, text:jetzt.text, ton:jetzt.ton };
+        }, neu=>{ bandBuchZiel[n]=neu; bandAndockHand={}; zeichne(); }, 'Wohin mit „'+n+'"?'));
+        zeilen.push(z);
+      });
+    } else {
+      const buch=userBook(bandBid);
+      const z_buch=zeile('Buch', buch ? ('<b>'+esc(buch.name)+'</b>')
+        : (USERBOOKS.length ? 'Noch keines gewählt' : 'Es gibt noch kein eigenes Buch — lege eines an'));
+      if(USERBOOKS.length){
+        /* Auch diese Wahl im Stil der App. Zwei Dropdowns nebeneinander, eines
+           vom Betriebssystem und eines von BandStand, saehen nach Versehen aus. */
+        z_buch._ctl.append(AWAHL.knopf(()=>{
+          const eintraege=[{wert:'', text:'Noch keines', ton:''}]
+            .concat(USERBOOKS.map((b,n)=>({ wert:b.bid, text:b.name,
+              ton: LIBTUNES.filter(t=>t.bid===b.bid).length+' Sätze',
+              kopf: n===0 ? 'Eigene Bücher' : null })));
+          const jetzt=eintraege.find(x=>x.wert===bandBid) || eintraege[0];
+          return { wert:bandBid, eintraege, text:jetzt.text, ton:'' };
+        }, neu=>{ bandBid=neu; zeichne(); }, 'Buch wählen'));
+      }
+      const inp=document.createElement('input'); inp.className='txt';
+      inp.placeholder='Neues Buch, z. B. Songbuch Band X';
+      /* Der Stapel bringt einen Namen mit — der des Archivs oder des Ordners.
+         Er steht als Vorschlag da, solange kein Buch gewaehlt ist. */
+      if(!bandBid && bandStapelName) inp.value=bandStapelName;
+      const anlegen=async()=>{ const v=inp.value.trim(); if(!v) return;
+        bandBid=await createBook(v); inp.value=''; render(); zeichne(); };
+      inp.addEventListener('keydown', e=>{ if(e.key==='Enter') anlegen(); });
+      const z_neu=zeile('Neues Buch', bandStapelName && !bandBid
+        ? 'Vorgeschlagen nach dem Stapel — überschreib ihn, wenn er nicht passt'
+        : 'Bündelt die Blätter dieses Stapels');
+      z_neu._ctl.append(inp, knopf('Anlegen', anlegen));
+      zeilen.push(z_buch, z_neu);
+    }
+
+    /* Die Ausgabe. Ein Real Book traegt sie auf dem Umschlag und nicht im
+       Dateinamen — sie wird deshalb gesagt und nicht geraten. Traegt bereits
+       ein Ordner die Stimme, ist die Ansage ueberfluessig und sagt das. */
+    const stimmOrdner = rollenHaben('stimme');
+    const jetztAus=AUSGABEN.find(a=>a.wert===bandAusgabe)||AUSGABEN[0];
+    const z_ausg=zeile('Ausgabe', stimmOrdner
+      ? 'Nicht nötig — die Stimme steht schon im Ordnernamen'
+      : bandAusgabe
+        ? 'Alle Blätter dieses Durchgangs werden die <b>'+esc(bandAusgabe)+'</b>-Stimme'
+        : 'Nur nötig, wenn der Stapel eine Ausgabe eines Real Books ist');
+    if(!stimmOrdner) z_ausg._ctl.append(AWAHL.knopf(
+      ()=>({ wert:bandAusgabe, eintraege:AUSGABEN, text:jetztAus.text, ton:'' }),
+      neu=>{ bandAusgabe=neu; bandAndockHand={}; zeichne(); }, 'Ausgabe wählen'));
+    zeilen.push(z_ausg);
+
+    return karte('Wohin', zeilen);
   }
 
   /* Der Ordnerdialog ist eine Sache der Schreibtisch-Browser. Kann Safari auf
@@ -10579,8 +11053,13 @@ setTimeout(ablageAnmelden, 0);
     });
     /* Auch die Ausgabe faellt zurueck auf „je Datei erkennen". Bliebe sie
        stehen, bekaeme der naechste Stapel still die Stimme des vorigen — bei
-       vierhundert Blaettern faellt das erst auf, wenn es zu spaet ist. */
+       vierhundert Blaettern faellt das erst auf, wenn es zu spaet ist.
+
+       Dasselbe gilt fuer die Rollen der Ordnerebenen: Ein neuer Stapel ist
+       anders gebaut als der vorige, und eine stehengebliebene Rolle waere
+       eine stille Falschaussage ueber Dateien, die sie nie gesehen hat. */
     bandHand={}; bandTitelHand={}; bandAndockHand={}; bandAusgabe=''; bandGlattAuf=false;
+    bandRollen={}; bandBuchZiel={}; bandZweige=new Set();
     bandOffen.clear(); bandLetzte=null;
     PDFW.alleZu();
     zeichne();
@@ -10595,7 +11074,21 @@ setTimeout(ablageAnmelden, 0);
     ausgabe:     v => { bandAusgabe = v||''; bandAndockHand={}; zeichne(); },
     buch:        b => { bandBid = b; zeichne(); },
     andocken:    (schl, an) => { bandAndockHand[schl]=an; zeichne(); },
-    zustand:     () => ({ bandBid, bandAusgabe, dateien:bandDateien.length, bandAndockHand }),
+    /* Die Rollen der Ordnerebenen — der Kern seit dem 5. August.
+       `rollen({1:'buch'})` setzt, `rollen()` liest. */
+    rollen:      r => { if(r!==undefined){ bandRollen=r||{}; bandBuchZiel={};
+                          bandAndockHand={}; zeichne(); } return bandRollen; },
+    ebenen:      () => ebenenLesen(bandStapel()),
+    zweige:      z => { bandZweige = new Set([].concat(z||[])); bandAndockHand={};
+                        bandBuchZiel={}; zeichne(); return [...bandZweige]; },
+    buchZiel:    (name, bid) => { bandBuchZiel[name]=bid||''; zeichne(); },
+    /* Die drei Zahlen, an denen sich alles messen laesst. */
+    zahlen:      () => { const v=bandLesen();
+                   return { buecher:v.buecher.length, titel:v.stuecke.length,
+                            elemente:v.saetze.length, uebergangen:v.uebergangen.length,
+                            toene:v.toene.length, offen:v.offen.length }; },
+    zustand:     () => ({ bandBid, bandAusgabe, bandRollen, bandBuchZiel,
+                          dateien:bandDateien.length, bandAndockHand }),
   };
 
   /* Ordner hineinziehen. Der Browser gibt Verzeichnisse nur ueber
@@ -10666,17 +11159,50 @@ setTimeout(ablageAnmelden, 0);
       trK.append(karte('Ohne Ordner',[z_tr]));
     }
 
-    const z_zahl=zeile('Gelesen',
-      '<b>'+v.stuecke.length+'</b> Stück'+(v.stuecke.length===1?'':'e')
-      +' aus <b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Satz':'Sätzen')
-      + (v.offen.length ? ' · <b>'+v.offen.length+'</b> nicht zugeordnet' : '')
+    /* Die eine Zeile, an der man sofort sieht, ob die Ordner richtig gelesen
+       sind. Sie nennt Buecher, Titel und Blaetter — dieselben drei Zahlen, die
+       nach dem Schreiben im Bestand stehen muessen. */
+    const nBuch=v.buecher.length;
+    const z_zahl=zeile('Ergibt',
+      '<b>'+nBuch+'</b> '+(nBuch===1?'Buch':'Bücher')
+      +' · <b>'+v.stuecke.length+'</b> Titel'
+      +' · <b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Blatt':'Blätter')
+      + (v.offen.length ? ' · <b>'+v.offen.length+'</b> ohne Stimme' : '')
       + (v.toene.length ? ' · '+v.toene.length+' Ton' : '')
       + (v.ausgelassen.length ? ' · '+v.ausgelassen.length+' ausgelassen' : ''));
+    const vorschauZeilen=[z_zahl];
+
+    /* Ein Titel mit sehr vielen Blaettern ist fast immer ein falsch gelesener
+       Ordner. Gesagt wird es als Frage, nicht als Befund — geraten wird hier
+       nichts, und die Zahl steht ohnehin daneben. */
+    const dickstes=v.stuecke.reduce((a,b)=>b.saetze.length>(a?a.saetze.length:0)?b:a, null);
+    if(dickstes && dickstes.saetze.length>=25 && v.stuecke.length<=2)
+      vorschauZeilen.push(zeile('Sieht das richtig aus?',
+        '„'+esc(dickstes.titel)+'" bekäme <b>'+dickstes.saetze.length+'</b> Blätter. '
+        +'Wenn dieser Ordner in Wahrheit ein Buch ist, stell ihn oben auf '
+        +'<b>ist ein Buch</b> um.'));
+
     const z_woher=zeile('Woher der Titel kommt', v.ordnerWeg
-      ? 'Aus dem <b>Ordnernamen</b> — der ist verlässlicher als der Dateiname'
-      : 'Aus dem <b>Dateinamen</b>, weil keine Ordner dabei sind');
-    const vorschauZeilen=[z_zahl, z_woher];
-    if(bandAusgabe) vorschauZeilen.push(zeile('Ausgabe',
+      ? 'Aus dem <b>Ordnernamen</b> der Stück-Ebene'
+      : 'Aus dem <b>Dateinamen</b> — keine Ebene ist als Stück gesetzt');
+    vorschauZeilen.push(z_woher);
+
+    /* Blaetter, die unter demselben Dateinamen schon am Zieltitel haengen. */
+    const doppelt=v.stuecke.reduce((n,s)=>n+(s.doppelt||0),0);
+    if(doppelt) vorschauZeilen.push(zeile('Schon einmal da',
+      '<b>'+doppelt+'</b> '+(doppelt===1?'Blatt trägt':'Blätter tragen')
+      +' denselben Dateinamen wie ein Blatt, das schon am Titel hängt. '
+      +(doppelt===1?'Es entsteht ':'Es entstehen ')+'ein zweites daneben. '
+      +'Ein BandStand-Paket würde das erkennen — ein Ordner trägt keine Kennungen.'));
+    if(v.hatBuchEbene) vorschauZeilen.push(zeile('Bücher',
+      v.buecher.map(b=>{
+        const da=userBook(b.zielBid);
+        return esc(b.name||'ohne Namen')+' → '+(da?esc(da.name):'<b>neu</b>')
+             +' <span class="muted">('+b.stuecke+' Titel)</span>';
+      }).join('<br>')));
+    if(rollenHaben('stimme')) vorschauZeilen.push(zeile('Stimme',
+      'Aus dem Ordnernamen — alle Blätter eines Ordners bekommen dieselbe'));
+    else if(bandAusgabe) vorschauZeilen.push(zeile('Ausgabe',
       'Alle Sätze bekommen die Stimme <b>'+esc(bandAusgabe)+'</b>'));
     halter.append(karte('Vorschau',vorschauZeilen));
 
@@ -10685,22 +11211,35 @@ setTimeout(ablageAnmelden, 0);
        Bildschirme weit unten. Jens hat ihn deshalb nicht gefunden und gemeint,
        der Import sei bereits gelaufen. Solange nichts geschrieben ist, sagt
        die Zeile das jetzt ausdrücklich. */
-    /* Das Buch muss es auch wirklich geben. Zeigt `bandBid` auf ein
-       geloeschtes Buch, entstuenden Stuecke ohne Buch — im Katalog unsichtbar
-       und nur noch ueber den Export zu finden. */
-    const buchDa = !!userBook(bandBid);
+    /* Jedes Ziel muss es auch wirklich geben — oder es muss neu angelegt
+       werden duerfen. Zeigt ein Ziel auf ein geloeschtes Buch, entstuenden
+       Stuecke ohne Buch: im Katalog unsichtbar und nur noch ueber den Export
+       zu finden.
+
+       Mit Buch-Ebene ist immer alles bereit, weil fehlende Buecher beim
+       Schreiben angelegt werden. Ohne Buch-Ebene muss das eine Buch stehen. */
+    const buchDa = v.hatBuchEbene
+      ? v.buecher.length>0
+      : !!userBook(bandBid);
     /* Die offenen Dateien sperren NICHT mehr. Bis zum 31. Juli stand hier
        zusaetzlich `&& !v.offen.length`, und elf von 460 Dateien hielten den
        ganzen Import auf. Sie gehen jetzt als „Not Assigned" mit. */
     const bereit = buchDa && v.saetze.length;
     const andockZahl=v.stuecke.filter(s=>s.andocken).length;
     const neuZahl=v.stuecke.length-andockZahl;
+    const neueBuecher=v.buecher.filter(b=>!userBook(b.zielBid)).length;
+    const wohin = v.hatBuchEbene
+      ? (v.buecher.length===1
+          ? '„'+esc(userBook(v.buecher[0].zielBid)&&userBook(v.buecher[0].zielBid).name || v.buecher[0].name)+'"'
+          : v.buecher.length+' Bücher')
+      : '„'+esc((userBook(bandBid)||{}).name||'')+'"';
     const z_go=zeile('Noch nichts gespeichert',
       !buchDa ? 'Wähle oben ein Buch'
       : !v.saetze.length ? 'Es ist nichts zuzuordnen'
-      : '<b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Satz':'Sätze')
-        +' in „'+esc((userBook(bandBid)||{}).name||'')+'" schreiben'
-        + (andockZahl ? ' · '+neuZahl+' neue Stücke, '+andockZahl+' angedockt' : '')
+      : '<b>'+v.saetze.length+'</b> '+(v.saetze.length===1?'Blatt':'Blätter')
+        +' in '+wohin+' schreiben'
+        + (neueBuecher ? ' · '+neueBuecher+(neueBuecher===1?' Buch':' Bücher')+' wird neu angelegt' : '')
+        + (andockZahl ? ' · '+neuZahl+' neue Titel, '+andockZahl+' angedockt' : '')
         + (v.offen.length ? ' · <b>'+v.offen.length+'</b> davon als „'+OHNE_STIMME+'"' : ''));
     const b=knopf('Jetzt importieren', async ()=>{
       b.disabled=true;
@@ -10711,25 +11250,65 @@ setTimeout(ablageAnmelden, 0);
       const bar=document.createElement('div'); bar.className='fortschritt';
       const fuell=document.createElement('i'); const txt=document.createElement('span');
       bar.append(fuell, txt); z_go.after(bar);
-      const ber=await importBandbuch(bandBid, v.saetze, (was,a,g)=>{
-        const p = g ? Math.round(a/g*100) : 0;
-        b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + g;
-        fuell.style.width = p+'%';
-        txt.textContent = (was==='lesen' ? 'Blätter lesen' : 'In den Bestand schreiben')
-                        + ' — ' + a + ' von ' + g + ' (' + p + ' %)';
+
+      /* Je Zielbuch ein Durchgang. `importStapel` bleibt unveraendert und
+         schreibt in genau ein Buch; die Buendelung geschieht hier. Fehlende
+         Buecher werden erst jetzt angelegt — vorher ist nichts entstanden,
+         auch wenn die Vorschau schon Namen genannt hat. */
+      const nachBuch=new Map();
+      v.stuecke.forEach(st=>{
+        const k=st.buchName||'';
+        if(!nachBuch.has(k)) nachBuch.set(k, {name:k, zielBid:st.zielBid, saetze:[]});
+        nachBuch.get(k).saetze.push(...st.saetze);
       });
+      let gesamt=0, stueckZahl=0, angedockt=0, glatt=0, erstesZiel='';
+      const gesamtBlaetter=v.saetze.length; let fertig=0;
+      for(const g of nachBuch.values()){
+        let bid=g.zielBid;
+        if(!userBook(bid)){
+          try{ bid=await createBook(g.name||'Import'); }
+          catch(e){ alert('Buch „'+(g.name||'Import')+'" anlegen fehlgeschlagen: '
+                          +(e&&e.message||e)); continue; }
+        }
+        if(!erstesZiel) erstesZiel=bid;
+        const n=await importStapel(bid, g.saetze, (was,a,ges)=>{
+          const p = gesamtBlaetter ? Math.round((fertig+a)/(gesamtBlaetter*2)*100) : 0;
+          b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + ges;
+          fuell.style.width = Math.min(100,p)+'%';
+          txt.textContent = (was==='lesen' ? 'Blätter lesen' : 'In den Bestand schreiben')
+                          + ' — ' + (g.name ? '„'+g.name+'": ' : '') + a + ' von ' + ges;
+        });
+        fertig += g.saetze.length*2;
+        gesamt += (n||0);
+        const z=window._letzterImport||{};
+        stueckZahl += (z.stuecke||0); angedockt += (z.angedockt||0); glatt += (z.glatt||0);
+      }
       bar.remove();
-      const z=window._letzterImport||{};
-      const ziel=bandBid;
+      /* Jede Einschraenkung der Liste faellt, damit das Eingelesene auch zu
+         sehen ist.
+
+         Am 3. August hat Jens ein Buch mit 56 Titeln importiert und eine
+         leere Liste vorgefunden: Eine gespeicherte Buchauswahl hatte sie
+         eingeschraenkt. Damals bekam der Empfang diesen Aufruf — der grosse
+         Import nicht. Seit dem 6. August laufen alle Wege durch diese eine
+         Stelle, und am 6. August hat der Prueflauf gezeigt, dass die Falle
+         damit wieder offen stand: 0 sichtbare Titel bei 33 im Bestand.
+         Deshalb steht der Aufruf jetzt hier, wo alle Wege durchkommen. */
+      await loadLibrary();
+      const engeWar = (typeof nachImportZeigen==='function') ? nachImportZeigen() : false;
       alert('Import fertig.\n'
-        + (ber||0)+' '+((ber===1)?'Blatt':'Blätter')+' geschrieben.\n'
-        + (z.stuecke||0)+' neue Titel'
-        + (z.angedockt ? ', '+z.angedockt+' an vorhandene angedockt' : '')
-        + (z.glatt ? '\n'+z.glatt+(z.glatt===1?' vorhandenes Etikett':' vorhandene Etiketten')+' angepasst' : '')
-        + ((z.uebergangen&&z.uebergangen.length) ? '\n'+z.uebergangen.length+' übergangen' : ''));
+        + gesamt+' '+((gesamt===1)?'Blatt':'Blätter')+' geschrieben.\n'
+        + stueckZahl+' neue Titel'
+        + (nachBuch.size>1 ? ' in '+nachBuch.size+' Büchern' : '')
+        + (angedockt ? ', '+angedockt+' an vorhandene angedockt' : '')
+        + (glatt ? '\n'+glatt+(glatt===1?' vorhandenes Etikett':' vorhandene Etiketten')+' angepasst' : '')
+        + (typeof titelInDerListe==='function'
+            ? '\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.' : '')
+        + (engeWar ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
       /* Zurueck in den Content, und zwar IN das Buch, das gerade gefuellt
          wurde — nicht auf die oberste Ebene. Man will sehen, was angekommen
-         ist. */
+         ist. Bei mehreren Buechern in das erste. */
+      const ziel=erstesZiel||bandBid;
       bandZustand(); unter=null; thema='content';
       cPfad=[ziel]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen();
       zeichne();
@@ -10747,9 +11326,11 @@ setTimeout(ablageAnmelden, 0);
     if(v.treffer){
       const andockZahl=v.stuecke.filter(s=>s.andocken).length;
       const kopf=zeile('Gefunden',
-        '<b>'+v.treffer+'</b> der gelesenen Stücke '+(v.treffer===1?'steht':'stehen')
-        +' schon in „'+esc((userBook(bandBid)||{}).name||'')+'"'
-        +(bandAusgabe ? ' — beim Nachladen einer Ausgabe ist Andocken das Übliche' : ''));
+        '<b>'+v.treffer+'</b> der gelesenen Titel '+(v.treffer===1?'steht':'stehen')
+        +(v.hatBuchEbene ? ' schon im jeweiligen Zielbuch'
+                         : ' schon in „'+esc((userBook(bandBid)||{}).name||'')+'"')
+        +((bandAusgabe||rollenHaben('stimme'))
+          ? ' — beim Nachladen einer Ausgabe ist Andocken das Übliche' : ''));
       const alle=zeile('Für alle', andockZahl+' von '+v.treffer+' docken an');
       alle._ctl.append(
         knopf('Alle andocken', ()=>{ v.stuecke.forEach(s=>{ if(s.vorhanden) bandAndockHand[s.schl]=true; }); zeichneVorschau(); }),

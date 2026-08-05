@@ -35,5 +35,9 @@ design_handoff_bandstand/
 # Entwuerfe und Ablagen, die auf dem Mac bleiben
 Icon Entwürfe ChatGPT/
 
+# Pruefstand: erzeugte Testbestaende aus echten Noten. Liegt hier, weil der
+# lokale Server nur aus dem Projektordner ausliefert. Nie ins Repo.
+_pruefstand/
+
 # macOS-Ablage
 .DS_Store
