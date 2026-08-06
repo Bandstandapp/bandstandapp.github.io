@@ -7284,7 +7284,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-06 · Ordner sagen, was sie sind';
+const APP_BUILD='2026-08-06 · Ausgaben mit eigenen Namen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10363,6 +10363,14 @@ setTimeout(ablageAnmelden, 0);
      anderes als im anderen. Eine Rolle je Ebene kann das nicht ausdruecken —
      zwei Durchgaenge koennen es. */
   let bandZweige=new Set();
+  /* Von Hand gesetzte Stimme je Ordner der Stimm-Ebene.
+
+     Gemessen am 6. August an Jens' echten Ordnern: `realbook1_bb` ergibt
+     „B♭", `realbook1_eb` ergibt „E♭", `realbook1_bass` ergibt „Bass" — aber
+     `realbook1`, die C-Ausgabe, ergibt gar nichts. Der Name sagt es nicht,
+     und was nicht darinsteht, kann keine Erkennung finden. Also wird auch
+     hier gefragt statt geraten. */
+  let bandStimmHand={};
   /* Woher der Stapel kam — der Name des Archivs oder des Ordners. Er ist der
      einzige Name, den ein Stapel ohne Buch-Ebene mitbringt, und steht deshalb
      als Vorschlag im Feld „Neues Buch". Vorbelegen ist kein Raten: Der
@@ -10380,7 +10388,7 @@ setTimeout(ablageAnmelden, 0);
   const bandOffen=new Set();
   function bandZustand(){ bandDateien=[]; bandHand={}; bandTitelHand={}; bandTrenner=' - ';
     bandAusgabe=''; bandAndockHand={}; bandGlattAuf=false;
-    bandRollen={}; bandBuchZiel={}; bandStapelName=''; bandZweige=new Set();
+    bandRollen={}; bandBuchZiel={}; bandStapelName=''; bandZweige=new Set(); bandStimmHand={};
     bandOffen.clear(); bandLetzte=null;
     /* Offene Fenster zeigen sonst Blaetter, die es nicht mehr gibt. */
     if(window.PDFW) PDFW.alleZu();
@@ -10527,6 +10535,12 @@ setTimeout(ablageAnmelden, 0);
      Gemessen am 6. August an den vier echten Ausgaben von Real Book Vol. 1:
      „Real Book Vol 1 Bb" ergibt „B♭", nicht den ganzen Ordnernamen. */
   const _ordnerStimme={};
+  /* Was ein Ordner an Stimme hergibt — von Hand gesetzt schlaegt erkannt. */
+  function ordnerStimmeJetzt(name){
+    if(!name) return '';
+    if(bandStimmHand[name]!==undefined) return bandStimmHand[name];
+    return ordnerStimme(name);
+  }
   function ordnerStimme(name){
     if(!name) return '';
     if(name in _ordnerStimme) return _ordnerStimme[name];
@@ -10540,11 +10554,14 @@ setTimeout(ablageAnmelden, 0);
        „Mardi Gras Flöte in C" ist eine Floete und keine C-Ausgabe. Der
        Unterschied ist die Absicht — hier hat jemand die Ebene benannt. */
     const ende=String(name).trim().toLowerCase();
+    /* Trennzeichen vor der Ausgabe: Leerzeichen, Unterstrich, Bindestrich,
+       Punkt. Der Unterstrich ist der wichtige — Jens' echte Ordner heissen
+       `realbook1_bb` und `realbook1_bass`. */
+    const passt = w => ende===w || /[ _\-.]/.test(ende.slice(-w.length-1,-w.length))
+                                    && ende.endsWith(w);
     const treffer=AUSGABEN.filter(a=>a.wert).find(a=>{
-      const w=a.wert.toLowerCase()
-        .replace('♭','b');                     /* „B♭" auch als „Bb" schreiben */
-      return ende===w || ende.endsWith(' '+w) || ende.endsWith('-'+w)
-          || ende===a.wert.toLowerCase() || ende.endsWith(' '+a.wert.toLowerCase());
+      const roh=a.wert.toLowerCase();
+      return passt(roh) || passt(roh.replace('♭','b'));   /* „B♭" auch als „Bb" */
     });
     const w = (treffer && treffer.wert)
            || ausgabeAusText(name)
@@ -10636,7 +10653,7 @@ setTimeout(ablageAnmelden, 0);
          laeuft deshalb durch dieselbe Erkennung wie der Rest eines
          Dateinamens. Erst wenn die nichts findet, gilt der Name selbst — dann
          hat der Nutzer ihn vermutlich mit Absicht so gewaehlt. */
-      const ausg = ordnerStimme(gelesen.stimme) || bandAusgabe || '';
+      const ausg = ordnerStimmeJetzt(gelesen.stimme) || bandAusgabe || '';
       /* `gruppe` ist die Kennung des Stuecks aus dieser Vorschau. Der Import
          buendelt danach — nicht nach dem Titeltext. Zwei Ordner desselben
          Namens bleiben dadurch zwei Stuecke und verschmelzen nicht. */
@@ -10865,9 +10882,37 @@ setTimeout(ablageAnmelden, 0);
              uebereinander" hiesse raten, welches gilt. Die aeltere weicht. */
           if(neu!=='nichts') Object.keys(bandRollen).forEach(k=>{
             if(+k!==eb.nr && bandRollen[k]===neu) delete bandRollen[k]; });
-          bandAndockHand={}; bandBuchZiel={}; zeichne();
+          bandAndockHand={}; bandBuchZiel={}; bandStimmHand={}; zeichne();
         }, 'Was bedeutet Ebene '+eb.nr+'?'));
         zeilen.push(z);
+
+        /* Traegt diese Ebene die Stimme, steht darunter je Ordner, welche
+           daraus wird. Erkennen allein reicht hier nicht: Ein Ordner namens
+           „realbook1" ist die C-Ausgabe, und das steht in seinem Namen
+           nirgends. Was nicht erkannt wurde, ist markiert und wird zur
+           Eingabe aufgefordert, statt still als Stimme durchzugehen. */
+        if(jetzt==='stimme') eb.namen.forEach(n=>{
+          const erkannt=ordnerStimme(n);
+          const wert=ordnerStimmeJetzt(n);
+          const trifft = wert!==n;             /* etwas Sinnvolles gefunden? */
+          const zs=zeile('', trifft
+            ? 'wird die Stimme <b>'+esc(anzeigeStimme(wert))+'</b>'
+            : '<b>nicht erkannt</b> — so bliebe der ganze Ordnername als Stimme stehen. '
+              +'Sag, welche es ist.');
+          zs.querySelector('.lb').innerHTML='<span class="muted">'+esc(n)+'</span>';
+          if(!trifft) zs.classList.add('warnrow');
+          zs._ctl.append(AWAHL.knopf(()=>{
+            const eintraege=[{wert:'', text: erkannt!==n ? 'Wie erkannt' : 'Nicht erkannt',
+                              ton: erkannt!==n ? anzeigeStimme(erkannt) : 'der Ordnername bliebe stehen'}]
+              .concat(AUSGABEN.filter(a=>a.wert).map((a,i)=>({ wert:a.wert,
+                       text:a.text, ton:a.ton, kopf: i===0 ? 'Ausgaben' : null })))
+              .concat(stimmenAuswahl(erkannt).filter(x=>x.wert && x.wert!=='-'));
+            const jz=eintraege.find(x=>x.wert===(bandStimmHand[n]||'')) || eintraege[0];
+            return { wert:bandStimmHand[n]||'', eintraege, text:jz.text, ton:jz.ton };
+          }, neu=>{ if(neu) bandStimmHand[n]=neu; else delete bandStimmHand[n];
+                    bandAndockHand={}; zeichne(); }, 'Welche Stimme ist „'+n+'"?'));
+          zeilen.push(zs);
+        });
       });
       w.append(karte(null, zeilen));
     }
@@ -11059,7 +11104,7 @@ setTimeout(ablageAnmelden, 0);
        anders gebaut als der vorige, und eine stehengebliebene Rolle waere
        eine stille Falschaussage ueber Dateien, die sie nie gesehen hat. */
     bandHand={}; bandTitelHand={}; bandAndockHand={}; bandAusgabe=''; bandGlattAuf=false;
-    bandRollen={}; bandBuchZiel={}; bandZweige=new Set();
+    bandRollen={}; bandBuchZiel={}; bandZweige=new Set(); bandStimmHand={};
     bandOffen.clear(); bandLetzte=null;
     PDFW.alleZu();
     zeichne();
@@ -11077,7 +11122,11 @@ setTimeout(ablageAnmelden, 0);
     /* Die Rollen der Ordnerebenen — der Kern seit dem 5. August.
        `rollen({1:'buch'})` setzt, `rollen()` liest. */
     rollen:      r => { if(r!==undefined){ bandRollen=r||{}; bandBuchZiel={};
-                          bandAndockHand={}; zeichne(); } return bandRollen; },
+                          bandStimmHand={}; bandAndockHand={}; zeichne(); } return bandRollen; },
+    stimme:      (ordner, wert) => { if(wert) bandStimmHand[ordner]=wert;
+                        else delete bandStimmHand[ordner]; zeichne();
+                        return ordnerStimmeJetzt(ordner); },
+    ordnerStimme: n => ordnerStimme(n),
     ebenen:      () => ebenenLesen(bandStapel()),
     zweige:      z => { bandZweige = new Set([].concat(z||[])); bandAndockHand={};
                         bandBuchZiel={}; zeichne(); return [...bandZweige]; },
