@@ -588,6 +588,8 @@
   .assi .koerper{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
     padding:14px 20px 18px}
   .assi .koerper .scard{max-width:none}
+  /* Der Schreibknopf der Vorschau. Im Fenster traegt ihn der Fuss. */
+  .assi .koerper .srow.schreibzeile{display:none}
   .assi .koerper .sgrp:first-child{margin-top:2px}
   .assi .fuss{flex:none;display:flex;gap:8px;align-items:center;
     padding:13px 20px;border-top:1px solid var(--line-soft);background:var(--bg-panel);
@@ -1125,7 +1127,9 @@
      Alt-Stimmen nebeneinander halten will, macht beide auf. Das oberste
      traegt den staerkeren Rand — sonst weiss man bei fuenf Fenstern nicht
      mehr, welches auf den Tastendruck hoert. */
-  .pdfw{position:fixed;z-index:96;display:flex;flex-direction:column;
+  /* Über die Assistenten (z-index 99). Bis zum 7. August lag das Fenster
+     darunter, und wer beim Import eine Stimme prüfen wollte, sah es nicht. */
+  .pdfw{position:fixed;z-index:101;display:flex;flex-direction:column;
      background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--r-16);
      box-shadow:var(--shadow-dlg);overflow:hidden;min-width:330px;min-height:200px}
   .pdfw[data-oben]{border-color:var(--accent-edge)}
@@ -1172,7 +1176,7 @@
   /* Solange gezogen wird, faengt eine unsichtbare Flaeche alle Zeiger ab.
      Ohne sie reisst der Zug ab, sobald der Finger ueber das Canvas oder ueber
      einen Knopf faehrt. */
-  .pdfw-fang{position:fixed;inset:0;z-index:95;display:none}
+  .pdfw-fang{position:fixed;inset:0;z-index:100;display:none}
   body[data-pdfw-zieht] .pdfw-fang{display:block}
   body[data-pdfw-zieht] .pdfw{box-shadow:var(--shadow-dock-drag)}
 
@@ -2162,6 +2166,24 @@ async function fotoAlsPDF(datei, kante){
   if(!jpg) throw new Error('Das Bild ließ sich nicht umwandeln.');
   return pdfMitBild(new Uint8Array(await jpg.arrayBuffer()), w, h);
 }
+/* Ein leeres Notizblatt: eine weiße Seite im Format DIN A4 hochkant, als PDF.
+   Am 7. August für die Probe gebaut. Es entsteht auf demselben Weg wie ein
+   Foto — weiße Fläche auf eine Leinwand, daraus ein JPEG, daraus ein PDF —
+   und verhält sich danach überall wie ein Blatt: Es liegt am Titel, geht auf
+   die Bühne und nimmt den Stift an.
+
+   1240 auf 1754 Punkte sind A4 bei 150 dpi. Feiner lohnt nicht: Der Stift
+   zeichnet auf der Bildschirmauflösung, nicht auf der des Blattes. */
+async function notizblattLeer(){
+  const c=document.createElement('canvas'); c.width=1240; c.height=1754;
+  const g=c.getContext('2d');
+  g.fillStyle='#ffffff'; g.fillRect(0,0,c.width,c.height);
+  const jpg=await new Promise(res=>c.toBlob(res,'image/jpeg',0.92));
+  const bytes=new Uint8Array(await jpg.arrayBuffer());
+  return pdfMitBild(bytes, c.width, c.height);
+}
+window.notizblattLeer = notizblattLeer;
+
 /* Ein einseitiges PDF, das genau ein JPEG traegt — fuenf Objekte, von Hand
    gebaut. Eine Bibliothek dafuer einzubinden waere ein Vielfaches an Gewicht,
    und die Regel des Projekts verbietet ohnehin, etwas nachzuladen. Das JPEG
@@ -4782,8 +4804,29 @@ function assignTagsFlow(t){
 function tagCard(tag){
   const c=document.createElement('div'); c.className='tagcard'; c.dataset.tag=tag.id;
   c.innerHTML=`<span class="grip">⣿</span><span class="dot" style="width:11px;height:11px;border-radius:50%;background:${tag.color}"></span>${esc(tag.name)}`
-    +`<span data-e="edit" title="Bearbeiten" style="margin-left:5px;color:var(--sub);cursor:pointer"><i class="i ic-pencil"></i></span>`;
+    +`<span data-e="edit" title="Bearbeiten" style="margin-left:5px;color:var(--sub);cursor:pointer"><i class="i ic-pencil"></i></span>`
+    +`<span data-e="del" title="Löschen" style="margin-left:2px;color:var(--sub);cursor:pointer"><i class="i ic-trash-2"></i></span>`;
   c.querySelector('[data-e=edit]').onclick=ev=>{ev.stopPropagation();openTagEditor(tag);};
+  /* Löschen gab es bisher nur eine Ebene tiefer, im Tag-Editor. Jens hat es am
+     7. August dort nicht gefunden und angenommen, es fehle. Der Weg über den
+     Editor bleibt; hier steht er noch einmal, wo man ihn sucht. Die Rückfrage
+     nennt die Zahl der Stücke, die den Tag tragen — sie ist der Grund, warum
+     man es sich zweimal überlegt. */
+  c.querySelector('[data-e=del]').onclick=ev=>{
+    ev.stopPropagation();
+    const n=tagCount(tag.id);
+    if(!confirm('Tag „'+tag.name+'" löschen?\n\n'
+      + (n ? n+(n===1?' Stück trägt':' Stücke tragen')+' ihn — die Zuordnung geht verloren.'
+           : 'Kein Stück trägt ihn.'))) return;
+    S.tags=S.tags.filter(t=>t.id!==tag.id);
+    for(const k in S.tuneTags){
+      S.tuneTags[k]=(S.tuneTags[k]||[]).filter(id=>id!==tag.id);
+      if(!S.tuneTags[k].length) delete S.tuneTags[k];
+    }
+    if(S.view==='tag:'+tag.id){ S.view='all'; S.openSet=null; }
+    S.tagFilter.delete(tag.id);
+    save(); manageTagsFlow(); render();
+  };
   return c;
 }
 function manageTagsFlow(){
@@ -7568,7 +7611,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Export Schritt für Schritt';
+const APP_BUILD='2026-08-07 · Notizblatt, Tags löschen, Fenster vorn';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10312,6 +10355,29 @@ setTimeout(ablageAnmelden, 0);
       fotoZeile._ctl.append(knopf('Kamera', ()=>fotoHinzu(true)),
                             knopf('Aus der Fotos-App', ()=>fotoHinzu(false)));
       zeilen.push(fotoZeile);
+
+      /* Ein leeres Blatt zum Draufschreiben. Am 7. August fuer die Probe
+         gebaut: Absprachen, Akkordfolgen, was sonst auf einem Zettel landet
+         und dann verlorengeht. Es haengt am Stueck, zu dem es gehoert, und
+         nimmt den Stift an wie jedes andere Blatt. */
+      const notizZeile=zeile('＋ Notizblatt…',
+        'Ein leeres Blatt an diesem Titel — zum Schreiben mit dem Stift');
+      notizZeile.classList.add('crow');
+      notizZeile._ctl.append(knopf('Anlegen', async()=>{
+        const t=cTitel(); if(!t) return;
+        await beiArbeit('Notizblatt wird angelegt…', '', async()=>{
+          try{
+            const pdf=await notizblattLeer();
+            const wieviel=(BS_KATALOG.elemente||[])
+              .filter(e=>e.titelId===t.id && e.art==='notizblatt').length;
+            await BS.elementAnlegen({ titelId:t.id, art:'notizblatt',
+              etikett:'Notizen'+(wieviel?' '+(wieviel+1):''),
+              dateiname:'Notizblatt.pdf', blob:pdf, np:1 });
+            await loadLibrary(); render(); zeichne();
+          }catch(e){ alert('Anlegen fehlgeschlagen: '+(e&&e.message||e)); }
+        });
+      }));
+      zeilen.push(notizZeile);
     }
 
     const reihen=cReihen();
@@ -12322,6 +12388,9 @@ setTimeout(ablageAnmelden, 0);
           ? '„'+esc(userBook(v.buecher[0].zielBid)&&userBook(v.buecher[0].zielBid).name || v.buecher[0].name)+'"'
           : v.buecher.length+' Bücher')
       : '„'+esc((userBook(bandBid)||{}).name||'')+'"';
+    /* Im Assistenten traegt der Fuss den Schreibknopf. Diese Zeile bleibt fuer
+       den Weg ueber die Seite und wird im Fenster ausgeblendet — zwei blaue
+       Knoepfe mit derselben Aufschrift sind einer zu viel. */
     const z_go=zeile('Noch nichts gespeichert',
       !buchDa ? 'Wähle oben ein Buch'
       : !v.saetze.length ? 'Es ist nichts zuzuordnen'
@@ -12352,6 +12421,7 @@ setTimeout(ablageAnmelden, 0);
        Wortmarke und hebt sich damit von allem ab, was daneben nur anbietet. */
     b.classList.add('wichtig');
     z_go._ctl.append(b);
+    z_go.classList.add('schreibzeile');
     halter.append(karte(null,[z_go]));
     /* ---- Was es im Buch schon gibt --------------------------------------
        Nichts davon geschieht von selbst. Die Karte sagt, was gefunden wurde,
