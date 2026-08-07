@@ -2811,7 +2811,15 @@ function currentList(){
      uebrigen Stimmen desselben Stuecks fehlten in der Zeile. */
   if(S.view==='fav') list=list.filter(t=>gruppeHat(S.fav,t));
   else if(S.view==='prac') list=list.filter(t=>gruppeHat(S.prac,t));
-  else if(S.view==='edited'){ list=list.filter(t=>t.isEdit); list.sort((a,b)=>(b.editedAt||0)-(a.editedAt||0)); return list; }
+  /* „Bearbeitet" zeigt BEIDE Sorten Notiz: die alten Eintraege des
+     Stift-Editors (`isEdit`) und die Notizblaetter aus dem eigenen Bestand.
+     Am 8. August von Jens gemeldet — er legte Notizblaetter an und fand sie
+     hier nicht wieder. Dass es zwei Sorten gibt, ist eine Altlast und gehoert
+     aufgeloest; bis dahin sollen sie wenigstens an einem Ort stehen. */
+  else if(S.view==='edited'){
+    list=list.filter(t=>t.isEdit || t.art==='notizblatt');
+    list.sort((a,b)=>(b.editedAt||b.addedAt||0)-(a.editedAt||a.addedAt||0));
+    return list; }
   else if(S.view.startsWith('tag:')){
     const id=S.view.slice(4); list=list.filter(t=>gruppeTagIds(t).includes(id));
     /* Eine eigene Reihenfolge je Tag, sobald einmal gezogen wurde. Sie liegt
@@ -2849,7 +2857,7 @@ function renderTabs(){
     ['fav','Favoriten',S.fav.size,'star'],
     ['prac','Üben',S.prac.size,'metronome'],
     ['recent','Zuletzt', Object.keys(S.recent).length,'clock'],
-    ['edited','Bearbeitet',USER.length,'pencil'],
+    ['edited','Bearbeitet',bearbeiteteZahl(),'pencil'],
     ['set','Setlists',S.sets.length,'list-music'],
   ];
   /* Jeder Eintrag als Bauauftrag: eine Kennung und eine Funktion, die den
@@ -3048,7 +3056,18 @@ function seitenzahl(t){ return t.np>1 ? `<span>· ${t.np}&nbsp;S.</span>` : ''; 
    Die Kuerzel der hochgeladenen Dateien stehen dabei — sie sind Stimmen
    derselben Sache, nur aus einer anderen Quelle. */
 function stimmenZeile(stimmen, zeige){
-  const s = stimmenHTML(stimmen, zeige);
+  let liste = stimmen;
+  if(liste && liste.length && !zeigeFremdeStimmen()){
+    /* Die eigene Voice bleibt stehen — dazu alles, was gar keine transponierte
+       Ausgabe ist: Ein Notizblatt und ein Foto gehoeren zum Stueck und waeren
+       sonst aus der Zeile verschwunden. Und die Stimme, die gerade auf der
+       Buehne liegt, bleibt in jedem Fall, sonst verloere die Zeile ihre
+       Auszeichnung. */
+    liste = stimmen.filter(t => stimmenNaehe(t)<1
+      || t.art==='notizblatt' || t.art==='foto'
+      || t.key===zeige.key || t.key===window.aktivesStueck);
+  }
+  const s = stimmenHTML(liste, zeige);
   const b = window.voiceBadges ? window.voiceBadges(zeige) : '';
   return (s||b) ? '<div class="stimmzeile">'+s+b+'</div>' : '';
 }
@@ -3088,9 +3107,28 @@ function pillenHTML(tagIds){
    mehr nebeneinander passen, kommt eine zweite dazu. Ohne Tags entsteht kein
    leerer Kasten. Am 2. August von Jens verlangt. */
 function tagZeile(tagIds){
+  if(!zeigeTags()) return '';
   const h=pillenHTML(tagIds);
   return h ? '<div class="tagrow">'+h+'</div>' : '';
 }
+/* ---------- Zwei Schalter fuer eine ruhigere Liste ----------
+   Am 8. August von Jens gewuenscht. Beide betreffen nur die ANZEIGE der
+   Zeile; die Tags selbst und die uebrigen Ausgaben bleiben unangetastet und
+   sind ueber die Tag-Verwaltung, die Suche und das Blaettern weiter zu
+   erreichen. Voreingestellt an, damit sich fuer niemanden ungefragt etwas
+   aendert. */
+/* Gezaehlt wird, was in der Liste STEHT — also ZEILEN, nicht Blaetter. Zwei
+   Notizblaetter an einem Stueck ergeben eine Zeile. Zahl und Liste sind am
+   8. August schon einmal auseinandergelaufen; das soll nicht wieder
+   passieren. */
+function bearbeiteteZahl(){
+  const alle=USER.concat(LIBTUNES.filter(t=>t.art==='notizblatt'));
+  return new Set(alle.map(t=>t.gid||t.key)).size;
+}
+function zeigeTags(){ return localStorage.getItem('bs_zeige_tags') !== '0'; }
+function zeigeFremdeStimmen(){ return localStorage.getItem('bs_zeige_stimmen') !== '0'; }
+function zeigeTagsSetzen(an){ localStorage.setItem('bs_zeige_tags', an?'1':'0'); render(); }
+function zeigeFremdeStimmenSetzen(an){ localStorage.setItem('bs_zeige_stimmen', an?'1':'0'); render(); }
 /* Ein Tipp auf eine Tag-Pille zeigt alle Stuecke mit diesem Tag. Der Klick
    darf nicht weiterlaufen, sonst ginge zugleich das Stueck auf. */
 function verdrahtePillen(li){
@@ -7856,7 +7894,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-08 · Notizen blättern mit';
+const APP_BUILD='2026-08-08 · Ruhigere Zeile, Notizen an einem Ort';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -11039,6 +11077,16 @@ setTimeout(ablageAnmelden, 0);
     z_fw._ctl.append(schalter(pdfwZuNachWahl(), an=>pdfwZuNachWahlSetzen(an)));
     w.append(karte('Verhalten',[z_sonst, z_fw],
       'Beim Zuordnen vieler Blätter am Stück spart das Schließen je Blatt einen Griff.'));
+
+    const z_zt=zeile('Tags in der Zeile zeigen',
+      'Aus: die Pillen verschwinden aus der Liste. Die Tags selbst bleiben');
+    z_zt._ctl.append(schalter(zeigeTags(), an=>zeigeTagsSetzen(an)));
+    const z_zs=zeile('Fremde Stimmen in der Zeile zeigen',
+      'Aus: nur Deine eigene Voice. Notizblätter und Fotos bleiben stehen');
+    z_zs._ctl.append(schalter(zeigeFremdeStimmen(), an=>zeigeFremdeStimmenSetzen(an)));
+    w.append(karte('Was in der Zeile steht',[z_zt,z_zs],
+      'Beides betrifft nur die Anzeige. Die anderen Ausgaben erreichst Du weiter '
+      +'über die Suche und das Blättern, die Tags über „Tags verwalten".'));
 
     const z_nl=zeile('In der Liste','Beim Stöbern und Suchen');
     z_nl._ctl.append(schalter(notizBlaetternWert('liste'),
