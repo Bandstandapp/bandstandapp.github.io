@@ -1627,6 +1627,8 @@
       <button class="gb" data-a="set"   title="Zu Setlist"><i class="i ic-list-plus"></i></button>
       <span class="gsep"></span>
       <button class="gb" data-a="note"  title="Handschriftliche Notiz"><i class="i ic-pencil"></i></button>
+      <button class="gb" data-a="foto"  title="Foto an diesen Titel hängen"><i class="i ic-plus"></i></button>
+      <button class="gb" data-a="blank" title="Leeres Notizblatt an diesen Titel"><i class="i ic-list-music"></i></button>
       <button class="gb" data-a="share" title="Weitergeben — auch Drucken"><i class="i ic-share"></i></button>
       <button class="gb" data-a="full"  title="Vollbild"><i class="i ic-maximize"></i></button>
     </div>
@@ -5760,6 +5762,55 @@ function openMetaSheet(t){
   });
 }
 
+/* ---- Foto und Notizblatt aus der Notenansicht ---------------------------
+   Beide haengen das neue Blatt an den TITEL des gerade offenen Stuecks, nicht
+   an das Blatt — ein Foto vom Workshop gehoert zum Stueck, gleichgueltig
+   welche Stimme man gerade aufgeschlagen hat.
+
+   `t.titelId` traegt jede Zeile der eigenen Noten. Fehlt sie, stammt das
+   Stueck aus der ausgelieferten Sammlung, und dort gibt es nichts anzuhaengen.
+   ------------------------------------------------------------------------ */
+function dockTitelId(t){ return t && t.titelId ? t.titelId : null; }
+
+async function dockFotoHinzu(t){
+  const tid=dockTitelId(t);
+  if(!tid){ alert('An dieses Stück lässt sich nichts anhängen — es stammt nicht aus Deinem eigenen Bestand.'); return; }
+  window.dateiWaehlen(async fs=>{
+    const liste=[].concat(fs||[]); if(!liste.length) return;
+    await beiArbeit(liste.length===1?'Foto wird abgelegt…':'Fotos werden abgelegt…','',async()=>{
+      let n=0; const schief=[];
+      for(const f of liste){
+        try{
+          const pdf=await fotoAlsPDF(f);
+          await BS.elementAnlegen({ titelId:tid, art:'foto',
+            dateiname:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf', blob:pdf, np:1 });
+          n++;
+        }catch(e){ schief.push(f.name||'ein Bild'); }
+      }
+      await loadLibrary(); render();
+      alert(n+(n===1?' Foto':' Fotos')+' an „'+(t.t||'diesen Titel')+'" gehängt.'
+        + (schief.length ? '\n\nNicht lesbar: '+schief.join(', ') : ''));
+    });
+  }, 'image/*', true, true);
+}
+
+async function dockNotizblatt(t){
+  const tid=dockTitelId(t);
+  if(!tid){ alert('An dieses Stück lässt sich nichts anhängen — es stammt nicht aus Deinem eigenen Bestand.'); return; }
+  await beiArbeit('Notizblatt wird angelegt…','',async()=>{
+    try{
+      const pdf=await notizblattLeer();
+      const da=(BS_KATALOG.elemente||[]).filter(e=>e.titelId===tid && e.art==='notizblatt').length;
+      await BS.elementAnlegen({ titelId:tid, art:'notizblatt',
+        etikett:'Notizen'+(da?' '+(da+1):''), dateiname:'Notizblatt.pdf', blob:pdf, np:1 });
+      await loadLibrary(); render();
+      alert('Leeres Notizblatt an „'+(t.t||'diesen Titel')+'" gehängt.\n\n'
+        +'Du findest es über die Stimmenwahl; mit dem Stift kannst Du sofort darauf schreiben.');
+    }catch(e){ alert('Anlegen fehlgeschlagen: '+(e&&e.message||e)); }
+  });
+}
+window.dockFotoHinzu=dockFotoHinzu; window.dockNotizblatt=dockNotizblatt;
+
 /* ---------- Baustein 3b: Sammlungspaket (eigene Noten als eine Datei) ---------- */
 /* Der Export des ganzen Bestands. Er liegt jetzt in BS: sprechende Namen im
    Ordner, die Kennungen im Katalog daneben, dazu eine LIESMICH — lesbar auch
@@ -7611,7 +7662,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Notizblatt, Tags löschen, Fenster vorn';
+const APP_BUILD='2026-08-07 · Foto und Notizblatt im Dock';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -9098,6 +9149,12 @@ setTimeout(ablageAnmelden, 0);
   knopf.tag  .onclick = () => { if(CURRENT) assignTagsFlow(CURRENT); };
   knopf.set  .onclick = () => { if(CURRENT) addToSetlistFlow(CURRENT); };
   knopf.note .onclick = () => { if(CURRENT && !CURRENT.isEdit) openEditor(CURRENT); };
+  /* Foto und leeres Notizblatt direkt aus der Notenansicht. Am 7. August von
+     Jens verlangt: Wer an einem Stück arbeitet, will dafür nicht ins Setup
+     springen. In Content bleiben beide Wege stehen — dort ordnet man, hier
+     arbeitet man. */
+  knopf.foto .onclick = () => { if(CURRENT) dockFotoHinzu(CURRENT); };
+  knopf.blank.onclick = () => { if(CURRENT) dockNotizblatt(CURRENT); };
   /* Geteilt wird, was auf dem Blatt liegt. Liegt dort eine Stimme, waere
      das Leadsheet die falsche Datei — und der Fehler faellt erst beim
      Empfaenger auf. */
