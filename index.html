@@ -1186,6 +1186,22 @@
   body[data-o=port] .supitem{flex:none;margin:0;white-space:nowrap}
   .sgrp{font:800 10.5px/1 var(--font-sans);letter-spacing:.16em;text-transform:uppercase;
      color:var(--text-dim);margin:22px 0 9px}
+  /* Die Gruppen der Themenliste. Elf Themen ohne Gliederung sind eine Wand;
+     drei Gruppen sagen, wonach man sucht — Bestand, App, System. Am 7. August
+     mit Jens festgelegt, zusammen mit der Trennung von Import und Export. */
+  .supgrp{font:800 9.5px/1 var(--font-sans);letter-spacing:.15em;text-transform:uppercase;
+     color:var(--text-faint);padding:16px 11px 6px}
+  .supnav>.supgrp:first-child{padding-top:4px}
+  body[data-o=port] .supgrp{padding:13px 9px 5px}
+  /* Erklärung ist kein Bedienelement. Bis zum 7. August stand jede Erklärung
+     als eigene Zeile IN der Karte und sah damit aus wie eine Zeile, an der es
+     etwas zu tun gibt. Jetzt steht sie darüber, ohne Kasten und ohne Fuge —
+     am Aussehen erkennt man, ob eine Handlung dranhängt. */
+  .shint{font:400 12.5px/1.55 var(--font-sans);color:var(--text-faint);
+     max-width:640px;margin:-1px 0 11px}
+  .shint b{color:var(--text-body);font-weight:600}
+  .shint.warn{color:var(--danger-ink)}
+  .sgrp+.shint{margin-top:-5px}
   .scard{background:var(--bg-panel);border:1px solid var(--line-soft);border-radius:var(--r-13);
      overflow:hidden;max-width:720px}
   /* Alle Zeilen tragen denselben helleren Ton; getrennt werden sie durch eine
@@ -1212,6 +1228,16 @@
     justify-content:flex-end}
   .srow.werkzeuge .sb{max-width:none}
   .srow .btn{height:auto;padding:8px 13px;font-size:12.5px;border-radius:var(--r-9);font-weight:600}
+  /* Eine Flucht rechts. Vorher stand jedes Bedienelement dort, wo sein Text
+     endete: Eingabefelder mit 180, 220 und 240 px nebeneinander, Knöpfe so
+     breit wie ihre Beschriftung. Jetzt hat die Steuerspalte eine Mindestbreite
+     und richtet sich rechts aus; gleichartige Elemente sind gleich groß.
+     Ausgenommen sind die Listenzeilen von Content und die Werkzeugleiste —
+     dort stehen mehrere Knöpfe nebeneinander und dürfen umbrechen. */
+  .srow:not(.crow):not(.werkzeuge)>.ctl{min-width:188px;justify-content:flex-end}
+  .srow:not(.crow):not(.werkzeuge)>.ctl>.btn{min-width:108px;text-align:center;
+     justify-content:center}
+  .srow:not(.crow)>.ctl>input.txt{width:188px;max-width:188px}
   /* Der Haken zum Mehrfachwaehlen im Notenbestand. Groesser als der im
      Dialog: Hier zielt ein Finger darauf, kein Mauszeiger. */
   .srow .hkbox{all:unset;width:20px;height:20px;flex:none;border-radius:var(--r-5);
@@ -7284,7 +7310,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-06 · Ausgaben mit eigenen Namen';
+const APP_BUILD='2026-08-07 · Setup nach Anwendungsfall';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -9002,19 +9028,28 @@ setTimeout(ablageAnmelden, 0);
   document.body.dataset.rs      = G(AN.rs) || 'b';
   document.body.dataset.tagline = G(AN.tagline) || 'book';
 
+  /* Elf Themen in drei Gruppen (7. August 2026).
+     Vorher waren es sieben, und drei Anwendungsfälle lagen quer darin: Der
+     Import stand als Zeile in Content, der Export an zwei Orten unter zwei
+     Namen — „Alles exportieren" in Content, „Sicherung exportieren" unter
+     „Sicherung und Abgleich". Wer seine Noten weitergeben wollte, suchte unter
+     Sicherung und fand das Falsche.
+     Jetzt ist die erste Frage „rein oder raus", die zweite „was". Content
+     enthält nur noch, was sein Name sagt: Bücher, Titel, Elemente ordnen. */
   const THEMEN = [
-    ['content',    'Content',               'book-open'],
-    ['instrument', 'Voice',                 'music'],
-    ['darstellung','Darstellung',           'star'],
-    ['werkzeug',   'Werkzeugleiste',        'grip-vertical'],
-    ['listen',     'Listen und Tags',       'tags'],
-    ['sicherung',  'Sicherung und Abgleich','download'],
-    ['ueber',      'Über',                  'settings'],
+    ['content',    'Content',        'book-open',     'Bestand'],
+    ['import',     'Import',         'download',      'Bestand'],
+    ['export',     'Export',         'share',         'Bestand'],
+    ['papierkorb', 'Papierkorb',     'trash-2',       'Bestand'],
+    ['instrument', 'Voice',          'music',         'App'],
+    ['darstellung','Darstellung',    'star',          'App'],
+    ['werkzeug',   'Werkzeugleiste', 'grip-vertical', 'App'],
+    ['listen',     'Listen und Tags','tags',          'App'],
+    ['abgleich',   'Abgleich',       'undo-2',        'System'],
+    ['ueber',      'Über',           'settings',      'System'],
   ];
-  const UNTERTITEL = { einzeln:'Einzeln sichern und teilen',
-                       offline:'Noten offline speichern',
-                       instrumente:'Voices verwalten',
-                       import:'Noten hinzufügen' };
+  const THEMA_NAME = Object.fromEntries(THEMEN.map(([id,name])=>[id,name]));
+  const UNTERTITEL = { instrumente:'Voices verwalten' };
   let thema='content', unter=null;
 
   /* ================================================================
@@ -9033,7 +9068,6 @@ setTimeout(ablageAnmelden, 0);
   let cWahl=new Set();       /* was auf dieser Ebene angehakt ist */
   let cSuche='', cBuchst='';
   let cAktion=null;          /* {art:'verschieben'|'kopieren', ebene, ids} */
-  let cKorb=false;
   const C_ARTEN_KEY='bs_teilen_arten';
 
   function cZuruecksetzen(){ cWahl=new Set(); }
@@ -9073,12 +9107,20 @@ setTimeout(ablageAnmelden, 0);
     });
     return s;
   }
-  function karte(titel, zeilen){
+  function karte(titel, zeilen, erklaerung){
     const box=document.createDocumentFragment();
     if(titel){ const h=document.createElement('div'); h.className='sgrp'; h.textContent=titel; box.append(h); }
+    if(erklaerung) box.append(hinweis(erklaerung));
     const c=document.createElement('div'); c.className='scard';
     zeilen.filter(Boolean).forEach(z=>c.append(z));
     box.append(c); return box;
+  }
+  /* Ein Erklärungsabsatz. Er steht ÜBER der Karte und nicht als Zeile darin —
+     eine Zeile ohne Bedienelement sieht aus wie eine, an der etwas zu tun ist,
+     und genau darüber ist Jens am 7. August gestolpert. */
+  function hinweis(text, warnend){
+    const p=document.createElement('p'); p.className='shint'+(warnend?' warn':'');
+    p.innerHTML=text; return p;
   }
   const KANTEN=[['left','Links'],['top','Oben'],['right','Rechts'],['bottom','Unten']];
 
@@ -9086,22 +9128,35 @@ setTimeout(ablageAnmelden, 0);
   function themenZeichnen(){
     const n=document.getElementById('supNav'); if(!n) return;
     n.innerHTML='';
-    THEMEN.forEach(([id,name,icon])=>{
+    let gruppeJetzt=null;
+    THEMEN.forEach(([id,name,icon,gruppe])=>{
+      if(gruppe!==gruppeJetzt){
+        gruppeJetzt=gruppe;
+        const g=document.createElement('div'); g.className='supgrp'; g.textContent=gruppe;
+        n.append(g);
+      }
       const d=document.createElement('div');
       d.className='supitem'+(id===thema&&!unter?' active':'')+(id===thema?' gewaehlt':'');
       d.innerHTML='<i class="i ic-'+icon+'"></i><span>'+esc(name)+'</span>';
-      d.onclick=()=>{ thema=id; unter=null; zeichne(); };
+      d.onclick=()=>{ themaSetzen(id); };
       n.append(d);
     });
+  }
+  /* Ein Themenwechsel räumt auf, was zum vorigen Thema gehörte. Ohne das
+     stünde man nach dem Wechsel von Content nach Import noch in einem Buch,
+     und der Zurück-Pfeil führte irgendwohin. */
+  function themaSetzen(id){
+    thema=id; unter=null;
+    if(id!=='content'){ cAktion=null; }
+    zeichne();
   }
   /* Der Brotkrumenpfad. Er sagt, WO man ist — nicht, was man gerade tut: Die
      Handlung steht als Überschrift ihres Schrittes. Sonst wanderte die Ebene
      aus dem Pfad, sobald eine Funktion läuft, und man wüsste nicht mehr,
      worauf sie wirkt. */
   function cKrumen(){
-    const teile=[{text:'Content', tu:()=>{ cPfad=[]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); }}];
-    if(cKorb) teile.push({text:'Papierkorb'});
-    else if(cFlach) teile.push({text:'Alle Titel'});
+    const teile=[{text:'Content', tu:()=>{ cPfad=[]; cFlach=false; cAktion=null; cZuruecksetzen(); zeichne(); }}];
+    if(cFlach) teile.push({text:'Alle Titel'});
     else {
       const b=cBuch(); if(b) teile.push({text:b.name,
         tu:()=>{ cPfad=[b.id]; cAktion=null; cZuruecksetzen(); zeichne(); }});
@@ -9121,10 +9176,13 @@ setTimeout(ablageAnmelden, 0);
         const t=teile[+el.dataset.k]; el.onclick=t.tu;
       });
     } else {
-      h2.textContent = unter ? UNTERTITEL[unter] : 'Setup';
+      /* Der Kopf nennt das Thema, nicht „Setup". Wo man ist, soll oben stehen
+         und nicht nur links in der Liste — im Hochformat ist die Liste schmal
+         und der Name dort abgeschnitten. */
+      h2.textContent = unter ? UNTERTITEL[unter] : (THEMA_NAME[thema] || 'Setup');
     }
     let z=h.querySelector('#supBack');
-    const zurueckNoetig = unter || (thema==='content' && (cPfad.length || cFlach || cKorb || cAktion));
+    const zurueckNoetig = unter || (thema==='content' && (cPfad.length || cFlach || cAktion));
     if(!zurueckNoetig){ if(z) z.remove(); return; }
     if(!z){
       z=document.createElement('button'); z.className='dlgclose'; z.id='supBack';
@@ -9134,7 +9192,6 @@ setTimeout(ablageAnmelden, 0);
     z.onclick=()=>{
       if(unter){ unter=null; zeichne(); return; }
       if(cAktion){ cAktion=null; zeichne(); return; }
-      if(cKorb){ cKorb=false; zeichne(); return; }
       if(cFlach){ cFlach=false; cZuruecksetzen(); zeichne(); return; }
       cPfad.pop(); cZuruecksetzen(); zeichne();
     };
@@ -9143,13 +9200,16 @@ setTimeout(ablageAnmelden, 0);
     kopfSetzen(); themenZeichnen();
     const w=document.getElementById('supScroll'); if(!w) return;
     w.innerHTML='';
-    if(unter==='einzeln')     return zeichneEinzeln(w);
-    if(unter==='offline')     return zeichneOffline(w);
     if(unter==='instrumente') return zeichneInstrumente(w);
-    if(unter==='import')    return zeichneImport(w);
-    ({ content:themaContent, instrument:themaInstrument, darstellung:themaDarstellung,
-       werkzeug:themaWerkzeug, listen:themaListen, sicherung:themaSicherung,
-       ueber:themaUeber }[thema])(w);
+    const tu = { content:themaContent, import:zeichneImport, export:themaExport,
+       papierkorb:cZeichneKorb,
+       instrument:themaInstrument, darstellung:themaDarstellung,
+       werkzeug:themaWerkzeug, listen:themaListen, abgleich:themaAbgleich,
+       ueber:themaUeber }[thema];
+    /* Ein unbekanntes Thema kann nur aus einem alten gespeicherten Zustand
+       kommen. Dann lieber auf Content zurück als eine leere Seite. */
+    if(!tu){ thema='content'; return zeichne(); }
+    tu(w);
   }
 
   /* ---- Thema: Instrument ----
@@ -9341,7 +9401,6 @@ setTimeout(ablageAnmelden, 0);
   /* ---- Thema: Bücher ---- */
   /* ---- Thema: Content — der Bestand in einem Fenster ------------------ */
   function themaContent(w){
-    if(cKorb)   return cZeichneKorb(w);
     if(cAktion) return cZeichneZiel(w);
     return cZeichneEbene(w);
   }
@@ -9714,9 +9773,12 @@ setTimeout(ablageAnmelden, 0);
     });
   }
 
-  /* ---- Der Papierkorb: die Tür, die bisher fehlte -------------------- */
+  /* ---- Der Papierkorb: seit dem 7. August ein eigenes Thema ------------
+     Er stand als Zeile in Content und war damit ein Unterfall des Ordnens.
+     Er ist keiner: Was hier liegt, ist bereits aus Content heraus. */
   function cZeichneKorb(w){
     const halter=document.createElement('div'); w.append(halter);
+    korbNachtrag(w);
     BS.korb().then(e=>{
       halter.innerHTML='';
       if(!e.length){
@@ -9725,7 +9787,7 @@ setTimeout(ablageAnmelden, 0);
         return;
       }
       const kopf=zeile(e.length+(e.length===1?' Eintrag':' Einträge'),
-        'Zurückholen bringt alles wieder, was am Eintrag hing. Leeren gibt den Platz frei — und ist endgültig');
+        'Zurückholen bringt alles wieder, was am Eintrag hing');
       kopf._ctl.append(knopf('Papierkorb leeren', async()=>{
         if(!confirm('Papierkorb endgültig leeren?\n\nDanach sind die Dateien weg.')) return;
         const r=await BS.korbLeeren();
@@ -9792,38 +9854,48 @@ setTimeout(ablageAnmelden, 0);
         zeilen.push(r);
       });
       if(e.length>40) zeilen.push(zeile('…','und '+(e.length-40)+' weitere'));
-      halter.append(karte('Papierkorb',zeilen));
+      halter.append(karte('Im Papierkorb', zeilen,
+        'Leeren gibt den Platz auf dem Gerät frei und ist <b>endgültig</b>.'));
     }).catch(()=>{ halter.append(karte(null,[zeile('Der Papierkorb ist nicht lesbar','')])); });
+  }
+  /* Endgültiges Löschen, das am Papierkorb vorbeigeht. Es stand bis zum
+     7. August unter „Sicherung" — an einem Ort, dessen Name Bewahren
+     verspricht. Hier steht es bei dem, was es ist. */
+  function korbNachtrag(w){
+    const nach=document.createElement('div'); w.append(nach);
+    const z_del=zeile('Alle Notizen löschen',
+      'Handschriftliche Notizen samt ihren Seiten');
+    z_del._ctl.append(knopf('Löschen', ()=>alleNotizenLoeschen(), 'warn'));
+    nach.append(karte('Endgültig löschen',[z_del],
+      'Geht <b>nicht</b> in den Papierkorb und lässt sich nicht zurückholen.'));
   }
 
   /* ---- Die Ebene selbst ---------------------------------------------- */
   function cZeichneEbene(w){
     const eb=cEbene(), K=BS_KATALOG;
 
-    /* Auf der obersten Ebene: was es zu tun gibt. */
+    /* Auf der obersten Ebene: was es hier zu tun gibt.
+       Import, Export, Papierkorb und der Offline-Vorrat standen bis zum
+       7. August ebenfalls hier. Sie sind eigene Themen geworden; Content ist
+       zum Ordnen da, nicht zum Herein- und Hinausgeben. */
     if(eb==='buch' && !cFlach){
-      /* Steht noch eine ungeschriebene Auswahl offen, sagt die Zeile es. Jens
-         ist am 31. Juli mehrfach darauf hereingefallen: Er hatte gewaehlt, wollte
-         in der Liste nachsehen, ob die Noten da sind — und fand sie leer, weil
-         noch nichts geschrieben war. */
-      const offeneWahl = bandDateien.length;
-      const z_add=zeile('Noten hinzufügen', offeneWahl
-        ? '<b>'+offeneWahl+' Dateien gewählt und noch nicht geschrieben.</b> '
-          +'Die Auswahl steht weiter bereit — hier weitermachen'
-        : 'Viele PDFs auf einmal — Titel und Stimme werden aus dem Namen gelesen, und Du siehst vorher, was erkannt wurde');
-      if(offeneWahl) z_add.classList.add('warnrow');
-      /* NICHT mehr `bandZustand()` beim Oeffnen. Das raeumte die gewaehlten
-         Dateien weg, und wer zwischendurch in die Liste sah, fing von vorn an.
-         Zurueckgesetzt wird nur, wenn ohnehin nichts offen ist; einen neuen
-         Stapel beginnt man ueber „Ordner wählen", das die Auswahl ersetzt. */
-      z_add._ctl.append(knopf(offeneWahl?'Weiter':'Öffnen', ()=>{
-        unter='import'; if(!bandDateien.length) bandZustand(); zeichne(); }));
+      /* Steht noch eine ungeschriebene Auswahl offen, sagt es die Seite —
+         und zwar oben, bevor man in die leere Liste sieht. Jens ist am
+         31. Juli mehrfach darauf hereingefallen: Er hatte gewaehlt, wollte
+         nachsehen, ob die Noten da sind, und fand nichts, weil noch nichts
+         geschrieben war. */
+      if(bandDateien.length){
+        const z_off=zeile('Import steht offen',
+          '<b>'+bandDateien.length+' Datei'+(bandDateien.length===1?'':'en')+' gewählt '
+          +'und noch nicht geschrieben.</b> Die Auswahl steht weiter bereit.');
+        z_off.classList.add('warnrow');
+        z_off._ctl.append(knopf('Weiter', ()=>themaSetzen('import')));
+        w.append(karte(null,[z_off]));
+      }
       const z_alle=zeile('Alle Titel',
         'Quer über alle Bücher — zum Zusammenstellen und als Paket teilen');
       z_alle._ctl.append(knopf('Öffnen ›', ()=>{ cFlach=true; cZuruecksetzen(); zeichne(); }));
-      const z_korb=zeile('Papierkorb','Entferntes zurückholen oder endgültig löschen');
-      z_korb._ctl.append(knopf('Öffnen ›', ()=>{ cKorb=true; zeichne(); }));
-      w.append(karte(null,[z_add, z_alle, z_korb]));
+      w.append(karte(null,[z_alle]));
 
       /* Die Zeile steht nur da, solange es etwas aufzuraeumen gibt — danach
          verschwindet sie von selbst. Ein Angebot, das sich erledigt, muss
@@ -9831,10 +9903,10 @@ setTimeout(ablageAnmelden, 0);
       const mitNr=etikettenMitNummer();
       if(mitNr.length){
         const z_nr=zeile('Nummern in den Etiketten',
-          mitNr.length+' Stimmen tragen eine Nummer am Ende, etwa „'+esc(mitNr[0].etikett)+'". '
-          +'Sie stammt aus dem Dateinamen. „Alt 1" und „Git 2" bleiben unangetastet.');
+          mitNr.length+' Stimmen tragen eine Nummer am Ende, etwa „'+esc(mitNr[0].etikett)+'"');
         z_nr._ctl.append(knopf('Aufräumen', async()=>{ await nummernAusEtiketten(); zeichne(); }));
-        w.append(karte(null,[z_nr]));
+        w.append(karte('Aufräumen',[z_nr],
+          'Die Nummer stammt aus dem Dateinamen. „Alt 1" und „Git 2" bleiben unangetastet.'));
       }
     }
 
@@ -9934,53 +10006,83 @@ setTimeout(ablageAnmelden, 0);
     w.append(karte(kopf, zeilen));
     w.append(karte(null,[cWerkzeuge()]));
 
-    /* Sichern und Exportieren — hier, weil es den ganzen Content betrifft. */
-    if(eb==='buch' && !cFlach){
-      const z_ex=zeile('Alles exportieren',
-        'Ordner und Dateien mit sprechenden Namen, dazu der Katalog — auch ohne BandStand lesbar');
-      const exK=knopf('Exportieren', async()=>{
-        exK.textContent='… wird erstellt';
-        try{ await exportPackage(); }finally{ exK.textContent='Exportieren'; }
-      });
-      z_ex._ctl.append(exK);
-      const z_im=zeile('Paket einlesen','Führt zusammen; Vorhandenes wird nicht verdoppelt');
-      z_im._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importPackage(f), '.zip,application/zip')));
-      const z_si=zeile('Katalog sichern','Ein Abzug ohne die Noten — klein, für den Fall eines Umbaus');
-      z_si._ctl.append(knopf('Sichern', async()=>{
-        try{ const z=await BS.sicherungAlsDatei('von Hand');
-          alert('Gesichert: '+z.buecher+' Bücher, '+z.titel+' Titel, '+z.elemente+' Elemente.');
-        }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
-      }));
-      w.append(karte('Sichern und weitergeben',[z_ex, z_im, z_si]));
-
-      /* Der Offline-Vorrat des Service Workers. Er betrifft die ausgelieferte
-         Sammlung, und die ist leer, seit BandStand ohne Noten kommt — die
-         Zeile bleibt trotzdem stehen, damit die Funktion nicht verschwindet.
-         Die Offline-Marken je Titel kommen mit dem Hub, Stufe 5. */
-      const gewaehlt=offlineAuswahl();
-      const z_off=zeile('Noten offline vorhalten',
-        gewaehlt.length ? gewaehlt.length+' von '+alleBuecher().length+' Büchern gewählt'
-                        : 'Noch keine Auswahl — es werden alle Bücher gespeichert');
-      z_off._sb.id='precacheStatus';
-      const balken=document.createElement('div'); balken.className='sbar'; balken.id='precacheBar';
-      balken.innerHTML='<i></i>'; z_off._sb.parentNode.append(balken);
-      z_off._ctl.append(knopf('Bücher wählen', ()=>{ unter='offline'; zeichne(); }));
-      const offKnopf=knopf('Starten', ()=>precacheStart(offlineUrls())); offKnopf.id='precacheBtn';
-      z_off._ctl.append(offKnopf);
-      const z_sonst=zeile('Kategorie „Sonstiges Material"',
-        'Deine bearbeiteten Titel in den Listen zeigen');
-      z_sonst._ctl.append(schalter(S.sonstOn, an=>{
-        S.sonstOn=an; Sset('rb_sonston', an?'1':'0'); render();
-      }));
-      const z_fw=zeile('Vorschau-Fenster nach der Stimmenwahl',
-        'Beim Zuordnen vieler Blätter am Stück spart „Schließen" je Blatt einen Griff');
-      z_fw._ctl.append(wahl([['knopf','Offen lassen'],['wahl','Schließen']],
-        pdfwZuNachWahl()?'wahl':'knopf',
-        v=>pdfwZuNachWahlSetzen(v==='wahl')));
-      w.append(karte('Offline und Anzeige',[z_off, z_sonst, z_fw]));
-      precacheZeichnen();
-    }
   }
+
+  /* ================================================================
+     Thema: Export — alles, was hinausgeht
+
+     Bis zum 7. August lag der Export an zwei Orten unter drei Namen: „Alles
+     exportieren" und „Katalog sichern" ganz unten in Content, „Sicherung
+     exportieren" und „Einzeln sichern" unter „Sicherung und Abgleich". Wer
+     seine Noten weitergeben wollte, suchte unter Sicherung — und fand dort
+     die Setlists.
+
+     Jetzt steht alles Hinausgehende an einem Ort, in zwei Karten: die Noten
+     zuerst, die Listen danach.
+     ================================================================ */
+  function themaExport(w){
+    const z_ex=zeile('Noten als Ordner',
+      'Ordner und Dateien mit sprechenden Namen, dazu der Katalog');
+    const exK=knopf('Exportieren', async()=>{
+      exK.textContent='… wird erstellt';
+      try{ await exportPackage(); }finally{ exK.textContent='Exportieren'; }
+    });
+    z_ex._ctl.append(exK);
+    const z_si=zeile('Katalog sichern','Ein Abzug ohne die Noten — klein');
+    z_si._ctl.append(knopf('Sichern', async()=>{
+      try{ const z=await BS.sicherungAlsDatei('von Hand');
+        alert('Gesichert: '+z.buecher+' Bücher, '+z.titel+' Titel, '+z.elemente+' Elemente.');
+      }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+    }));
+    /* Einzelne Titel als Paket gehen über Content › Alle Titel › anhaken.
+       Der Weg steht hier als dritte Zeile derselben Karte und nicht in einer
+       eigenen ohne Überschrift — sonst sähe sie aus wie ein Anhängsel. */
+    const z_wahl=zeile('Nur eine Auswahl',
+      'Einzelne Titel statt alles — in Content anhaken und „Als Paket teilen"');
+    z_wahl._ctl.append(knopf('Zu Content', ()=>{
+      thema='content'; unter=null; cFlach=true; cPfad=[]; cAktion=null;
+      cZuruecksetzen(); zeichne(); }));
+    w.append(karte('Noten', [z_ex, z_si, z_wahl],
+      'Ein Paket ist auch ohne BandStand lesbar: Du siehst Ordner und PDFs mit '
+      +'ihren Namen. Der Katalog im Paket sagt einem anderen BandStand, wie es '
+      +'zu lesen ist — deshalb kommt alles unverändert zurück.'));
+
+    const teile=[['setlists','Setlists','Namen und Reihenfolge'],
+                 ['tags','Tags','Namen, Farben und Zuordnungen'],
+                 ['favorites','Favoriten','Was mit dem Stern markiert ist'],
+                 ['practice','Übungsliste','Was auf der Üben-Liste steht']];
+    const z_alles=zeile('Alles zusammen',
+      'Setlists, Tags, Favoriten, Übungsliste und Korrekturen in einer Datei');
+    z_alles._ctl.append(knopf('Exportieren', ()=>exportData()));
+    w.append(karte('Listen und Einstellungen', [z_alles].concat(
+      teile.map(([art,name,sb])=>{
+        const z=zeile(name, sb); z._ctl.append(knopf('Einzeln', ()=>exportPart(art))); return z;
+      })),
+      'Ohne Noten — nur, was Du selbst angelegt hast. Jede einzelne Datei trägt '
+      +'eine Kennung, an der der Import sie wiedererkennt.'));
+  }
+
+  /* ================================================================
+     Das Thema „Offline-Vorrat" ist am 7. August entfallen.
+
+     Es versprach etwas, das es nicht halten konnte. Gemessen in der laufenden
+     App: `TUNES` hat 0 Stuecke, der Noten-Cache `tunes-rb-v1` existiert nicht,
+     und alle 35 Elemente des Testbestands trugen ihre Datei bereits in der
+     Gerätedatenbank. Vorhalten konnte das Thema nur die AUSGELIEFERTE
+     Sammlung — und die ist leer, seit BandStand ohne Noten kommt. Was der
+     Nutzer selbst importiert, liegt ohnehin auf dem Gerät.
+
+     Die Maschinerie darunter bleibt stehen: `precacheStart`, `offlineUrls`,
+     `alleBuecher`, `offlineAuswahl`, `zeichneOffline` und `precacheZeichnen`.
+     Sie wird mit dem Hub gebraucht (Stufe 5), wo es zum ersten Mal einen
+     zweiten Ort gibt und „liegt auf dem Gerät" wieder etwas bedeutet. Dann
+     tritt an ihre Stelle die Kennzeichnung je Titel, die Jens am 7. August
+     entworfen hat: ein blauer Punkt hinter dem Namen, ein Filter in Content
+     und ein Weg, Einzelnes vom Gerät zu nehmen, ohne es zu löschen.
+
+     `precacheZeichnen` findet ihre Knoten nicht mehr und steigt sauber aus;
+     die Meldungen des Service Workers laufen ins Leere, ohne zu stoeren.
+     ================================================================ */
   /* ================================================================
      Die Bruecke von der Hauptliste nach Content.
 
@@ -10005,7 +10107,7 @@ setTimeout(ablageAnmelden, 0);
     const ids=[...new Set([].concat(titelIds||[]).filter(id=>bekannt.has(id)))];
     if(!ids.length){ alert('Zu dieser Auswahl gibt es keinen Titel im Bestand.'); return; }
     const buecher=[...new Set(ids.map(id=>(K.titel||[]).find(t=>t.id===id).buchId))];
-    thema='content'; unter=null; cKorb=false; cAktion=null;
+    thema='content'; unter=null; cAktion=null;
     cSuche=''; cBuchst='';
     if(buecher.length===1){ cFlach=false; cPfad=[buecher[0]]; }
     else                  { cFlach=true;  cPfad=[]; }
@@ -10028,12 +10130,12 @@ setTimeout(ablageAnmelden, 0);
   window.importVorschau = function(eintraege, hinweis, stapelName, rollen){
     const liste=(eintraege||[]).filter(e=>e && e.file);
     if(!liste.length){ alert('In diesem Stapel steht keine lesbare Datei.'); return false; }
-    thema='content'; cKorb=false; cAktion=null;
+    thema='import'; cAktion=null;
     bandZustand();
-    /* Erst oeffnen, dann die Unterseite: `auf()` setzt `unter` selbst auf
-       null, und eine vorher gesetzte Unterseite waere damit wieder weg. */
+    /* Erst das Thema setzen, dann oeffnen: `auf()` setzt `unter` auf null und
+       zeichnet — seit dem 7. August ist der Import ein eigenes Thema und keine
+       Unterseite mehr, die dabei wieder verlorenginge. */
     auf();
-    unter='import';
     bandUebernehmen(liste);          /* zeichnet selbst */
     if(stapelName) bandStapelName=stapelName;
     /* Eine mitgelieferte Lesart ist keine Vermutung, sondern eine Aussage des
@@ -10047,9 +10149,9 @@ setTimeout(ablageAnmelden, 0);
   /* Prueflatte fuer die Konsole, wie `bandPruef` und `gruppenBericht`. Sie
      ruft nur, was die Oberflaeche auch ruft. */
   window.cPruef = {
-    gehe:     p => { thema='content'; unter=null; cPfad=p||[]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); },
-    flach:    () => { thema='content'; unter=null; cFlach=true; cPfad=[]; cKorb=false; cAktion=null; cZuruecksetzen(); zeichne(); },
-    korb:     () => { thema='content'; unter=null; cKorb=true; cAktion=null; zeichne(); },
+    gehe:     p => { thema='content'; unter=null; cPfad=p||[]; cFlach=false; cAktion=null; cZuruecksetzen(); zeichne(); },
+    flach:    () => { thema='content'; unter=null; cFlach=true; cPfad=[]; cAktion=null; cZuruecksetzen(); zeichne(); },
+    korb:     () => { thema='papierkorb'; unter=null; cAktion=null; zeichne(); },
     suche:    q => { cSuche=q||''; zeichne(); },
     buchstabe:b => { cBuchst=b||''; zeichne(); },
     wahl:     ids => { cWahl=new Set([].concat(ids||[])); zeichne(); },
@@ -10059,7 +10161,7 @@ setTimeout(ablageAnmelden, 0);
     teilen:   ids => cTeilen([].concat(ids)),
     zeigen:   ids => window.contentZeigen([].concat(ids)),
     krumen:   () => document.querySelector('.suphead h2').innerText.replace(/\s+/g,' ').trim(),
-    zustand:  () => ({ ebene:cEbene(), pfad:cPfad.slice(), flach:cFlach, korb:cKorb,
+    zustand:  () => ({ ebene:cEbene(), pfad:cPfad.slice(), flach:cFlach, thema,
                        wahl:[...cWahl], aktion:cAktion, reihen:cReihen().length }),
     zeichne:  () => zeichne(),
   };
@@ -10089,12 +10191,28 @@ setTimeout(ablageAnmelden, 0);
       document.body.dataset.tagline, v=>{ document.body.dataset.tagline=v; Sset(AN.tagline,v); }));
     const z_hell=zeile('Helle Oberfläche','Noch nicht gebaut — die App ist bisher nur dunkel');
     z_hell._ctl.append(schalter(false, null, true));
-    const z_name=zeile('Dein Name','Wird als „Bearbeitet von" an Deine handschriftlichen Notizen gehängt');
+    const z_name=zeile('Dein Name','Wird als „Bearbeitet von" an Deine Notizen gehängt');
     const inp=document.createElement('input'); inp.className='txt'; inp.value=getEditorName();
     inp.placeholder='z. B. Jens';
     inp.onchange=()=>setEditorName(inp.value.trim());
     z_name._ctl.append(inp);
-    w.append(karte(null,[z_wm,z_rs,z_tl,z_hell,z_name]));
+    w.append(karte('Aussehen',[z_wm,z_rs,z_tl,z_hell,z_name]));
+
+    /* Beide Zeilen standen bis zum 7. August unten in Content, unter der
+       Überschrift „Offline und Anzeige". Sie ändern das Verhalten der App und
+       nicht den Bestand — hier ist ihr Platz.
+       Aus dem Zweier-Segment „Offen lassen / Schließen" ist ein Schalter
+       geworden: Eine Ja-Nein-Frage bekommt überall dieselbe Form. */
+    const z_sonst=zeile('Kategorie „Sonstiges Material"',
+      'Deine bearbeiteten Titel in den Listen zeigen');
+    z_sonst._ctl.append(schalter(S.sonstOn, an=>{
+      S.sonstOn=an; Sset('rb_sonston', an?'1':'0'); render();
+    }));
+    const z_fw=zeile('Vorschau nach der Stimmenwahl schließen',
+      'Aus: das Fenster bleibt offen, bis Du es schließt');
+    z_fw._ctl.append(schalter(pdfwZuNachWahl(), an=>pdfwZuNachWahlSetzen(an)));
+    w.append(karte('Verhalten',[z_sonst, z_fw],
+      'Beim Zuordnen vieler Blätter am Stück spart das Schließen je Blatt einen Griff.'));
   }
 
   /* ---- Thema: Werkzeugleiste ---- */
@@ -10122,20 +10240,17 @@ setTimeout(ablageAnmelden, 0);
     w.append(karte(null,[z_tags,z_sets]));
   }
 
-  /* ---- Thema: Sicherung und Abgleich ---- */
-  function themaSicherung(w){
+  /* ---- Thema: Abgleich ----
+     Nur noch der Dropbox-Abgleich. Was hier bis zum 7. August unter
+     „Sicherung" stand, ist auf Import, Export und Papierkorb verteilt — dort
+     sucht man es, wenn man es braucht. */
+  function themaAbgleich(w){
     const z_sync=zeile('Geräte-Abgleich (Dropbox)', null);
     if(window.RBSync){ try{ window.RBSync.renderSettings(z_sync); }catch(e){} }
-    w.append(karte('Abgleich',[z_sync]));
-    const z_exp=zeile('Sicherung exportieren','Setlists, Tags, Favoriten, Übungsliste und Korrekturen in eine Datei');
-    z_exp._ctl.append(knopf('Exportieren', ()=>exportData()));
-    const z_imp=zeile('Sicherung einlesen','Wird zusammengeführt; nichts wird gelöscht, der neuere Stand gewinnt');
-    z_imp._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importData(f))));
-    const z_teil=zeile('Einzeln sichern und teilen','Je eine Datei für Setlists, Tags, Favoriten oder Übungsliste');
-    z_teil._ctl.append(knopf('Öffnen', ()=>{ unter='einzeln'; zeichne(); }));
-    const z_del=zeile('Alle Notizen löschen','Entfernt alle handschriftlichen Notizen samt Seiten');
-    z_del._ctl.append(knopf('Löschen', ()=>alleNotizenLoeschen(), 'warn'));
-    w.append(karte('Sicherung',[z_exp,z_imp,z_teil,z_del]));
+    w.append(karte('Dropbox',[z_sync],
+      'Abgeglichen werden sechs Dinge: Setlists, Tags, Tag-Zuordnungen, Favoriten, '
+      +'Übungsliste und Deine Korrekturen an Titel und Komponist. '
+      +'<b>Noten, Ton und Zeichnungen bleiben auf dem Gerät.</b>'));
   }
 
   /* ---- Thema: Über ---- */
@@ -10541,6 +10656,20 @@ setTimeout(ablageAnmelden, 0);
     if(bandStimmHand[name]!==undefined) return bandStimmHand[name];
     return ordnerStimme(name);
   }
+  /* Die Stimme eines Ordners von Hand setzen. EINE Stelle, die der Knopf in
+     der Vorschau und die Prueflatte gemeinsam rufen.
+     Vorher hatte jeder seinen eigenen Weg, und sie liefen auseinander: Die
+     Prueflatte vergass `bandAndockHand` zu leeren, und damit blieb das von
+     Hand gewaehlte Andocken stehen, waehrend sich die Stimme darunter aenderte.
+     Genau die Falle aus CLAUDE.md — der Pruefstand ging nicht den Weg, den der
+     Nutzer geht. Am 7. August zusammengelegt. */
+  function stimmVonHand(ordner, wert){
+    if(!ordner) return '';
+    if(wert) bandStimmHand[ordner]=wert; else delete bandStimmHand[ordner];
+    bandAndockHand={};
+    zeichne();
+    return ordnerStimmeJetzt(ordner);
+  }
   function ordnerStimme(name){
     if(!name) return '';
     if(name in _ordnerStimme) return _ordnerStimme[name];
@@ -10811,7 +10940,9 @@ setTimeout(ablageAnmelden, 0);
     if(IST_IOS) z_dat._ctl.append(kDatei, kOrdner);
     else        z_dat._ctl.append(kOrdner, kDatei);
     const z_zieh=zeile('Hineinziehen','Ordner, Dateien oder ein Archiv auf diese Seite ziehen');
-    w.append(karte('Was',[z_dat, z_zieh]));
+    w.append(karte('Noten hereinholen',[z_dat, z_zieh],
+      'Titel und Stimme werden aus den Namen gelesen. Du siehst vorher, was '
+      +'erkannt wurde, und schreibst erst danach.'));
 
     /* 2 — was die Ordner bedeuten. Die Karte steht nur da, wenn es Ordner
        gibt; bei losen Dateien gibt es nichts zu entscheiden. */
@@ -10909,8 +11040,7 @@ setTimeout(ablageAnmelden, 0);
               .concat(stimmenAuswahl(erkannt).filter(x=>x.wert && x.wert!=='-'));
             const jz=eintraege.find(x=>x.wert===(bandStimmHand[n]||'')) || eintraege[0];
             return { wert:bandStimmHand[n]||'', eintraege, text:jz.text, ton:jz.ton };
-          }, neu=>{ if(neu) bandStimmHand[n]=neu; else delete bandStimmHand[n];
-                    bandAndockHand={}; zeichne(); }, 'Welche Stimme ist „'+n+'"?'));
+          }, neu=>stimmVonHand(n, neu), 'Welche Stimme ist „'+n+'"?'));
           zeilen.push(zs);
         });
       });
@@ -10929,6 +11059,26 @@ setTimeout(ablageAnmelden, 0);
     /* 4 — die Vorschau, in einem eigenen Kasten, damit nur sie neu gezeichnet wird */
     const halter=document.createElement('div'); halter.id='bandVorschau';
     w.append(halter);
+    /* 5 — die anderen Eingänge. Sie stehen UNTER dem Hauptweg: Wer ein Paket
+       einliest, hat keine Vorschau offen und findet sie gleich; wer mitten im
+       Import steht, wird von ihnen nicht unterbrochen. */
+    const z_pak=zeile('BandStand-Paket','Von einem anderen BandStand — führt zusammen, verdoppelt nichts');
+    z_pak._ctl.append(knopf('Datei wählen',
+      ()=>dateiWaehlen(f=>importPackage(f), '.zip,application/zip')));
+    w.append(karte('Fertige Pakete',[z_pak],
+      'Ein Paket bringt seine Kennungen mit. Daran erkennt BandStand, was schon '
+      +'da ist — erneutes Einlesen legt nichts doppelt an.'));
+
+    /* Eine eigene Überschrift, obwohl es nur eine Zeile ist. Ohne sie stünde
+       ihr Hinweis unmittelbar unter der Paket-Karte und sähe aus, als gehörte
+       er dorthin — genau die Vermischung, gegen die der Umbau angetreten ist. */
+    const z_set=zeile('Listen und Einstellungen',
+      'Setlists, Tags, Favoriten, Übungsliste — einzeln oder alles zusammen');
+    z_set._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importPart(f))));
+    w.append(karte('Ohne Noten',[z_set],
+      'Wird zusammengeführt; nichts wird gelöscht, und bei einem Widerspruch '
+      +'gewinnt der neuere Stand.'));
+
     /* Die Seite wird losgeloest zusammengebaut — Falle 3 aus CLAUDE.md. `w`
        ist der Knoten, den wir schon in der Hand haben; kein zweites Suchen. */
     w.dataset.zielflaeche='1';
@@ -11123,10 +11273,15 @@ setTimeout(ablageAnmelden, 0);
        `rollen({1:'buch'})` setzt, `rollen()` liest. */
     rollen:      r => { if(r!==undefined){ bandRollen=r||{}; bandBuchZiel={};
                           bandStimmHand={}; bandAndockHand={}; zeichne(); } return bandRollen; },
-    stimme:      (ordner, wert) => { if(wert) bandStimmHand[ordner]=wert;
-                        else delete bandStimmHand[ordner]; zeichne();
-                        return ordnerStimmeJetzt(ordner); },
-    ordnerStimme: n => ordnerStimme(n),
+    /* Zwei Namen für dasselbe Paar aus Ordner und Stimme, und der
+       ausführlichere von beiden las nur: `ordnerStimme('realbook1','C')` nahm
+       den zweiten Wert still entgegen und tat nichts. Am 7. August genau
+       darauf hereingefallen — eine Prüflatte, die schweigend nichts tut, ist
+       schlimmer als gar keine. Jetzt setzen beide, wenn ein Wert danebensteht,
+       und `ordnerStimme(n)` allein liest weiterhin nur das Erkannte. */
+    stimme:      (ordner, wert) => stimmVonHand(ordner, wert),
+    ordnerStimme:(ordner, wert) => wert===undefined ? ordnerStimme(ordner)
+                                                    : stimmVonHand(ordner, wert),
     ebenen:      () => ebenenLesen(bandStapel()),
     zweige:      z => { bandZweige = new Set([].concat(z||[])); bandAndockHand={};
                         bandBuchZiel={}; zeichne(); return [...bandZweige]; },
@@ -11359,7 +11514,7 @@ setTimeout(ablageAnmelden, 0);
          ist. Bei mehreren Buechern in das erste. */
       const ziel=erstesZiel||bandBid;
       bandZustand(); unter=null; thema='content';
-      cPfad=[ziel]; cFlach=false; cKorb=false; cAktion=null; cZuruecksetzen();
+      thema='content'; cPfad=[ziel]; cFlach=false; cAktion=null; cZuruecksetzen();
       zeichne();
     });
     b.disabled=!bereit;
@@ -11540,19 +11695,10 @@ setTimeout(ablageAnmelden, 0);
   }
 
   /* ---- Unterseite: Einzeln sichern und teilen ---- */
-  function zeichneEinzeln(w){
-    const teile=[['setlists','Setlists','Namen und Reihenfolge Deiner Setlists'],
-                 ['tags','Tags','Namen, Farben und Zuordnungen'],
-                 ['favorites','Favoriten','Welche Stücke Du mit dem Stern markiert hast'],
-                 ['practice','Übungsliste','Welche Stücke auf der Üben-Liste stehen']];
-    w.append(karte('Einzeln sichern', teile.map(([art,name,sb])=>{
-      const z=zeile(name, sb); z._ctl.append(knopf('Sichern', ()=>exportPart(art))); return z;
-    })));
-    const z_imp=zeile('Einzelne Datei einlesen',
-      'Jede Datei trägt eine Kennung; beim Einlesen wird sie erkannt und sauber zusammengeführt');
-    z_imp._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(f=>importPart(f))));
-    w.append(karte('Einlesen',[z_imp]));
-  }
+  /* Die Unterseite „Einzeln sichern und teilen" ist am 7. August entfallen.
+     Ihre vier Knöpfe stehen jetzt unmittelbar im Thema Export, und ihr
+     Einlese-Knopf im Thema Import — eine Seite tiefer war sie nur, weil der
+     Export dort keinen eigenen Ort hatte. */
 
   /* ---- Unterseite: welche Bücher offline ----
      Vorher galt alles oder nichts. Bei 309 MB und 6.231 Dateien ist die Wahl
@@ -11590,16 +11736,12 @@ setTimeout(ablageAnmelden, 0);
     const z_alle=zeile('Alle Bücher','Keine Auswahl bedeutet: alle Bücher werden gespeichert');
     z_alle._ctl.append(knopf('Auswahl aufheben', ()=>{ Sset(OFF_KEY,'[]'); zeichne(); }));
     const anzahl=offlineUrls().length;
-    const z_los=zeile('Jetzt speichern',
-      anzahl.toLocaleString('de-DE')+' Stücke, geschätzt '+Math.round(anzahl*0.05)+' MB');
-    z_los._sb.id='precacheStatus';
-    const balken=document.createElement('div'); balken.className='sbar'; balken.id='precacheBar';
-    balken.innerHTML='<i></i>'; z_los._sb.parentNode.append(balken);
-    const btn=knopf('Starten', ()=>precacheStart(offlineUrls())); btn.id='precacheBtn';
-    z_los._ctl.append(btn);
-    w.append(karte('Auswahl',[z_alle,...zeilen]));
-    w.append(karte('Speichern',[z_los]));
-    precacheZeichnen();
+    /* Gestartet wird eine Ebene höher, im Thema selbst. Hier wird nur
+       gewählt — sonst stünde derselbe Knopf an zwei Orten. */
+    w.append(karte('Auswahl', [z_alle,...zeilen],
+      'Gewählt sind zurzeit <b>'+anzahl.toLocaleString('de-DE')+'</b> Stücke, '
+      +'geschätzt '+Math.round(anzahl*0.05)+' MB. Gespeichert wird mit „Zurück" '
+      +'und dann „Starten".'));
   }
 
   /* ---- Fortschritt beim Vorabspeichern ---- */
