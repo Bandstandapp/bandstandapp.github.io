@@ -563,42 +563,42 @@
      zwischen den anderen Karten unterging.
      Jetzt eine Frage je Fenster, mit Schrittanzeige. Die Bausteine sind
      dieselben geblieben; der Rahmen zeigt sie nur einzeln. */
-  #impAssi{position:fixed;inset:0;z-index:99;display:none;
+  .assi{position:fixed;inset:0;z-index:99;display:none;
     align-items:center;justify-content:center;background:var(--scrim-dlg);padding:16px}
-  #impAssi.an{display:flex}
-  #impAssi .fenster{background:var(--bg-elev);border:1px solid var(--border-strong);
+  .assi.an{display:flex}
+  .assi .fenster{background:var(--bg-elev);border:1px solid var(--border-strong);
     border-radius:var(--r-16);box-shadow:var(--shadow-dlg);
     width:min(760px,100%);max-height:calc(100vh - 32px);
     display:flex;flex-direction:column;overflow:hidden}
-  #impAssi .kopf{flex:none;padding:15px 20px 12px;border-bottom:1px solid var(--line-soft)}
-  #impAssi .kopf h3{margin:0 0 11px;font:800 17px/1.25 var(--font-sans);color:var(--text)}
-  #impAssi .schritte{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+  .assi .kopf{flex:none;padding:15px 20px 12px;border-bottom:1px solid var(--line-soft)}
+  .assi .kopf h3{margin:0 0 11px;font:800 17px/1.25 var(--font-sans);color:var(--text)}
+  .assi .schritte{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
   /* Was noch kommt, steht gedimmt da — man sieht, wie viel Weg noch vor einem
      liegt, ohne dass es sich wie ein Knopf anfühlt. */
-  #impAssi .stufe{display:flex;align-items:center;gap:6px;padding:5px 10px;
+  .assi .stufe{display:flex;align-items:center;gap:6px;padding:5px 10px;
     border-radius:var(--r-pill);background:var(--bg-app);
     font:700 11.5px/1 var(--font-sans);color:var(--text-ghost);white-space:nowrap}
-  #impAssi .stufe .nr{display:inline-flex;align-items:center;justify-content:center;
+  .assi .stufe .nr{display:inline-flex;align-items:center;justify-content:center;
     width:16px;height:16px;border-radius:50%;background:var(--switch-off);
     color:var(--text-dim);font-size:10px}
-  #impAssi .stufe.erledigt{color:var(--text-body)}
-  #impAssi .stufe.erledigt .nr{background:var(--accent-wash-strong);color:var(--accent-bright)}
-  #impAssi .stufe.jetzt{color:var(--white);background:var(--accent)}
-  #impAssi .stufe.jetzt .nr{background:var(--white);color:var(--accent)}
-  #impAssi .koerper{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  .assi .stufe.erledigt{color:var(--text-body)}
+  .assi .stufe.erledigt .nr{background:var(--accent-wash-strong);color:var(--accent-bright)}
+  .assi .stufe.jetzt{color:var(--white);background:var(--accent)}
+  .assi .stufe.jetzt .nr{background:var(--white);color:var(--accent)}
+  .assi .koerper{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
     padding:14px 20px 18px}
-  #impAssi .koerper .scard{max-width:none}
-  #impAssi .koerper .sgrp:first-child{margin-top:2px}
-  #impAssi .fuss{flex:none;display:flex;gap:8px;align-items:center;
+  .assi .koerper .scard{max-width:none}
+  .assi .koerper .sgrp:first-child{margin-top:2px}
+  .assi .fuss{flex:none;display:flex;gap:8px;align-items:center;
     padding:13px 20px;border-top:1px solid var(--line-soft);background:var(--bg-panel);
     padding-bottom:calc(13px + env(safe-area-inset-bottom))}
-  #impAssi .fuss .stand{flex:1;min-width:0;font:600 12.5px/1.4 var(--font-sans);
+  .assi .fuss .stand{flex:1;min-width:0;font:600 12.5px/1.4 var(--font-sans);
     color:var(--text-faint)}
-  #impAssi .fuss .btn{min-width:104px;justify-content:center;text-align:center}
+  .assi .fuss .btn{min-width:104px;justify-content:center;text-align:center}
   /* Im Hochformat ist die Schrittleiste die erste Zeile, die umbricht.
      Sie darf das — sie schiebt dann den Titel nicht aus dem Bild. */
-  body[data-o=port] #impAssi .stufe{padding:4px 8px;font-size:11px}
-  body[data-o=port] #impAssi .fenster{max-height:calc(100vh - 24px)}
+  body[data-o=port] .assi .stufe{padding:4px 8px;font-size:11px}
+  body[data-o=port] .assi .fenster{max-height:calc(100vh - 24px)}
   @media print{
     @page{ size:auto; margin:0 }
     html,body{ margin:0 !important; padding:0 !important; background:#fff !important }
@@ -7568,7 +7568,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Import Schritt für Schritt';
+const APP_BUILD='2026-08-07 · Export Schritt für Schritt';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10331,6 +10331,190 @@ setTimeout(ablageAnmelden, 0);
   }
 
   /* ================================================================
+     Der Export-Assistent — drei Schritte
+
+     Am 7. August gebaut, nach `docs/BandStand_Konzept_Export.md`. Drei
+     Schritte und nicht sechs wie beim Import, und der Grund liegt in der
+     Sache: Der Import stellt Fragen, die die App nicht beantworten kann —
+     was ein Ordner bedeutet, welche Ausgabe „realbook1" enthält. Der Export
+     stellt keine einzige davon; er kennt den Bestand vollständig. Sechs
+     Fenster wären Streckung, nicht Führung.
+
+     Was ihm fehlte, war nicht Führung, sondern Auskunft über den Ausgang:
+     wie groß die Datei wird, und dass gerade gearbeitet wird.
+     ================================================================ */
+  let expSchritt=0, expWahl=null, expFertig=null;
+
+  const expStufen = () => [{k:'was',t:'Was'},{k:'form',t:'Form'},{k:'fertig',t:'Fertig'}];
+
+  function expBau(){
+    let o=document.getElementById('expAssi');
+    if(o) return o;
+    o=document.createElement('div'); o.id='expAssi'; o.className='assi';
+    o.setAttribute('role','dialog'); o.setAttribute('aria-modal','true');
+    o.innerHTML='<div class="fenster"><div class="kopf"><h3></h3>'
+      +'<div class="schritte"></div></div><div class="koerper"></div>'
+      +'<div class="fuss"><span class="stand"></span></div></div>';
+    document.body.append(o);
+    return o;
+  }
+  function expOeffnen(){
+    if(!(BS_KATALOG.elemente||[]).length){
+      alert('Es sind keine Noten im Bestand, die sich exportieren ließen.'); return; }
+    expWahl=null; expFertig=null; expSchritt=0;
+    expBau().classList.add('an');
+    expZeichnen();
+  }
+  function expZu(){
+    const o=document.getElementById('expAssi'); if(o) o.classList.remove('an');
+    expFertig=null;
+  }
+
+  /* Was der gewählte Umfang umfasst. Die Größe ist NICHT geschätzt: Jedes
+     Element trägt sein Byte-Maß im Katalog. Nur die Kompression fehlt in der
+     Rechnung, und die ändert bei PDF-Dateien wenig — sie sind bereits
+     komprimiert. */
+  function expUmfang(){
+    const k=BS_KATALOG;
+    const buecher = expWahl && expWahl.length
+      ? (k.buecher||[]).filter(b=>expWahl.includes(b.id))
+      : (k.buecher||[]);
+    const bIds=new Set(buecher.map(b=>b.id));
+    const titel=(k.titel||[]).filter(t=>bIds.has(t.buchId));
+    const tIds=new Set(titel.map(t=>t.id));
+    let elemente=(k.elemente||[]).filter(e=>tIds.has(e.titelId));
+    if(!EXP_TON) elemente=elemente.filter(e=>(BS.ARTEN[e.art]||{}).austausch==='immer');
+    const bytes=elemente.reduce((a,e)=>a+(e.groesse||0),0);
+    return { buecher:buecher.length, titel:titel.length, elemente:elemente.length,
+             bytes, titelIds:[...tIds] };
+  }
+  const expMB = b => b>=1048576 ? (b/1048576).toFixed(1)+' MB'
+                   : b>=1024    ? Math.round(b/1024)+' kB' : b+' Bytes';
+
+  function expZeichnen(){
+    const o=document.getElementById('expAssi'); if(!o) return;
+    const stufen=expStufen(), jetzt=stufen[expSchritt];
+    const leiste=o.querySelector('.schritte'); leiste.innerHTML='';
+    stufen.forEach((st,i)=>{
+      const d=document.createElement('div');
+      d.className='stufe'+(i===expSchritt?' jetzt':(i<expSchritt?' erledigt':''));
+      d.innerHTML='<span class="nr">'+(i+1)+'</span><span>'+esc(st.t)+'</span>';
+      if(i<expSchritt && expSchritt<2){ d.style.cursor='pointer';
+        d.onclick=()=>{ expSchritt=i; expZeichnen(); }; }
+      leiste.append(d);
+    });
+    const k=o.querySelector('.koerper'); k.innerHTML='';
+    const fuss=o.querySelector('.fuss');
+    [...fuss.querySelectorAll('button')].forEach(b=>b.remove());
+    const stand=fuss.querySelector('.stand');
+    const u=expUmfang();
+    stand.innerHTML = (jetzt.k==='fertig') ? ''
+      : '<b>'+u.titel+'</b> Titel · <b>'+u.elemente+'</b> '
+        +(u.elemente===1?'Blatt':'Blätter')+' · <b>'+expMB(u.bytes)+'</b>';
+    const kn=(t,tu,art)=>{ const b=knopf(t,tu,art); fuss.append(b); return b; };
+    const titel=o.querySelector('h3');
+
+    if(jetzt.k==='was'){
+      titel.textContent='Was soll hinaus?';
+      const alles=zeile('Der ganze Bestand',
+        (BS_KATALOG.buecher||[]).length+' Bücher mit allem darin');
+      alles._ctl.append(schalter(!expWahl, an=>{ expWahl = an ? null : []; expZeichnen(); }));
+      k.append(karte(null,[alles]));
+      const zeilen=(BS_KATALOG.buecher||[]).slice()
+        .sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
+        .map(b=>{
+          const t=(BS_KATALOG.titel||[]).filter(x=>x.buchId===b.id);
+          const ids=new Set(t.map(x=>x.id));
+          const el=(BS_KATALOG.elemente||[]).filter(x=>ids.has(x.titelId));
+          const z=zeile(b.name, t.length+' Titel · '+el.length+' Blätter · '
+            +expMB(el.reduce((a,x)=>a+(x.groesse||0),0)));
+          const an = !expWahl || expWahl.includes(b.id);
+          z._ctl.append(schalter(an, ein=>{
+            /* Aus „alles" wird beim ersten Abwählen eine echte Liste. */
+            if(!expWahl) expWahl=(BS_KATALOG.buecher||[]).map(x=>x.id);
+            expWahl = ein ? [...new Set(expWahl.concat(b.id))] : expWahl.filter(x=>x!==b.id);
+            if(expWahl.length===(BS_KATALOG.buecher||[]).length) expWahl=null;
+            expZeichnen();
+          }));
+          return z;
+        });
+      k.append(karte('Einzelne Bücher', zeilen,
+        'Nimm einzelne heraus, wenn nicht alles mit soll. Die Größe daneben ist '
+        +'kein Schätzwert — sie steht so im Bestand.'));
+      const z_ton=zeile('Tonaufnahmen mitnehmen','Sonst gehen nur die Blätter mit');
+      z_ton._ctl.append(schalter(EXP_TON, an=>{ EXP_TON=an; expZeichnen(); }));
+      k.append(karte(null,[z_ton]));
+      kn('Abbrechen', ()=>expZu());
+      const w=kn('Weiter ›', ()=>{ expSchritt++; expZeichnen(); }, 'wichtig');
+      if(!u.elemente){ w.disabled=true; w.style.opacity='.45'; }
+    }
+    else if(jetzt.k==='form'){
+      titel.textContent='Wie soll das Archiv aufgebaut sein?';
+      const z_b=zeile('Jedes Buch ein Ordner','Die oberste Ebene trägt die Buchnamen');
+      z_b._ctl.append(schalter(EXP_FORM.buchOrdner, an=>{ EXP_FORM.buchOrdner=an; expZeichnen(); }));
+      const z_t=zeile('Jeder Titel ein Ordner','Die Blätter liegen im Ordner ihres Stücks');
+      z_t._ctl.append(schalter(EXP_FORM.stueckOrdner, an=>{ EXP_FORM.stueckOrdner=an; expZeichnen(); }));
+      /* `zeile()` legt den Untertitel nur an, wenn er nicht leer ist — mit ''
+         wäre `_sb` null und die ganze Stufe bräche ab. Der Pfad wird deshalb
+         gleich mitgegeben. */
+      const z_p=zeile('So sieht es aus',
+        '<span style="font-family:ui-monospace,monospace">'
+        +esc(exportBeispiel(EXP_FORM))+'</span>');
+      k.append(karte(null,[z_b,z_t,z_p]));
+      /* Die Warnung stand bisher klein unter dem Beispiel und wurde übersehen.
+         Sie beschreibt einen Verlust, der sich hinterher nicht mehr heilen
+         lässt — gemessen am 6. August beim Rundlauf ohne Katalog. */
+      if(!EXP_FORM.buchOrdner)
+        k.append(hinweis('<b>Ohne Buch-Ordner geht die Buchzuordnung verloren</b>, sobald '
+          +'jemand das Archiv auspackt und die nackten Ordner wieder hereingibt. '
+          +'Titel und Blätter bleiben vollständig, aber alles landet in einem Buch. '
+          +'Im Paket selbst steht der Katalog — über ihn kommt alles unverändert zurück.', true));
+      k.append(karte('Es entsteht',[zeile('Umfang',
+        '<b>'+u.buecher+'</b> '+(u.buecher===1?'Buch':'Bücher')
+        +' · <b>'+u.titel+'</b> Titel · <b>'+u.elemente+'</b> '
+        +(u.elemente===1?'Blatt':'Blätter')+' · rund <b>'+expMB(u.bytes)+'</b>')],
+        'Das Packen dauert bei großen Beständen einige Minuten. Gemessen an '
+        +'6.231 Blättern: 24 Sekunden bis zur fertigen Datei.'));
+      kn('‹ Zurück', ()=>{ expSchritt--; expZeichnen(); });
+      kn('Datei erstellen', ()=>expSchreiben(), 'wichtig');
+    }
+    else {
+      titel.textContent='Die Datei ist fertig';
+      const f=expFertig||{};
+      k.append(karte(null,[
+        zeile('Enthalten', '<b>'+(f.titel||0)+'</b> Titel · <b>'+(f.elemente||0)+'</b> '
+          +((f.elemente===1)?'Blatt':'Blätter')),
+        zeile('Größe', '<b>'+expMB(f.bytes||0)+'</b>'),
+        zeile('Aufbau', '<span style="font-family:ui-monospace,monospace">'
+          +esc(exportBeispiel(EXP_FORM))+'</span>')],
+        IST_IOS ? 'Auf dem iPad liegt sie dort, wohin Safari Geladenes legt — '
+                  +'meist „Downloads" in der Dateien-App.'
+                : 'Sie liegt im Download-Ordner.'));
+      kn('Fertig', ()=>expZu(), 'wichtig');
+    }
+  }
+
+  async function expSchreiben(){
+    const o=document.getElementById('expAssi');
+    const knoepfe=o?[...o.querySelectorAll('.fuss button')]:[];
+    knoepfe.forEach(b=>b.disabled=true);
+    const u=expUmfang();
+    try{
+      const z=await beiArbeit('Archiv wird gepackt…',
+        u.elemente+' Blätter, rund '+expMB(u.bytes)+'. '
+        +'Bitte warte, bis diese Anzeige verschwindet.',
+        ()=>BS.exportAlsDatei({ form:Object.assign({},EXP_FORM),
+              arten: EXP_TON ? Object.keys(BS.ARTEN) : undefined,
+              titelIds: expWahl && expWahl.length ? u.titelIds : undefined }));
+      expFertig={ titel:z.titel, elemente:z.elemente, bytes:z.bytes };
+      expSchritt=2; expZeichnen();
+    }catch(e){
+      knoepfe.forEach(b=>b.disabled=false);
+      alert('Export fehlgeschlagen: '+(e&&e.message||e));
+    }
+  }
+
+  /* ================================================================
      Thema: Export — alles, was hinausgeht
 
      Bis zum 7. August lag der Export an zwei Orten unter drei Namen: „Alles
@@ -10343,13 +10527,11 @@ setTimeout(ablageAnmelden, 0);
      zuerst, die Listen danach.
      ================================================================ */
   function themaExport(w){
+    /* Seit dem 7. August führt der Assistent. Die Seite ist nur noch der
+       Einstieg — dieselbe Aufteilung wie beim Import. */
     const z_ex=zeile('Noten als Ordner',
       'Ordner und Dateien mit sprechenden Namen, dazu der Katalog');
-    const exK=knopf('Exportieren', async()=>{
-      exK.textContent='… wird erstellt';
-      try{ await exportPackage(); }finally{ exK.textContent='Exportieren'; }
-    });
-    z_ex._ctl.append(exK);
+    z_ex._ctl.append(knopf('Exportieren', ()=>expOeffnen()));
     const z_si=zeile('Katalog sichern','Ein Abzug ohne die Noten — klein');
     z_si._ctl.append(knopf('Sichern', async()=>{
       try{ const z=await BS.sicherungAlsDatei('von Hand');
@@ -11522,7 +11704,7 @@ setTimeout(ablageAnmelden, 0);
   function assiBau(){
     let o=document.getElementById('impAssi');
     if(o) return o;
-    o=document.createElement('div'); o.id='impAssi';
+    o=document.createElement('div'); o.id='impAssi'; o.className='assi';
     o.setAttribute('role','dialog'); o.setAttribute('aria-modal','true');
     o.innerHTML='<div class="fenster"><div class="kopf"><h3></h3>'
       +'<div class="schritte"></div></div>'
