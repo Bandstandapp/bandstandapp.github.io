@@ -5690,7 +5690,33 @@ async function zipAlsOrdner(zip, zipName){
    In beiden Faellen bleiben die KENNUNGEN erhalten. Deshalb verdoppelt ein
    zweites Einlesen desselben Pakets nichts, sondern erkennt „habe ich schon". */
 async function importPackage(file){
-  let zip; try{ zip=await JSZip.loadAsync(file); }catch(e){ alert('Kein gültiges Paket.'); return; }
+  /* Die Meldung nennt, was sie sieht. Sie hiess bis zum 7. August nur „Kein
+     gültiges Paket" und verschwieg den Grund — auf dem iPad war das eine
+     Sackgasse: Jens sah den Download anlaufen, danach die Meldung, und nichts
+     sagte ihm, woran es lag.
+
+     Der haeufigste Grund steht deshalb zuerst und wird eigens geprueft. Eine
+     Datei aus iCloud Drive liegt auf dem iPad oft nur als Platzhalter. Safari
+     reicht sie weiter, waehrend der Download noch laeuft, und `size` ist dann
+     0 — JSZip bekommt nichts zu lesen und wirft. */
+  const name = (file && file.name) || 'Die Datei';
+  if(file && file.size===0){
+    alert('„'+name+'" ist leer — 0 Bytes.\n\n'
+      +'Liegt sie in iCloud Drive, ist sie noch nicht auf dem Gerät. Tippe sie '
+      +'in der Dateien-App einmal an, warte, bis das Wolkensymbol verschwindet, '
+      +'und wähle sie dann erneut.');
+    return;
+  }
+  let zip;
+  try{ zip=await JSZip.loadAsync(file); }
+  catch(e){
+    alert('„'+name+'" lässt sich nicht als Archiv lesen.\n\n'
+      +'Größe: '+(((file&&file.size)||0)).toLocaleString('de-DE')+' Bytes\n'
+      +'Typ: '+((file&&file.type)||'unbekannt')+'\n'
+      +'Grund: '+((e&&e.message)||e)+'\n\n'
+      +'Stammt sie aus iCloud Drive, lade sie in der Dateien-App zuerst herunter.');
+    return;
+  }
   const neu=zip.file('katalog.json'), alt=zip.file('manifest.json');
   if(!neu && !alt) return zipAlsOrdner(zip, file && file.name);
   let kat;
@@ -7310,7 +7336,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Setup nach Anwendungsfall';
+const APP_BUILD='2026-08-07 · Archive und sprechende Fehler';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10913,6 +10939,33 @@ setTimeout(ablageAnmelden, 0);
   const rollenHaben = rolle => Object.keys(bandRollen||{})
     .some(k=>bandRollen[k]===rolle);
 
+  /* Was über „Dateien wählen" hereinkommt, ist entweder ein Archiv oder ein
+     Stapel loser Blätter. Der Knopf bietet seit dem 7. August alles an, also
+     muss er hier selbst sortieren — vorher tat es der `accept`-Filter, und
+     genau der sperrte das Archiv aus.
+
+     Beides zugleich ergibt keinen brauchbaren Stapel. Das Archiv bringt eine
+     Ordnerstruktur mit, die losen Dateien haben keine, und `zipAlsOrdner`
+     setzt den Zustand ohnehin zurück — die losen Dateien wären danach weg.
+     Deshalb gewinnt das Archiv, und was liegen bleibt, wird genannt statt
+     still verworfen. */
+  function notenAnnehmen(dateien){
+    const liste=(dateien||[]).filter(Boolean);
+    if(!liste.length) return;
+    const istZip = f => /\.zip$/i.test(f.name||'') || /zip/i.test(f.type||'');
+    const zips=liste.filter(istZip);
+    const rest=liste.filter(f=>!istZip(f));
+    if(!zips.length){ bandUebernehmen(liste.map(f=>({file:f, pfad:f.name}))); return; }
+    if(zips.length>1 || rest.length)
+      alert('Es wird nur „'+(zips[0].name||'das Archiv')+'" gelesen.\n\n'
+        +'Ein Archiv bringt seine Ordner mit; alles daneben würde den Stapel '
+        +'verfälschen. Hol den Rest danach in einem zweiten Durchgang.');
+    /* Dasselbe `importPackage` wie beim Empfang: Findet es einen Katalog, ist
+       es ein BandStand-Paket; findet es keinen, geht das Archiv als Ordner in
+       dieselbe Vorschau. Ein Weg herein, wie das Konzept vom 5. August will. */
+    importPackage(zips[0]);
+  }
+
   function zeichneImport(w){
     /* Die Reihenfolge der Karten folgt dem Ablauf: erst die Dateien holen,
        dann sagen, was ihre Ordner bedeuten, dann sagen wohin, dann schreiben.
@@ -10934,9 +10987,15 @@ setTimeout(ablageAnmelden, 0);
        Dateiwahl der Weg, und die trägt ihren eigenen Namen. */
     const kOrdner=knopf((bandDateien.length && !IST_IOS) ? 'Anderen Ordner' : 'Ordner wählen',
                         ()=>ordnerWaehlen());
+    /* OHNE accept-Filter, wie der Empfangs-Knopf seit dem 2. August.
+       Hier stand `'application/pdf,.pdf,audio/*'`, und damit war ein ZIP im
+       Dateien-Dialog des iPads grau. Der Text der Zeile darüber verspricht
+       auf iOS ausdrücklich, dass ein gepacktes Archiv die Ordner mitbringt —
+       der Filter verbot genau das. Jens ist am 7. August daran gescheitert.
+       Auf iOS greifen `accept`-Angaben ohnehin nicht zuverlässig. Lieber
+       alles anbieten und hinterher sagen, was nicht ging. */
     const kDatei=knopf('Dateien wählen',
-        ()=>dateiWaehlen(fs=>bandUebernehmen([...fs].map(f=>({file:f, pfad:f.name}))),
-                         'application/pdf,.pdf,audio/*', true));
+        ()=>dateiWaehlen(fs=>notenAnnehmen([...fs]), '', true));
     if(IST_IOS) z_dat._ctl.append(kDatei, kOrdner);
     else        z_dat._ctl.append(kOrdner, kDatei);
     const z_zieh=zeile('Hineinziehen','Ordner, Dateien oder ein Archiv auf diese Seite ziehen');
@@ -11062,9 +11121,13 @@ setTimeout(ablageAnmelden, 0);
     /* 5 — die anderen Eingänge. Sie stehen UNTER dem Hauptweg: Wer ein Paket
        einliest, hat keine Vorschau offen und findet sie gleich; wer mitten im
        Import steht, wird von ihnen nicht unterbrochen. */
+    /* Auch hier ohne Filter, aus demselben Grund: `.zip,application/zip`
+       greift auf iOS nicht zuverlässig, und ein grau dastehendes Archiv sperrt
+       den Weg für ein ganzes Buch. `importPackage` prüft ohnehin selbst und
+       meldet, wenn es kein Paket ist. */
     const z_pak=zeile('BandStand-Paket','Von einem anderen BandStand — führt zusammen, verdoppelt nichts');
     z_pak._ctl.append(knopf('Datei wählen',
-      ()=>dateiWaehlen(f=>importPackage(f), '.zip,application/zip')));
+      ()=>dateiWaehlen(f=>importPackage(f), '')));
     w.append(karte('Fertige Pakete',[z_pak],
       'Ein Paket bringt seine Kennungen mit. Daran erkennt BandStand, was schon '
       +'da ist — erneutes Einlesen legt nichts doppelt an.'));
