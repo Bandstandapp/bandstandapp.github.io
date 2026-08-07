@@ -2595,10 +2595,17 @@ function bsZuTune(el, ti, bu){
      bekommt die Stimmen-Schalter wie ein Real Book. Die Gruppe ist jetzt der
      TITEL selbst und nicht mehr ein aus dem Namen gerechneter Schluessel —
      deshalb verschmelzen zwei gleichnamige Stuecke nicht mehr. */
-  const hatStimme = !!(el.instrument || el.etikett);
+  /* Ein Foto oder Notizblatt gehoert IMMER zu seinem Titel, auch ohne Etikett.
+     Ohne diese Ausnahme bekam ein Foto eine eigene Gruppe, und der Titel stand
+     zweimal in der Liste: einmal mit allen Blaettern, einmal nur mit dem Foto.
+     Am 7. August von Jens gemeldet. Neue Fotos tragen jetzt ein Etikett; diese
+     Zeile heilt zusaetzlich die, die vorher ohne eines entstanden sind — ohne
+     ihre Daten anzufassen. */
+  const amTitel = el.art==='foto' || el.art==='notizblatt';
+  const hatStimme = !!(el.instrument || el.etikett) || amTitel;
   if(hatStimme){
     t.instrument = el.instrument||'';
-    t.stimme = el.etikett || el.instrument || '';
+    t.stimme = el.etikett || el.instrument || (amTitel ? (BS.ARTEN[el.art]||{}).name : '') || '';
     t.fam='ub|'+ti.buchId; t.gid='bs|'+el.titelId;
   } else { t.instrument=''; t.stimme=''; t.fam=''; t.gid=t.key; }
   return t;
@@ -3793,7 +3800,17 @@ function titelBearbeiten(titelId){
         for(const f of [].concat(fs)){
           try{
             const {blob, art, name} = await umbau(f);
-            await BS.elementAnlegen({ titelId, art, dateiname:name, blob, np:art==='foto'?1:await BS.seitenzahl(blob) });
+            /* Ein Foto braucht ein Etikett, sonst faellt es aus der Gruppe
+               seines Titels: `bsZuTune` steckt ein Element ohne Stimme in eine
+               eigene Gruppe, und der Titel stand danach zweimal in der Liste.
+               Am 7. August von Jens gemeldet. */
+            const eti = art==='foto'
+              ? 'Foto'+((()=>{ const d=(BS_KATALOG.elemente||[])
+                    .filter(e=>e.titelId===titelId && e.art==='foto').length+z;
+                  return d?' '+(d+1):''; })())
+              : '';
+            await BS.elementAnlegen({ titelId, art, etikett:eti, dateiname:name, blob,
+              np:art==='foto'?1:await BS.seitenzahl(blob) });
             z++;
           }catch(e){ schief.push(f.name||'eine Datei'); }
         }
@@ -5782,7 +5799,14 @@ async function dockFotoHinzu(t){
       for(const f of liste){
         try{
           const pdf=await fotoAlsPDF(f);
+          /* Das Etikett ist nicht Zierde, sondern entscheidet die Gruppierung:
+             `bsZuTune` steckt ein Element OHNE Stimme in eine eigene Gruppe,
+             und dann stand der Titel zweimal in der Liste — einmal mit allen
+             Blättern, einmal nur mit dem Foto. Am 7. August von Jens gemeldet. */
+          const da=(BS_KATALOG.elemente||[])
+            .filter(e=>e.titelId===tid && e.art==='foto').length + n;
           await BS.elementAnlegen({ titelId:tid, art:'foto',
+            etikett:'Foto'+(da?' '+(da+1):''),
             dateiname:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf', blob:pdf, np:1 });
           n++;
         }catch(e){ schief.push(f.name||'ein Bild'); }
@@ -7662,7 +7686,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Foto und Notizblatt im Dock';
+const APP_BUILD='2026-08-08 · Foto bleibt bei seinem Titel';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10399,7 +10423,12 @@ setTimeout(ablageAnmelden, 0);
         for(const f of [].concat(fs)){
           try{
             const pdf=await fotoAlsPDF(f);
+            /* Etikett wie im Dock-Weg — ohne es faellt das Foto aus der Gruppe
+               seines Titels und steht als zweiter Eintrag in der Liste. */
+            const da=(BS_KATALOG.elemente||[])
+              .filter(e=>e.titelId===t.id && e.art==='foto').length + n;
             await BS.elementAnlegen({ titelId:t.id, art:'foto',
+              etikett:'Foto'+(da?' '+(da+1):''),
               dateiname:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf',
               blob:pdf, np:1 });
             n++;
