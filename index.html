@@ -556,6 +556,49 @@
   #arbeitLauf .lauf i{display:block;height:100%;width:40%;border-radius:var(--r-pill);
     background:var(--accent-bright);animation:arbeitZieht 1.1s ease-in-out infinite}
   @keyframes arbeitZieht{ 0%{transform:translateX(-100%)} 100%{transform:translateX(250%)} }
+  /* ---- Der Import-Assistent (7. August) --------------------------------
+     Die Import-Seite trug alle Fragen untereinander, und der Schreibknopf
+     stand am Ende — bei vierhundert Blättern zwanzig Bildschirme tief. Jens
+     hat dabei einen Stapel in das falsche Buch geschrieben, weil die Buchwahl
+     zwischen den anderen Karten unterging.
+     Jetzt eine Frage je Fenster, mit Schrittanzeige. Die Bausteine sind
+     dieselben geblieben; der Rahmen zeigt sie nur einzeln. */
+  #impAssi{position:fixed;inset:0;z-index:99;display:none;
+    align-items:center;justify-content:center;background:var(--scrim-dlg);padding:16px}
+  #impAssi.an{display:flex}
+  #impAssi .fenster{background:var(--bg-elev);border:1px solid var(--border-strong);
+    border-radius:var(--r-16);box-shadow:var(--shadow-dlg);
+    width:min(760px,100%);max-height:calc(100vh - 32px);
+    display:flex;flex-direction:column;overflow:hidden}
+  #impAssi .kopf{flex:none;padding:15px 20px 12px;border-bottom:1px solid var(--line-soft)}
+  #impAssi .kopf h3{margin:0 0 11px;font:800 17px/1.25 var(--font-sans);color:var(--text)}
+  #impAssi .schritte{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+  /* Was noch kommt, steht gedimmt da — man sieht, wie viel Weg noch vor einem
+     liegt, ohne dass es sich wie ein Knopf anfühlt. */
+  #impAssi .stufe{display:flex;align-items:center;gap:6px;padding:5px 10px;
+    border-radius:var(--r-pill);background:var(--bg-app);
+    font:700 11.5px/1 var(--font-sans);color:var(--text-ghost);white-space:nowrap}
+  #impAssi .stufe .nr{display:inline-flex;align-items:center;justify-content:center;
+    width:16px;height:16px;border-radius:50%;background:var(--switch-off);
+    color:var(--text-dim);font-size:10px}
+  #impAssi .stufe.erledigt{color:var(--text-body)}
+  #impAssi .stufe.erledigt .nr{background:var(--accent-wash-strong);color:var(--accent-bright)}
+  #impAssi .stufe.jetzt{color:var(--white);background:var(--accent)}
+  #impAssi .stufe.jetzt .nr{background:var(--white);color:var(--accent)}
+  #impAssi .koerper{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:14px 20px 18px}
+  #impAssi .koerper .scard{max-width:none}
+  #impAssi .koerper .sgrp:first-child{margin-top:2px}
+  #impAssi .fuss{flex:none;display:flex;gap:8px;align-items:center;
+    padding:13px 20px;border-top:1px solid var(--line-soft);background:var(--bg-panel);
+    padding-bottom:calc(13px + env(safe-area-inset-bottom))}
+  #impAssi .fuss .stand{flex:1;min-width:0;font:600 12.5px/1.4 var(--font-sans);
+    color:var(--text-faint)}
+  #impAssi .fuss .btn{min-width:104px;justify-content:center;text-align:center}
+  /* Im Hochformat ist die Schrittleiste die erste Zeile, die umbricht.
+     Sie darf das — sie schiebt dann den Titel nicht aus dem Bild. */
+  body[data-o=port] #impAssi .stufe{padding:4px 8px;font-size:11px}
+  body[data-o=port] #impAssi .fenster{max-height:calc(100vh - 24px)}
   @media print{
     @page{ size:auto; margin:0 }
     html,body{ margin:0 !important; padding:0 !important; background:#fff !important }
@@ -5829,13 +5872,15 @@ async function zipAlsOrdner(zip, zipName){
            if(j && j.rollen && Object.keys(j.rollen).length) vorgabe=j.rollen; }
   }catch(e){}
 
+  /* Der Text sagte bis zum 7. August „Sag oben, was die Ordner bedeuten".
+     „Oben" gibt es nicht mehr — der Assistent führt jetzt Schritt für Schritt,
+     und ein Verweis auf eine Stelle, die keiner sucht, verwirrt nur. */
   window.importVorschau(eintraege,
     eintraege.length+(eintraege.length===1?' Datei':' Dateien')+' aus „'+wurzelName+'" gelesen.\n\n'
     +(vorgabe
       ? 'Das Archiv stammt aus einem BandStand-Export und sagt selbst, was seine '
-        +'Ordner bedeuten. Die Ebenen stehen schon richtig — prüfe die Zahlen und schreib.'
-      : 'Es ist noch nichts geschrieben. Sag oben, was die Ordner bedeuten — '
-        +'ein Buch, ein Stück oder eine Stimme —, prüfe die Zahlen und schreib dann.'),
+        +'Ordner bedeuten. Die Ebenen stehen schon richtig.'
+      : 'Es ist noch nichts geschrieben. Du wirst jetzt Schritt für Schritt gefragt.'),
     wurzelName, vorgabe);
 }
 /* Einlesen. Es kennt zwei Formen: den neuen Katalog und das alte
@@ -7523,7 +7568,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-07 · Arbeitsanzeige und Import zurücknehmen';
+const APP_BUILD='2026-08-07 · Import Schritt für Schritt';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -9410,6 +9455,11 @@ setTimeout(ablageAnmelden, 0);
     };
   }
   function zeichne(){
+    /* Steht der Assistent offen, gehört ihm das Wort. Ohne das zeichnete
+       jede Änderung im Hintergrund die Seite neu, und seine Karten stünden
+       doppelt da. */
+    const assi=document.getElementById('impAssi');
+    if(assi && assi.classList.contains('an')){ assiZeichnen(); }
     kopfSetzen(); themenZeichnen();
     const w=document.getElementById('supScroll'); if(!w) return;
     w.innerHTML='';
@@ -11212,14 +11262,14 @@ setTimeout(ablageAnmelden, 0);
     importPackage(zips[0]);
   }
 
-  function zeichneImport(w){
-    /* Die Reihenfolge der Karten folgt dem Ablauf: erst die Dateien holen,
-       dann sagen, was ihre Ordner bedeuten, dann sagen wohin, dann schreiben.
-       Bis zum 5. August stand „Wohin" oben — das war die Frage, die man ohne
-       die Dateien gar nicht beantworten kann. */
+  /* ---- Die Bausteine des Imports -----------------------------------------
+     Seit dem 7. August gibt es zwei Rahmen für dieselben Fragen: die
+     Import-Seite und den Assistenten. Damit sie nie auseinanderlaufen, liegen
+     die Zeilen HIER und werden von beiden geholt. Dieselbe Lehre wie bei
+     `stimmVonHand`: Zwei Wege zu einer Sache sind einer zu viel. */
 
-    /* 1 — die Dateien. Womit ein Ordner gelesen wird, entscheidet die
-       Ordner-Karte darunter; hier wird nur gesammelt. */
+  /* Baustein 1 — woher die Noten kommen. */
+  function assiZeilenNoten(){
     const z_dat=zeile('Noten',
       bandDateien.length ? ('<b>'+bandDateien.length+'</b> Datei'+(bandDateien.length===1?'':'en')+' gelesen')
       : IST_IOS ? 'Auf dem iPad geht nur <b>Dateien wählen</b> — Safari kann hier keine Ordner auswählen. '
@@ -11245,16 +11295,15 @@ setTimeout(ablageAnmelden, 0);
     if(IST_IOS) z_dat._ctl.append(kDatei, kOrdner);
     else        z_dat._ctl.append(kOrdner, kDatei);
     const z_zieh=zeile('Hineinziehen','Ordner, Dateien oder ein Archiv auf diese Seite ziehen');
-    w.append(karte('Noten hereinholen',[z_dat, z_zieh],
-      'Titel und Stimme werden aus den Namen gelesen. Du siehst vorher, was '
-      +'erkannt wurde, und schreibst erst danach.'));
+    return [z_dat, z_zieh];
+  }
 
-    /* 2 — was die Ordner bedeuten. Die Karte steht nur da, wenn es Ordner
-       gibt; bei losen Dateien gibt es nichts zu entscheiden. */
+  /* Baustein 2 — die Zweige eines gemischten Stapels. Leer, wo es nichts zu
+     teilen gibt. */
+  function assiZeilenZweige(){
     const alleEbenen=ebenenLesen(bandDateien);
-    const ebenen=ebenenLesen(bandStapel());
+    const zeilen=[];
     if(bandDateien.length && alleEbenen.length){
-      const zeilen=[];
 
       /* Der gemischte Stapel. Liegen oben mehrere Ordner und darunter noch
          eine Ebene, koennen die Zweige Verschiedenes bedeuten — „Real Books"
@@ -11301,7 +11350,17 @@ setTimeout(ablageAnmelden, 0);
         : 'Die Zahlen in der Vorschau rechnen sich bei jeder Änderung sofort neu.');
       if(nichtsGesetzt) kopf.classList.add('warnrow');
       zeilen.push(kopf);
+    }
+    return zeilen;
+  }
 
+  /* Baustein 3 — welche Rolle jede Ordnerebene trägt. Die Frage, an der alles
+     hängt: Dieselbe Ordnerform bedeutet bei Bandnoten ein Stück und bei Real
+     Books ein Buch, und das steht in den Dateien nicht drin. */
+  function assiZeilenRollen(){
+    const ebenen=ebenenLesen(bandStapel());
+    const zeilen=[];
+    {
       ebenen.forEach(eb=>{
         const jetzt=bandRollen[eb.nr]||'nichts';
         const bsp=eb.beispiele.map(esc).join(' · ')
@@ -11322,11 +11381,23 @@ setTimeout(ablageAnmelden, 0);
         }, 'Was bedeutet Ebene '+eb.nr+'?'));
         zeilen.push(z);
 
-        /* Traegt diese Ebene die Stimme, steht darunter je Ordner, welche
-           daraus wird. Erkennen allein reicht hier nicht: Ein Ordner namens
-           „realbook1" ist die C-Ausgabe, und das steht in seinem Namen
-           nirgends. Was nicht erkannt wurde, ist markiert und wird zur
-           Eingabe aufgefordert, statt still als Stimme durchzugehen. */
+      });
+    }
+    return zeilen;
+  }
+
+  /* Baustein 4 — welche Stimme aus welchem Ordner wird. Nur dort, wo eine
+     Ebene die Rolle „Stimme" trägt.
+     Erkennen allein reicht nicht: Ein Ordner namens „realbook1" ist die
+     C-Ausgabe, und das steht in seinem Namen nirgends. Was nicht erkannt
+     wurde, ist markiert und wird zur Eingabe aufgefordert, statt still als
+     Stimme durchzugehen. */
+  function assiZeilenStimmen(){
+    const ebenen=ebenenLesen(bandStapel());
+    const zeilen=[];
+    ebenen.forEach(eb=>{
+      const jetzt=bandRollen[eb.nr]||'nichts';
+      {
         if(jetzt==='stimme') eb.namen.forEach(n=>{
           const erkannt=ordnerStimme(n);
           const wert=ordnerStimmeJetzt(n);
@@ -11348,23 +11419,31 @@ setTimeout(ablageAnmelden, 0);
           }, neu=>stimmVonHand(n, neu), 'Welche Stimme ist „'+n+'"?'));
           zeilen.push(zs);
         });
-      });
-      w.append(karte(null, zeilen));
+      }
+    });
+    return zeilen;
+  }
+
+  /* ---- Die Import-Seite ---------------------------------------------------
+     Sie ist seit dem 7. August der Einstieg, nicht mehr der ganze Ablauf: Sie
+     zeigt die drei Türen herein und die fertigen Pakete. Sobald Dateien da
+     sind, übernimmt der Assistent. */
+  function zeichneImport(w){
+    w.append(karte('Noten hereinholen', assiZeilenNoten(),
+      'Titel und Stimme werden aus den Namen gelesen. Du wirst Schritt für '
+      +'Schritt gefragt und schreibst erst am Ende.'));
+
+    /* Steht ein Stapel offen, führt eine Zeile zurück in den Assistenten. */
+    if(bandDateien.length){
+      const z=zeile('Import läuft',
+        '<b>'+bandDateien.length+'</b> Datei'+(bandDateien.length===1?'':'en')
+        +' gewählt und noch nicht geschrieben');
+      z.classList.add('warnrow');
+      z._ctl.append(knopf('Weiter', ()=>assiOeffnen()));
+      w.append(karte(null,[z]));
     }
 
-    /* 3 — wohin. Traegt eine Ebene die Rolle „Buch", steht hier je Ordner
-       eine Zeile; sonst die eine Buchwahl wie bisher. */
-    w.append(zeichneWohin());
-
-    /* Das Trennzeichen wird nur noch gebraucht, wenn keine Ordner im Spiel
-       sind. Es steht deshalb erst da, wenn es zaehlt. */
-    const halterTr=document.createElement('div'); halterTr.id='bandTrennKasten';
-    w.append(halterTr);
-
-    /* 4 — die Vorschau, in einem eigenen Kasten, damit nur sie neu gezeichnet wird */
-    const halter=document.createElement('div'); halter.id='bandVorschau';
-    w.append(halter);
-    /* 5 — die anderen Eingänge. Sie stehen UNTER dem Hauptweg: Wer ein Paket
+    /* Die anderen Eingänge. Sie stehen UNTER dem Hauptweg: Wer ein Paket
        einliest, hat keine Vorschau offen und findet sie gleich; wer mitten im
        Import steht, wird von ihnen nicht unterbrochen. */
     /* Auch hier ohne Filter, aus demselben Grund: `.zip,application/zip`
@@ -11392,7 +11471,313 @@ setTimeout(ablageAnmelden, 0);
        ist der Knoten, den wir schon in der Hand haben; kein zweites Suchen. */
     w.dataset.zielflaeche='1';
     ziehenAnmelden(w);
-    zeichneVorschau();
+  }
+
+  /* ================================================================
+     Der Import-Assistent — eine Frage je Fenster
+
+     Am 7. August gebaut. Vorher standen alle Fragen untereinander auf einer
+     Seite, und der Schreibknopf lag am Ende: bei vierhundert Blättern zwanzig
+     Bildschirme tief. Jens hat dabei vier Real Books in sein Blauton-Buch
+     geschrieben, weil die Buchwahl zwischen den anderen Karten unterging.
+
+     Die Reihenfolge ist nicht beliebig. „Wohin" MUSS hinter „Was die Ordner
+     bedeuten" stehen: Trägt eine Ebene die Rolle „Buch", gibt es mehrere
+     Zielbücher — eines je Ordner —, und welche das sind, weiß man vorher
+     nicht. Dieselbe Lehre wie am 5. August.
+
+     Schritte, die nichts zu fragen haben, entfallen. Ein Stapel loser Dateien
+     hat keine Ordner, also auch keine Ordnerfrage.
+     ================================================================ */
+  let assiSchritt=0;
+  let assiFertig=null;      /* die Meldung des letzten Laufs, für das Schlussbild */
+
+  function assiStufen(){
+    /* Nach dem Schreiben ist der Stapel leer, und die Stufen „Ordner" und
+       „Stimmen" fielen rückwirkend weg — die Leiste schrumpfte, während man
+       auf „Fertig" stand. Der letzte Lauf hält sie deshalb fest. */
+    if(assiFertig && assiFertig.stufen) return assiFertig.stufen;
+    const hatOrdner = bandDateien.length && ebenenLesen(bandDateien).length>0;
+    const hatStimmen = assiZeilenStimmen().length>0;
+    const stufen=[{k:'was', t:'Noten'}];
+    if(hatOrdner)  stufen.push({k:'ordner',  t:'Ordner'});
+    if(hatStimmen) stufen.push({k:'stimmen', t:'Stimmen'});
+    stufen.push({k:'wohin',  t:'Wohin'});
+    stufen.push({k:'pruefen',t:'Prüfen'});
+    stufen.push({k:'fertig', t:'Fertig'});
+    return stufen;
+  }
+  function assiOeffnen(nr){
+    const o=assiBau();
+    assiSchritt = (nr===undefined) ? (bandDateien.length ? 1 : 0) : nr;
+    o.classList.add('an');
+    assiZeichnen();
+  }
+  function assiZu(){
+    const o=document.getElementById('impAssi');
+    if(o) o.classList.remove('an');
+    assiFertig=null;
+    zeichne();
+  }
+  function assiBau(){
+    let o=document.getElementById('impAssi');
+    if(o) return o;
+    o=document.createElement('div'); o.id='impAssi';
+    o.setAttribute('role','dialog'); o.setAttribute('aria-modal','true');
+    o.innerHTML='<div class="fenster"><div class="kopf"><h3></h3>'
+      +'<div class="schritte"></div></div>'
+      +'<div class="koerper"></div>'
+      +'<div class="fuss"><span class="stand"></span></div></div>';
+    document.body.append(o);
+    return o;
+  }
+
+  function assiZeichnen(){
+    const o=document.getElementById('impAssi'); if(!o) return;
+    const stufen=assiStufen();
+    if(assiSchritt>=stufen.length) assiSchritt=stufen.length-1;
+    if(assiSchritt<0) assiSchritt=0;
+    const jetzt=stufen[assiSchritt];
+
+    /* Die Schrittleiste. Was noch kommt, steht gedimmt da — das ist die
+       Antwort auf „wie viel liegt noch vor mir". */
+    const leiste=o.querySelector('.schritte'); leiste.innerHTML='';
+    stufen.forEach((s,i)=>{
+      const d=document.createElement('div');
+      d.className='stufe'+(i===assiSchritt?' jetzt':(i<assiSchritt?' erledigt':''));
+      d.innerHTML='<span class="nr">'+(i+1)+'</span><span>'+esc(s.t)+'</span>';
+      /* Zurückspringen ja, vorspringen nein: Ein späterer Schritt kann auf
+         Angaben beruhen, die noch nicht gemacht sind. */
+      if(i<assiSchritt){ d.style.cursor='pointer'; d.onclick=()=>{ assiSchritt=i; assiZeichnen(); }; }
+      leiste.append(d);
+    });
+
+    const k=o.querySelector('.koerper'); k.innerHTML='';
+    const fuss=o.querySelector('.fuss');
+    [...fuss.querySelectorAll('button')].forEach(b=>b.remove());
+    const stand=fuss.querySelector('.stand'); stand.textContent='';
+
+    const titel=o.querySelector('h3');
+    const v = bandDateien.length ? bandLesen() : null;
+    /* Die drei Zahlen stehen in jedem Schritt im Fuß. Sie sind der Prüfstein:
+       Wer sieht, dass aus 1.600 Blättern ein Titel würde, merkt es hier und
+       nicht hinterher. */
+    if(v && jetzt.k!=='fertig')
+      stand.innerHTML='Ergibt <b>'+v.buecher.length+'</b> '+(v.buecher.length===1?'Buch':'Bücher')
+        +' · <b>'+v.stuecke.length+'</b> Titel · <b>'+v.saetze.length+'</b> '
+        +(v.saetze.length===1?'Blatt':'Blätter');
+
+    const knopfR=(text,tu,art)=>{ const b=knopf(text,tu,art); fuss.append(b); return b; };
+
+    if(jetzt.k==='was'){
+      titel.textContent='Welche Noten?';
+      k.append(karte(null, assiZeilenNoten(),
+        bandDateien.length
+          ? '<b>'+bandDateien.length+' Dateien gelesen.</b> Es ist noch nichts geschrieben.'
+          : 'Ein ganzer Ordner, einzelne Dateien oder ein gepacktes Archiv. '
+            +'Du kannst sie auch auf dieses Fenster ziehen.'));
+      const zw=assiZeilenZweige();
+      if(zw.length) k.append(karte('Nur ein Teil?', zw,
+        'Bedeuten die obersten Ordner Verschiedenes, nimm sie einzeln und '
+        +'wiederhole den Durchgang.'));
+      knopfR('Abbrechen', ()=>assiZu());
+      const w=knopfR('Weiter ›', ()=>{ assiSchritt++; assiZeichnen(); }, 'wichtig');
+      w.disabled=!bandDateien.length;
+      if(!bandDateien.length) w.style.opacity='.45';
+    }
+    else if(jetzt.k==='ordner'){
+      titel.textContent='Was bedeuten die Ordner?';
+      k.append(karte(null, assiZeilenRollen(),
+        'Dieselbe Ordnerform bedeutet Verschiedenes: Bei Bandnoten ist ein '
+        +'Ordner ein <b>Stück</b>, bei Real Books ein <b>Buch</b>. Das steht in '
+        +'den Dateien nicht drin — deshalb die Frage. Die Zahlen unten rechnen '
+        +'sich sofort neu.'));
+      knopfR('‹ Zurück', ()=>{ assiSchritt--; assiZeichnen(); });
+      knopfR('Weiter ›', ()=>{ assiSchritt++; assiZeichnen(); }, 'wichtig');
+    }
+    else if(jetzt.k==='stimmen'){
+      titel.textContent='Welche Stimme wird aus welchem Ordner?';
+      const zs=assiZeilenStimmen();
+      const offen=zs.filter(z=>z.classList.contains('warnrow')).length;
+      k.append(karte(null, zs,
+        /* „1 Ordner sind" stand hier beim ersten Bauen. Derselbe Fehler ist im
+           Projekt schon als „1 Sätze" und „1 Elemente" aufgetreten. */
+        offen ? '<b>'+offen+(offen===1 ? ' Ordner ist' : ' Ordner sind')
+                +' nicht erkannt.</b> '+(offen===1?'Sein':'Ihr')+' Name sagt die '
+                +'Ausgabe nicht — so bliebe der ganze Ordnername als Stimme stehen.'
+              : 'Alle Ordner sind erkannt. Stimmt etwas nicht, stell es hier um.'));
+      knopfR('‹ Zurück', ()=>{ assiSchritt--; assiZeichnen(); });
+      knopfR('Weiter ›', ()=>{ assiSchritt++; assiZeichnen(); }, 'wichtig');
+    }
+    else if(jetzt.k==='wohin'){
+      titel.textContent='Wohin soll der Stapel?';
+      k.append(zeichneWohin());
+      /* Die Warnung, die Jens am 7. August gefehlt hat. Er schrieb vier Real
+         Books in sein Blauton-Buch und merkte es erst, als beide Bestände
+         untrennbar nebeneinanderlagen. */
+      const warn=assiZielWarnung();
+      if(warn) k.append(hinweis(warn, true));
+      const trK=document.createElement('div'); trK.id='bandTrennKasten'; k.append(trK);
+      knopfR('‹ Zurück', ()=>{ assiSchritt--; assiZeichnen(); });
+      knopfR('Weiter ›', ()=>{ assiSchritt++; assiZeichnen(); }, 'wichtig');
+      zeichneVorschauStill();
+    }
+    else if(jetzt.k==='pruefen'){
+      titel.textContent='Stimmt das so?';
+      const halterTr=document.createElement('div'); halterTr.id='bandTrennKasten'; k.append(halterTr);
+      const halter=document.createElement('div'); halter.id='bandVorschau'; k.append(halter);
+      zeichneVorschau();
+      knopfR('‹ Zurück', ()=>{ assiSchritt--; assiZeichnen(); });
+      knopfR('Jetzt importieren', ()=>assiSchreiben(), 'wichtig');
+    }
+    else if(jetzt.k==='fertig'){
+      titel.textContent='Import abgeschlossen';
+      const f=assiFertig||{};
+      const z1=zeile('Geschrieben',
+        '<b>'+(f.elemente||0)+'</b> '+((f.elemente===1)?'Blatt':'Blätter')
+        +' · <b>'+(f.stuecke||0)+'</b> neue Titel'
+        +((f.angedockt||0) ? ' · <b>'+f.angedockt+'</b> an vorhandene gehängt' : ''));
+      const z2=zeile('In der Liste stehen jetzt',
+        '<b>'+((BS_KATALOG.titel||[]).length)+'</b> Titel in <b>'
+        +((BS_KATALOG.buecher||[]).length)+'</b> '
+        +(((BS_KATALOG.buecher||[]).length===1)?'Buch':'Büchern'));
+      k.append(karte(null,[z1,z2],
+        f.buchName ? 'Geschrieben nach „<b>'+esc(f.buchName)+'</b>". '
+          +'War das das falsche Buch, holt „Rückgängig" in Content alles wieder heraus.'
+          : ''));
+      knopfR('Fertig', ()=>{ assiZu(); }, 'wichtig');
+    }
+    /* Hineinziehen soll auch im Fenster gehen — sonst wäre der Assistent ein
+       Rückschritt gegenüber der Seite. */
+    k.dataset.zielflaeche='1'; ziehenAnmelden(k);
+  }
+
+  /* Die Vorschau still durchrechnen, ohne sie zu zeichnen: Der Schritt
+     „Wohin" braucht ihre Zahlen für den Fuß, aber nicht ihre Zeilen. */
+  function zeichneVorschauStill(){ try{ bandLetzte=bandLesen(); }catch(e){} }
+
+  /* Was steht schon in dem Buch, in das geschrieben werden soll?
+     Gibt null zurück, wenn das Ziel leer oder neu ist. */
+  function assiZielWarnung(){
+    if(rollenHaben('buch')) return null;      /* dort entscheidet jeder Ordner selbst */
+    if(!bandBid) return null;                 /* noch kein Ziel gewählt */
+    const buch=(BS_KATALOG.buecher||[]).find(b=>b.id===bandBid);
+    if(!buch) return null;
+    const titel=(BS_KATALOG.titel||[]).filter(t=>t.buchId===buch.id);
+    if(!titel.length) return null;
+    const ids=new Set(titel.map(t=>t.id));
+    const blaetter=(BS_KATALOG.elemente||[]).filter(e=>ids.has(e.titelId)).length;
+    const v=bandLesen();
+    /* Gleiche Namen werden zusammengeführt — das ist der Fall, der sich
+       hinterher am schwersten aufdröseln lässt. */
+    const da=new Set(titel.map(t=>norm(t.titel)));
+    const gleich=v.stuecke.filter(s=>da.has(norm(s.titel))).length;
+    return '„<b>'+esc(buch.name)+'</b>" enthält bereits <b>'+titel.length+'</b> Titel '
+      +'mit <b>'+blaetter+'</b> Blättern. Deine <b>'+v.saetze.length+'</b> Blätter kommen dazu.'
+      + (gleich ? ' <b>'+gleich+(gleich===1 ? ' Titel trägt denselben Namen und wird'
+                                            : ' Titel tragen denselben Namen und werden')
+                  +' zusammengeführt.</b>' : '');
+  }
+
+  async function assiSchreiben(){
+    const o=document.getElementById('impAssi');
+    const knoepfe=o?[...o.querySelectorAll('.fuss button')]:[];
+    knoepfe.forEach(b=>b.disabled=true);
+    try{
+      const zielBid=bandBid;
+      /* Die Stufen VOR dem Schreiben festhalten: `bandSchreiben` räumt den
+         Stapel weg, und ohne Dateien fielen „Ordner" und „Stimmen" aus der
+         Leiste — sie schrumpfte, während man auf „Fertig" stand. */
+      const stufen=assiStufen();
+      const ber=await beiArbeit('Wird geschrieben…',
+        'Bitte warte, bis diese Anzeige verschwindet.',
+        ()=>bandSchreiben(null, true));
+      const buch=(BS_KATALOG.buecher||[]).find(b=>b.id===(ber.erstesZiel||zielBid));
+      assiFertig={ elemente:ber.blaetter, stuecke:ber.stuecke,
+                   angedockt:ber.angedockt, buchName:(buch&&buch.name)||'',
+                   engeWar:ber.engeWar, stufen };
+      assiSchritt=stufen.length-1;
+      assiZeichnen();
+    }catch(e){
+      knoepfe.forEach(b=>b.disabled=false);
+      alert('Import fehlgeschlagen: '+(e&&e.message||e));
+    }
+  }
+
+  /* ---- Der eine Weg zum Schreiben ----------------------------------------
+     Bis zum 7. August steckte dieser Ablauf im Knopf der Vorschau. Seit es den
+     Assistenten gibt, rufen ihn zwei Rahmen — und zwei Kopien wären zwei
+     Wahrheiten. Der Fortschritt geht als Rückruf hinaus; wie er gezeigt wird,
+     entscheidet der Aufrufer.
+
+     `melde(art, getan, gesamt, buchName, anteil)` — art ist 'lesen' oder
+     'schreiben'. */
+  async function bandSchreiben(melde, ohneAbschluss){
+    const v=bandLesen();
+    /* Je Zielbuch ein Durchgang. `importStapel` bleibt unveraendert und
+       schreibt in genau ein Buch; die Buendelung geschieht hier. Fehlende
+       Buecher werden erst jetzt angelegt — vorher ist nichts entstanden,
+       auch wenn die Vorschau schon Namen genannt hat. */
+    const nachBuch=new Map();
+    v.stuecke.forEach(st=>{
+      const k=st.buchName||'';
+      if(!nachBuch.has(k)) nachBuch.set(k, {name:k, zielBid:st.zielBid, saetze:[]});
+      nachBuch.get(k).saetze.push(...st.saetze);
+    });
+    let gesamt=0, stueckZahl=0, angedockt=0, glatt=0, erstesZiel='';
+    const gesamtBlaetter=v.saetze.length; let fertig=0;
+    for(const g of nachBuch.values()){
+      let bid=g.zielBid;
+      if(!userBook(bid)){
+        try{ bid=await createBook(g.name||'Import'); }
+        catch(e){ alert('Buch „'+(g.name||'Import')+'" anlegen fehlgeschlagen: '
+                        +(e&&e.message||e)); continue; }
+      }
+      if(!erstesZiel) erstesZiel=bid;
+      const n=await importStapel(bid, g.saetze, (was,a,ges)=>{
+        const p = gesamtBlaetter ? Math.round((fertig+a)/(gesamtBlaetter*2)*100) : 0;
+        if(melde) melde(was, a, ges, g.name||'', Math.min(100,p));
+      });
+      fertig += g.saetze.length*2;
+      gesamt += (n||0);
+      const z=window._letzterImport||{};
+      stueckZahl += (z.stuecke||0); angedockt += (z.angedockt||0); glatt += (z.glatt||0);
+    }
+    /* Jede Einschraenkung der Liste faellt, damit das Eingelesene auch zu
+       sehen ist.
+
+       Am 3. August hat Jens ein Buch mit 56 Titeln importiert und eine
+       leere Liste vorgefunden: Eine gespeicherte Buchauswahl hatte sie
+       eingeschraenkt. Damals bekam der Empfang diesen Aufruf — der grosse
+       Import nicht. Seit dem 6. August laufen alle Wege durch diese eine
+       Stelle, und am 6. August hat der Prueflauf gezeigt, dass die Falle
+       damit wieder offen stand: 0 sichtbare Titel bei 33 im Bestand.
+       Deshalb steht der Aufruf jetzt hier, wo alle Wege durchkommen. */
+    await loadLibrary();
+    const engeWar = (typeof nachImportZeigen==='function') ? nachImportZeigen() : false;
+    const bericht={ blaetter:gesamt, stuecke:stueckZahl, angedockt, glatt,
+                    buecher:nachBuch.size, erstesZiel, engeWar };
+    /* Der Assistent zeigt sein eigenes Schlussbild und springt nicht weg.
+       Über die Seite bleibt es beim gewohnten Ablauf: Meldung, dann hinein in
+       das Buch, das gerade gefüllt wurde. */
+    if(ohneAbschluss){ bandZustand(); return bericht; }
+    alert('Import fertig.\n'
+      + gesamt+' '+((gesamt===1)?'Blatt':'Blätter')+' geschrieben.\n'
+      + stueckZahl+' neue Titel'
+      + (nachBuch.size>1 ? ' in '+nachBuch.size+' Büchern' : '')
+      + (angedockt ? ', '+angedockt+' an vorhandene angedockt' : '')
+      + (glatt ? '\n'+glatt+(glatt===1?' vorhandenes Etikett':' vorhandene Etiketten')+' angepasst' : '')
+      + (typeof titelInDerListe==='function'
+          ? '\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.' : '')
+      + (engeWar ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
+    /* Zurueck in den Content, und zwar IN das Buch, das gerade gefuellt
+       wurde — nicht auf die oberste Ebene. Man will sehen, was angekommen
+       ist. Bei mehreren Buechern in das erste. */
+    const ziel=erstesZiel||bandBid;
+    bandZustand(); unter=null; thema='content';
+    thema='content'; cPfad=[ziel]; cFlach=false; cAktion=null; cZuruecksetzen();
+    zeichne();
+    return bericht;
   }
 
   /* ---- Wohin geschrieben wird -----------------------------------------
@@ -11566,7 +11951,16 @@ setTimeout(ablageAnmelden, 0);
     bandRollen={}; bandBuchZiel={}; bandZweige=new Set(); bandStimmHand={};
     bandOffen.clear(); bandLetzte=null;
     PDFW.alleZu();
-    zeichne();
+    /* Sobald Dateien da sind, übernimmt der Assistent. Er ist seit dem
+       7. August der Weg durch den Import; die Seite ist nur noch der
+       Einstieg. */
+    if(bandDateien.length){
+      thema='import';
+      assiOeffnen(1);
+    } else {
+      const o=document.getElementById('impAssi'); if(o) o.classList.remove('an');
+      zeichne();
+    }
   }
 
   /* Prueflatte fuer die Konsole — dieselbe Absicht wie `gruppenBericht` und
@@ -11763,68 +12157,13 @@ setTimeout(ablageAnmelden, 0);
       const bar=document.createElement('div'); bar.className='fortschritt';
       const fuell=document.createElement('i'); const txt=document.createElement('span');
       bar.append(fuell, txt); z_go.after(bar);
-
-      /* Je Zielbuch ein Durchgang. `importStapel` bleibt unveraendert und
-         schreibt in genau ein Buch; die Buendelung geschieht hier. Fehlende
-         Buecher werden erst jetzt angelegt — vorher ist nichts entstanden,
-         auch wenn die Vorschau schon Namen genannt hat. */
-      const nachBuch=new Map();
-      v.stuecke.forEach(st=>{
-        const k=st.buchName||'';
-        if(!nachBuch.has(k)) nachBuch.set(k, {name:k, zielBid:st.zielBid, saetze:[]});
-        nachBuch.get(k).saetze.push(...st.saetze);
+      await bandSchreiben((art, a, ges, name, anteil)=>{
+        b.textContent = (art==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + ges;
+        fuell.style.width = Math.min(100,anteil)+'%';
+        txt.textContent = (art==='lesen' ? 'Blätter lesen' : 'In den Bestand schreiben')
+                        + ' — ' + (name ? '„'+name+'": ' : '') + a + ' von ' + ges;
       });
-      let gesamt=0, stueckZahl=0, angedockt=0, glatt=0, erstesZiel='';
-      const gesamtBlaetter=v.saetze.length; let fertig=0;
-      for(const g of nachBuch.values()){
-        let bid=g.zielBid;
-        if(!userBook(bid)){
-          try{ bid=await createBook(g.name||'Import'); }
-          catch(e){ alert('Buch „'+(g.name||'Import')+'" anlegen fehlgeschlagen: '
-                          +(e&&e.message||e)); continue; }
-        }
-        if(!erstesZiel) erstesZiel=bid;
-        const n=await importStapel(bid, g.saetze, (was,a,ges)=>{
-          const p = gesamtBlaetter ? Math.round((fertig+a)/(gesamtBlaetter*2)*100) : 0;
-          b.textContent = (was==='lesen' ? 'Lese ' : 'Schreibe ') + a + '/' + ges;
-          fuell.style.width = Math.min(100,p)+'%';
-          txt.textContent = (was==='lesen' ? 'Blätter lesen' : 'In den Bestand schreiben')
-                          + ' — ' + (g.name ? '„'+g.name+'": ' : '') + a + ' von ' + ges;
-        });
-        fertig += g.saetze.length*2;
-        gesamt += (n||0);
-        const z=window._letzterImport||{};
-        stueckZahl += (z.stuecke||0); angedockt += (z.angedockt||0); glatt += (z.glatt||0);
-      }
       bar.remove();
-      /* Jede Einschraenkung der Liste faellt, damit das Eingelesene auch zu
-         sehen ist.
-
-         Am 3. August hat Jens ein Buch mit 56 Titeln importiert und eine
-         leere Liste vorgefunden: Eine gespeicherte Buchauswahl hatte sie
-         eingeschraenkt. Damals bekam der Empfang diesen Aufruf — der grosse
-         Import nicht. Seit dem 6. August laufen alle Wege durch diese eine
-         Stelle, und am 6. August hat der Prueflauf gezeigt, dass die Falle
-         damit wieder offen stand: 0 sichtbare Titel bei 33 im Bestand.
-         Deshalb steht der Aufruf jetzt hier, wo alle Wege durchkommen. */
-      await loadLibrary();
-      const engeWar = (typeof nachImportZeigen==='function') ? nachImportZeigen() : false;
-      alert('Import fertig.\n'
-        + gesamt+' '+((gesamt===1)?'Blatt':'Blätter')+' geschrieben.\n'
-        + stueckZahl+' neue Titel'
-        + (nachBuch.size>1 ? ' in '+nachBuch.size+' Büchern' : '')
-        + (angedockt ? ', '+angedockt+' an vorhandene angedockt' : '')
-        + (glatt ? '\n'+glatt+(glatt===1?' vorhandenes Etikett':' vorhandene Etiketten')+' angepasst' : '')
-        + (typeof titelInDerListe==='function'
-            ? '\n\nIn der Liste stehen jetzt '+titelInDerListe()+' Titel.' : '')
-        + (engeWar ? '\n\nDie Liste war eingeschränkt und steht jetzt auf „Alle".' : ''));
-      /* Zurueck in den Content, und zwar IN das Buch, das gerade gefuellt
-         wurde — nicht auf die oberste Ebene. Man will sehen, was angekommen
-         ist. Bei mehreren Buechern in das erste. */
-      const ziel=erstesZiel||bandBid;
-      bandZustand(); unter=null; thema='content';
-      thema='content'; cPfad=[ziel]; cFlach=false; cAktion=null; cZuruecksetzen();
-      zeichne();
     });
     b.disabled=!bereit;
     /* Der eine Knopf, der die Hauptsache tut — er traegt den Ton der
@@ -11832,7 +12171,6 @@ setTimeout(ablageAnmelden, 0);
     b.classList.add('wichtig');
     z_go._ctl.append(b);
     halter.append(karte(null,[z_go]));
-
     /* ---- Was es im Buch schon gibt --------------------------------------
        Nichts davon geschieht von selbst. Die Karte sagt, was gefunden wurde,
        und stellt die Frage; geschrieben wird erst auf „Jetzt importieren". */
