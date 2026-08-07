@@ -10,7 +10,7 @@
    Der Noten-Cache bleibt davon ausgenommen. Er heißt weiterhin 'tunes-rb-v1'; das Kürzel ist
    historisch und ohne Bedeutung, ein Umbenennen brächte nichts und riskierte nur, dass jemand
    seine offline gespeicherten Noten verliert. */
-const SHELL = 'shell-bs-41';
+const SHELL = 'shell-bs-42';
 const MINE  = /^shell-/;         // es gibt nur noch eine App auf dieser Adresse
 const TUNES = 'tunes-rb-v1';
 const SHELL_ASSETS = [
@@ -18,9 +18,30 @@ const SHELL_ASSETS = [
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',
   './fonts/manrope-latin.woff2', './fonts/manrope-latin-ext.woff2'
 ];
+/* Die Bibliotheken, 1,6 MB. Sie standen bis zum 8. August in KEINER Liste und
+   kamen nur zufällig in den Cache — über den Shell-Pfad, nachdem die Seite sie
+   schon angefordert hatte. Bei jedem Versionswechsel wird der alte Cache
+   gelöscht, und dann musste PDF.js zwingend übers Netz, mit 'no-store', also
+   unter Umgehung des Browser-Caches. Blieb das einmal stecken, fehlte
+   `pdfjsLib`: Der Betrachter fiel auf Safaris eigene PDF-Anzeige zurück (Blatt
+   zu klein, Rand links), und der Stift-Editor ging gar nicht. Genau das ist
+   Jens am 8. August auf dem iPad passiert. */
+const SHELL_LIBS = [
+  './vendor/pdfjs/pdf.min.js', './vendor/pdfjs/pdf.worker.min.js',
+  './vendor/jszip/jszip.min.js'
+];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const c = await caches.open(SHELL);
+    await c.addAll(SHELL_ASSETS);
+    /* Die Bibliotheken einzeln und fehlertolerant: Bleibt eine im Netz hängen,
+       darf das nicht die ganze Installation kippen — sonst aktiviert der neue
+       Service Worker nie und die App bleibt auf dem alten Stand stehen. Was
+       hier fehlschlägt, holt der fetch-Pfad unten nach. */
+    await Promise.all(SHELL_LIBS.map(u => c.add(u).catch(() => {})));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', e => {
@@ -68,6 +89,20 @@ self.addEventListener('fetch', e => {
   }
 
   if (e.request.method !== 'GET') return;
+
+  /* Die Bibliotheken: cache-first. Sie ändern sich innerhalb einer Version
+     nie, und der Shell-Pfad zog sie bei JEDEM Start neu über das Netz. Beim
+     Versionswechsel wird der Cache ohnehin geleert, die neue Fassung kommt
+     also von selbst. */
+  if (url.pathname.includes('/vendor/')) {
+    e.respondWith(
+      caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
+        if (resp && resp.status === 200) { const copy = resp.clone(); caches.open(SHELL).then(c => c.put(e.request, copy)); }
+        return resp;
+      }))
+    );
+    return;
+  }
 
   if (url.pathname.includes('/tunes/')) {
     // Noten: cache-first (offline-fest)

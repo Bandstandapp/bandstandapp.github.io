@@ -5830,11 +5830,17 @@ async function dockNotizblatt(t){
     try{
       const pdf=await notizblattLeer();
       const da=(BS_KATALOG.elemente||[]).filter(e=>e.titelId===tid && e.art==='notizblatt').length;
-      await BS.elementAnlegen({ titelId:tid, art:'notizblatt',
+      const rec=await BS.elementAnlegen({ titelId:tid, art:'notizblatt',
         etikett:'Notizen'+(da?' '+(da+1):''), dateiname:'Notizblatt.pdf', blob:pdf, np:1 });
       await loadLibrary(); render();
-      alert('Leeres Notizblatt an „'+(t.t||'diesen Titel')+'" gehängt.\n\n'
-        +'Du findest es über die Stimmenwahl; mit dem Stift kannst Du sofort darauf schreiben.');
+      /* Das neue Blatt geht gleich auf. Vorher stand nur eine Meldung da, wer
+         es beschreiben wollte, musste es erst über die Stimmenwahl suchen —
+         am 8. August von Jens gemeldet. Wer ein Notizblatt anlegt, will darauf
+         schreiben, nicht danach suchen. */
+      const neu=rec && LIBTUNES.find(x=>x.bsId===rec.id);
+      if(neu) openViewer(neu);
+      else alert('Leeres Notizblatt an „'+(t.t||'diesen Titel')+'" gehängt.\n\n'
+        +'Du findest es über die Stimmenwahl.');
     }catch(e){ alert('Anlegen fehlgeschlagen: '+(e&&e.message||e)); }
   });
 }
@@ -6569,6 +6575,12 @@ function computeFit(n,natW,natH,W,H,gap){
 const _pdfCache={};
 async function loadPdf(url){
   if(_pdfCache[url])return _pdfCache[url];
+  /* Fehlt die Bibliothek, hiess der Fehler bisher „Can't find variable:
+     pdfjsLib" — auf dem iPad ein Satz, mit dem niemand etwas anfangen kann.
+     Er sagt jetzt, was zu tun ist. */
+  if(!window.pdfjsLib) throw new Error(
+    'Der Noten-Baustein (PDF.js) ist nicht geladen. Schliesse BandStand ganz '
+    +'und starte es mit Netz noch einmal — dann holt die App ihn nach.');
   // Bytes selbst holen und an PDF.js geben – robuster in Safari & mit Service Worker als getDocument(url)
   const buf=await (await fetch(encodeURI(url))).arrayBuffer();
   const doc=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
@@ -7770,7 +7782,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-08 · Notizblatt behält seine Notiz';
+const APP_BUILD='2026-08-08 · PDF-Baustein bleibt im Gepäck';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
