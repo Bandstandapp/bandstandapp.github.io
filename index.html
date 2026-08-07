@@ -2790,15 +2790,20 @@ function markeZahlen(){
   markeZahlen();
 })();
 
-function matches(t){
-  if(S.books.size && !S.books.has(t.bid)) return false;
+/* `ohneBuch` ueberspringt die Buchauswahl. Gebraucht wird das von „Bearbeitet":
+   Eine handschriftliche Notiz traegt `bid:'user'` und liegt damit in keinem
+   Buch. War auch nur ein Buch gewaehlt, warf diese Zeile jede Notiz weg — der
+   Reiter zeigte seine Zahl, und darunter stand nichts. Am 8. August von Jens
+   gemeldet und nachgestellt: 1 im Reiter, 0 in der Liste. */
+function matches(t, ohneBuch){
+  if(!ohneBuch && S.books.size && !S.books.has(t.bid)) return false;
   if(S.initial && initialOf(t)!==S.initial) return false;
   if(S.q){const q=norm(S.q); if(!norm(t.t).includes(q) && !norm(t.c).includes(q) && !norm(t.editor).includes(q)) return false;}
   if(S.tagFilter.size){const tt=tuneTagIds(t.key); if(![...S.tagFilter].some(id=>tt.includes(id))) return false;}
   return true;
 }
 function currentList(){
-  let list=ALL().filter(matches);
+  let list=ALL().filter(t=>matches(t, S.view==='edited'));
   // „Sonstiges Material" ausblenden, wenn abgeschaltet (außer im Reiter „Bearbeitet" oder wenn gezielt gefiltert)
   if(!S.sonstOn && S.view!=='edited' && !S.books.has(SONST_BID)) list=list.filter(t=>t.bid!==SONST_BID);
   /* Favorit, Ueben und Tags fragen die ganze Gruppe. Sonst zeigte die
@@ -7174,6 +7179,15 @@ const BS = (function(){
     da.n--;
     if(da.n<=0 && _leihe.size>LEIHE_MAX){ URL.revokeObjectURL(da.url); _leihe.delete(id); }
   }
+  /* Werden die Bytes eines Elements UEBERSCHRIEBEN, zeigt die geliehene
+     Adresse noch auf den alten Blob — und `urlZurueck` gibt sie nicht her,
+     solange der Vorrat nicht voll ist. Das Blatt sah danach unveraendert aus.
+     Hier wird sie ohne Ruecksicht auf den Zaehler weggeworfen. */
+  function urlVergessen(id){
+    const da=_leihe.get(id); if(!da) return;
+    try{ URL.revokeObjectURL(da.url); }catch(e){}
+    _leihe.delete(id);
+  }
   function leiheLeeren(){ for(const [,v] of _leihe) try{ URL.revokeObjectURL(v.url); }catch(e){}
     _leihe.clear(); }
 
@@ -7458,7 +7472,7 @@ const BS = (function(){
            seitenzahlAusBytes, seitenzahl,
            katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
            verschieben, kopieren,
-           bytes, urlLeihen, urlZurueck, leiheLeeren,
+           bytes, urlLeihen, urlZurueck, urlVergessen, leiheLeeren,
            loeschen, korb, wiederherstellen, korbLeeren,
            sicherung, sicherungen, sicherungAlsDatei,
            exportieren, exportAlsDatei, speicherFest,
@@ -7494,14 +7508,20 @@ async function openEditor(t){
   const stage=document.getElementById('eStage'); stage.innerHTML='<div style="color:#e6eef6;margin:auto">Lädt…</div>';
   document.getElementById('editor').classList.add('open');
   document.getElementById('eTitle').value=t.t+' (Edits)';
+  /* Die Knoepfe stehen sofort da, `ED` entsteht erst nach dem Laden des
+     Blattes. Wer in dieser Luecke auf eine Farbe tippt, griff bis zum
+     8. August ins Leere: ein Fehler in der Konsole, die Auszeichnung sprang
+     trotzdem um — sichtbar gruen gewaehlt, gezeichnet wurde schwarz.
+     Ausgezeichnet wird jetzt immer, und `ED` uebernimmt beim Anlegen, was in
+     der Leiste steht. */
   const pens=document.getElementById('ePens'); pens.innerHTML='';
   PEN_COLORS.forEach((c,i)=>{ const el=document.createElement('div'); el.className='pen'+(i===0?' on':''); el.style.background=c;
-    el.onclick=()=>{ ED.color=c; setTool('pen'); document.querySelectorAll('#ePens .pen').forEach(x=>x.classList.remove('on')); el.classList.add('on'); };
+    el.onclick=()=>{ if(ED) ED.color=c; setTool('pen'); document.querySelectorAll('#ePens .pen').forEach(x=>x.classList.remove('on')); el.classList.add('on'); };
     pens.append(el); });
   const widths=document.getElementById('eWidths'); widths.innerHTML='';
   PEN_WIDTHS.forEach((w,i)=>{ const el=document.createElement('div'); el.className='penw'+(i===1?' on':''); const d=6+i*5;
     el.innerHTML='<i style="width:'+d+'px;height:'+d+'px"></i>';
-    el.onclick=()=>{ ED.sizeIdx=i; document.querySelectorAll('#eWidths .penw').forEach(x=>x.classList.remove('on')); el.classList.add('on'); };
+    el.onclick=()=>{ if(ED) ED.sizeIdx=i; document.querySelectorAll('#eWidths .penw').forEach(x=>x.classList.remove('on')); el.classList.add('on'); };
     widths.append(el); });
   /* Schlaegt das Laden fehl, blieb hier frueher stumm „Lädt…" stehen: alle
      Knoepfe da, kein Stueck. Jetzt steht der Grund auf der Flaeche. */
@@ -7524,7 +7544,12 @@ async function openEditor(t){
   for(let i=1;i<=n;i++){ const page=await doc.getPage(i); const vp=page.getViewport({scale:R});
     const bg=document.createElement('canvas'); bg.width=Math.round(vp.width); bg.height=Math.round(vp.height);
     await page.render({canvasContext:bg.getContext('2d'),viewport:vp}).promise; pages.push({bg,w:bg.width,h:bg.height,strokes:[]}); }
-  ED={tune:t,pages,cur:0,tool:'pen',color:PEN_COLORS[0],sizeIdx:1,drawing:false,penSeen:false,stroke:null,drawC:null,zoom:1,panX:0,panY:0,stackEl:null};
+  /* Was in der Leiste ausgezeichnet steht, gilt — auch wenn waehrend des
+     Ladens getippt wurde. Ohne Auszeichnung bleibt es beim Ersatzwert. */
+  const anIndex=(wahl,ersatz)=>{ const i=[...document.querySelectorAll(wahl)]
+    .findIndex(x=>x.classList.contains('on')); return i<0?ersatz:i; };
+  const iFarbe=anIndex('#ePens .pen',0), iStaerke=anIndex('#eWidths .penw',1);
+  ED={tune:t,pages,cur:0,tool:'pen',color:PEN_COLORS[iFarbe],sizeIdx:iStaerke,drawing:false,penSeen:false,stroke:null,drawC:null,zoom:1,panX:0,panY:0,stackEl:null};
   buildPageNav(); showEditorPage(0);
 }
 function buildPageNav(){ const nav=document.getElementById('ePageNav');
@@ -7661,6 +7686,65 @@ document.getElementById('eUndo').onclick=()=>{ if(!ED)return; ED.pages[ED.cur].s
 document.getElementById('eCancel').onclick=()=>{ document.getElementById('editor').classList.remove('open'); ED=null; };
 document.getElementById('eSave').onclick=async()=>{
   if(!ED)return;
+  /* Ein NOTIZBLATT nimmt seine Striche in sich auf, statt einen zweiten
+     Eintrag zu erzeugen. Fuer jedes andere Blatt bleibt es beim alten Weg:
+     Dort ist das Original fremdes Notenmaterial und darf nicht ueberschrieben
+     werden, hier ist das Blatt eigens zum Beschreiben angelegt worden.
+
+     Jens am 8. August: „Ich kann darauf schreiben, es wird bestaetigt, aber
+     danach ist das Notizblatt leer." Die Notiz lag als eigener Eintrag unter
+     „Bearbeitet" — nicht verloren, aber nicht dort, wo er sie suchte.
+
+     Angefasst wird nur dieser Speicherweg, nicht die Zeicheneingabe. */
+  /* Nur ein EINSEITIGES Notizblatt nimmt die Striche in sich auf. Der Weg
+     unten schreibt Seite 1 und sonst nichts; bei mehreren Seiten waeren die
+     uebrigen verloren. Ein Notizblatt entsteht heute immer einseitig — sollte
+     das je anders kommen, greift ohne weiteres Zutun der alte Weg. */
+  if(ED.tune && ED.tune.art==='notizblatt' && ED.tune.bsId && ED.pages.length===1){
+    try{
+      const pg=ED.pages[0];
+      const out=document.createElement('canvas'); out.width=pg.w; out.height=pg.h;
+      const ctx=out.getContext('2d');
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,pg.w,pg.h); ctx.drawImage(pg.bg,0,0);
+      pg.strokes.forEach(x=>drawStroke(ctx,x));
+      const jpg=await new Promise(res=>out.toBlob(res,'image/jpeg',0.92));
+      const pdf=pdfMitBild(new Uint8Array(await jpg.arrayBuffer()), out.width, out.height);
+      const id=ED.tune.bsId;
+      await BS._intern.tx(['bytes','elemente'],'readwrite',(by,el)=>{
+        by.put({id, blob:pdf});
+        const g=el.get(id);
+        g.onsuccess=()=>{ const r=g.result; if(r){ r.groesse=pdf.size; r.geaendert=Date.now(); el.put(r); } };
+      });
+      /* Drei Zwischenlager zeigen jetzt noch auf die alten Bytes, und alle
+         drei muessen geraeumt werden — sonst steht das Blatt nach dem
+         Speichern unveraendert da. Gemessen am 8. August: geschrieben wurde
+         richtig, gezeigt wurde das leere Blatt.
+           `_pdfCache`   — das gelesene PDF, an der Adresse geschluesselt
+           `_urlHalter`  — der Vorrat der Oberflaeche
+           die Leihe in BS — sie gibt die Adresse sonst erst her, wenn zwoelf
+                             andere Blaetter sie verdraengt haben
+         `LIBTUNES` steht mit `let` auf oberster Ebene und liegt NICHT auf
+         `window` — ein `window.LIBTUNES` liest hier immer eine leere Liste. */
+      const alt=LIBTUNES.find(x=>x.bsId===id);
+      if(alt && alt.f) delete _pdfCache[alt.f];
+      if(alt) urlFreigeben(alt);
+      BS.urlVergessen(id);
+      document.getElementById('editor').classList.remove('open'); ED=null;
+      await loadLibrary();
+      /* Der Betrachter haelt den ALTEN Satz fest; nach dem Neuladen ist dessen
+         Adresse tot. Er bekommt deshalb den neuen Satz und zeichnet noch
+         einmal — der Nutzer landet ja unmittelbar wieder auf dem Blatt. */
+      const neu=LIBTUNES.find(x=>x.bsId===id);
+      if(neu && CURRENT && CURRENT.bsId===id) CURRENT=neu;
+      render();
+      if(neu && document.getElementById('viewer').classList.contains('open')
+         && typeof blattNeuZeichnen==='function') blattNeuZeichnen(true);
+      return;
+    }catch(e){
+      alert('Speichern auf dem Notizblatt fehlgeschlagen: '+(e&&e.message||e)
+        +'\n\nEs wird stattdessen als eigene Notiz abgelegt.');
+    }
+  }
   const name=getEditorName();
   const title=(document.getElementById('eTitle').value.trim())||(ED.tune.t+' (Edits)');
   const uk='user|'+uid('u');
@@ -7686,7 +7770,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-08 · Foto bleibt bei seinem Titel';
+const APP_BUILD='2026-08-08 · Notizblatt behält seine Notiz';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
