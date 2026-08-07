@@ -4588,36 +4588,110 @@ function updateNavUI(){
       +'<button class="btn ghost" id="navNext" title="Nächstes">›</button>';
     document.getElementById('navPos').textContent=(NAV.idx+1)+' / '+NAV.keys.length;
     const pv=document.getElementById('navPrev'), nx=document.getElementById('navNext');
-    pv.disabled=NAV.idx<=0; nx.disabled=NAV.idx>=NAV.keys.length-1;
+    pv.disabled=!navKann(-1); nx.disabled=!navKann(1);
     pv.onclick=()=>navGo(-1); nx.onclick=()=>navGo(1);
   }
   const fp=document.getElementById('vFsPrev'), fn=document.getElementById('vFsNext');
   fp.hidden=!multi; fn.hidden=!multi;
-  fp.disabled=NAV.idx<=0; fn.disabled=NAV.idx>=NAV.keys.length-1;
+  fp.disabled=!navKann(-1); fn.disabled=!navKann(1);
 }
-function navGo(delta){
-  if(NAV.keys.length<2) return;
-  const i=NAV.idx+delta; if(i<0||i>=NAV.keys.length) return;
-  const wasFull=document.getElementById('viewer').classList.contains('fullscreen');
-  NAV={keys:NAV.keys, idx:i}; let t=byKey[NAV.keys[i]]; if(!t) return;
-  /* Die gewaehlte Stimme geht mit zum naechsten Stueck, sofern es sie hat.
-     Wer eine Setlist in B durchspielt, bleibt in B. Sonst gilt, was die Zeile
-     ohnehin zeigen wuerde.
+/* Ob ein Schritt ueberhaupt etwas bringt. Muss dieselben Faelle kennen wie
+   `navGo`, sonst steht der Pfeil auf dem letzten Stueck grau, obwohl dahinter
+   noch zwei Notizen liegen. */
+function navKann(delta){
+  if(notizBlaetternAn() && CURRENT){
+    const n=notizenVon(CURRENT);
+    if(n.length){
+      const i=n.findIndex(x=>x.key===CURRENT.key);
+      if(delta>0 && i<n.length-1) return true;
+      if(delta<0 && i>=0)         return true;
+    }
+  }
+  const i=NAV.idx+delta;
+  return NAV.keys.length>1 && i>=0 && i<NAV.keys.length;
+}
+/* ---------- Notizen als weitere Seiten ----------
+   Beim Blaettern kann ein Notizblatt wie eine weitere Seite des Stueckes
+   gelten: Erst nach der letzten Notiz springt die Darstellung auf den
+   naechsten Titel. Zwei Schalter, weil das Stoebern in der Liste etwas
+   anderes ist als das Durchspielen einer Setlist. Am 8. August von Jens
+   gewuenscht, beide Male voreingestellt an.
 
-     Der Wunsch ist ein eigener Zustand und wird NICHT aus CURRENT.stimme
-     gelesen. Bis zum 28. Juli war er das, und dann loeschte ihn jedes Stueck
-     ohne transponierte Ausgaben — dort ist die Stimme leer. Gemessen: Nach
-     „Bass" wischte man weiter, traf „1983" ohne Ausgaben, und Bass war
-     verloren. Schlimmer noch setzte „500 Miles High", das es nur in E gibt,
-     den Wunsch versehentlich auf E, und der ueberstimmte danach das
-     Instrument. */
+   Gezaehlt werden NUR Notizblaetter — nicht die Fotos am selben Titel und
+   nicht die alten Eintraege unter „Bearbeitet", die als eigenstaendige
+   Stuecke in der Liste stehen und dort ohnehin angeblaettert werden.
+
+   Der Zustand steckt in CURRENT und braucht kein Gedaechtnis: Steht ein
+   Notizblatt auf der Buehne, geht es zum naechsten desselben Titels; steht
+   ein Notenblatt da, geht es zur ersten Notiz. `NAV.idx` bleibt dabei auf
+   dem Stueck stehen — der Zaehler „3 / 17" soll Stuecke zaehlen, nicht
+   Blaetter. */
+function notizBlaetternWert(wo){
+  return localStorage.getItem('bs_notiz_'+wo) !== '0';
+}
+function notizBlaetternSetzen(wo,an){
+  localStorage.setItem('bs_notiz_'+wo, an?'1':'0');
+}
+function notizBlaetternAn(){
+  return notizBlaetternWert((S.view==='set' && S.openSet) ? 'setlist' : 'liste');
+}
+/* Die Notizblaetter eines Stueckes, „Notizen" vor „Notizen 2". */
+function notizenVon(t){
+  if(!t || !t.gid || typeof GRUPPEN==='undefined' || !GRUPPEN[t.gid]) return [];
+  return GRUPPEN[t.gid].filter(x=>x.art==='notizblatt')
+    .sort((a,b)=>(a.stimme||'').localeCompare(b.stimme||'','de',{numeric:true}));
+}
+/* Das Blatt, das die Zeile an dieser Stelle zeigt.
+
+   Die gewaehlte Stimme geht mit zum naechsten Stueck, sofern es sie hat.
+   Wer eine Setlist in B durchspielt, bleibt in B. Sonst gilt, was die Zeile
+   ohnehin zeigen wuerde.
+
+   Der Wunsch ist ein eigener Zustand und wird NICHT aus CURRENT.stimme
+   gelesen. Bis zum 28. Juli war er das, und dann loeschte ihn jedes Stueck
+   ohne transponierte Ausgaben — dort ist die Stimme leer. Gemessen: Nach
+   „Bass" wischte man weiter, traf „1983" ohne Ausgaben, und Bass war
+   verloren. Schlimmer noch setzte „500 Miles High", das es nur in E gibt,
+   den Wunsch versehentlich auf E, und der ueberstimmte danach das
+   Instrument. */
+function stueckAn(i){
+  let t=byKey[NAV.keys[i]]; if(!t) return null;
   const wunsch = STIMMWUNSCH;
   if(wunsch && t.fam && GRUPPEN[t.gid]){
     const gleiche = GRUPPEN[t.gid].find(x=>x.stimme===wunsch);
     if(gleiche) t=gleiche;
   }
-  openViewer(t, true);
-  if(wasFull) enterFullscreen();
+  return t;
+}
+function navGo(delta){
+  const wasFull=document.getElementById('viewer').classList.contains('fullscreen');
+  const zeige=t=>{ if(!t) return; openViewer(t, true); if(wasFull) enterFullscreen(); };
+
+  /* Erst die Notizen des laufenden Stueckes, dann das naechste. Steht das
+     Notenblatt auf der Buehne, ist `i` gleich -1 und `n[i+1]` die erste
+     Notiz. */
+  if(notizBlaetternAn() && CURRENT){
+    const n=notizenVon(CURRENT);
+    if(n.length){
+      const i=n.findIndex(x=>x.key===CURRENT.key);
+      if(delta>0 && i<n.length-1) return zeige(n[i+1]);
+      if(delta<0 && i>0)          return zeige(n[i-1]);
+      if(delta<0 && i===0)        return zeige(stueckAn(NAV.idx));
+    }
+  }
+
+  if(NAV.keys.length<2) return;
+  const i=NAV.idx+delta; if(i<0||i>=NAV.keys.length) return;
+  NAV={keys:NAV.keys, idx:i};
+  const t=stueckAn(i); if(!t) return;
+  /* Rueckwaerts ins vorige Stueck: dort gleich an dessen LETZTE Notiz, damit
+     der Weg vorwaerts und rueckwaerts derselbe ist. Ohne das kaeme man beim
+     Zurueckblaettern nie an die Notizen des vorigen Stueckes. */
+  if(delta<0 && notizBlaetternAn()){
+    const n=notizenVon(t);
+    if(n.length) return zeige(n[n.length-1]);
+  }
+  zeige(t);
 }
 document.getElementById('vFsPrev').onclick=()=>navGo(-1);
 document.getElementById('vFsNext').onclick=()=>navGo(1);
@@ -7782,7 +7856,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-08 · PDF-Baustein bleibt im Gepäck';
+const APP_BUILD='2026-08-08 · Notizen blättern mit';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10965,6 +11039,17 @@ setTimeout(ablageAnmelden, 0);
     z_fw._ctl.append(schalter(pdfwZuNachWahl(), an=>pdfwZuNachWahlSetzen(an)));
     w.append(karte('Verhalten',[z_sonst, z_fw],
       'Beim Zuordnen vieler Blätter am Stück spart das Schließen je Blatt einen Griff.'));
+
+    const z_nl=zeile('In der Liste','Beim Stöbern und Suchen');
+    z_nl._ctl.append(schalter(notizBlaetternWert('liste'),
+      an=>notizBlaetternSetzen('liste',an)));
+    const z_ns=zeile('In der Setlist','Beim Durchspielen einer Setliste');
+    z_ns._ctl.append(schalter(notizBlaetternWert('setlist'),
+      an=>notizBlaetternSetzen('setlist',an)));
+    w.append(karte('Notizen beim Blättern',[z_nl,z_ns],
+      'An: Ein Notizblatt zählt wie eine weitere Seite des Stücks. Erst nach der '
+      +'letzten Notiz geht es zum nächsten Titel. Aus: Nach der letzten Notenseite '
+      +'geht es sofort weiter, die Notizen erreichst Du über die Stimmenwahl.'));
   }
 
   /* ---- Thema: Werkzeugleiste ---- */
