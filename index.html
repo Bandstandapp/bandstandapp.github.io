@@ -1641,7 +1641,7 @@
 <!-- Annotation editor -->
 <div class="editor" id="editor">
   <div class="ebar">
-    <input class="txt etitle" id="eTitle" placeholder="Titel der Notiz…" autocomplete="off">
+    <input class="txt etitle" id="eTitle" placeholder="Titel" autocomplete="off">
     <div class="etools" id="ePens"></div>
     <div class="etools" id="eWidths"></div>
     <button class="ebtn" id="eHL" title="Textmarker">Marker</button>
@@ -2644,6 +2644,9 @@ async function loadLibrary(){
     .sort((a,b)=> (a.t||'').localeCompare(b.t||'','de')
                || (stimmenRang(stimmWert(a))-stimmenRang(stimmWert(b))));
   if(typeof gruppenLibNachtragen==='function') gruppenLibNachtragen();
+  /* Wer eine Notiz trägt, wird hier mitgelesen — die Liste soll es wissen,
+     ohne je Zeile in die Datenbank zu greifen. */
+  if(typeof notizKennungenLaden==='function') await notizKennungenLaden();
   rebuildByKey();
 }
 
@@ -2817,7 +2820,7 @@ function currentList(){
      hier nicht wieder. Dass es zwei Sorten gibt, ist eine Altlast und gehoert
      aufgeloest; bis dahin sollen sie wenigstens an einem Ort stehen. */
   else if(S.view==='edited'){
-    list=list.filter(t=>t.isEdit || t.art==='notizblatt');
+    list=list.filter(t=>t.isEdit || t.art==='notizblatt' || hatNotiz(t));
     list.sort((a,b)=>(b.editedAt||b.addedAt||0)-(a.editedAt||a.addedAt||0));
     return list; }
   else if(S.view.startsWith('tag:')){
@@ -3117,12 +3120,22 @@ function tagZeile(tagIds){
    sind ueber die Tag-Verwaltung, die Suche und das Blaettern weiter zu
    erreichen. Voreingestellt an, damit sich fuer niemanden ungefragt etwas
    aendert. */
+/* Welche Elemente tragen eine handschriftliche Notiz? Einmal beim Start und
+   nach jedem Speichern gelesen — die Liste fragt sonst je Zeile die Datenbank.
+   Steht mit `let` auf oberster Ebene und liegt damit NICHT auf `window`. */
+let NOTIZ_KENNUNGEN=new Set();
+async function notizKennungenLaden(){
+  try{ NOTIZ_KENNUNGEN=await BS.notizKennungen(); }catch(e){ NOTIZ_KENNUNGEN=new Set(); }
+}
+/* Trägt dieses Blatt eine Notiz? */
+function hatNotiz(t){ return !!(t && t.bsId && NOTIZ_KENNUNGEN.has(t.bsId)); }
+
 /* Gezaehlt wird, was in der Liste STEHT — also ZEILEN, nicht Blaetter. Zwei
-   Notizblaetter an einem Stueck ergeben eine Zeile. Zahl und Liste sind am
-   8. August schon einmal auseinandergelaufen; das soll nicht wieder
+   beschriebene Ausgaben eines Stuecks ergeben eine Zeile. Zahl und Liste sind
+   am 8. August schon einmal auseinandergelaufen; das soll nicht wieder
    passieren. */
 function bearbeiteteZahl(){
-  const alle=USER.concat(LIBTUNES.filter(t=>t.art==='notizblatt'));
+  const alle=USER.concat(LIBTUNES.filter(t=>t.art==='notizblatt' || hatNotiz(t)));
   return new Set(alle.map(t=>t.gid||t.key)).size;
 }
 function zeigeTags(){ return localStorage.getItem('bs_zeige_tags') !== '0'; }
@@ -6684,6 +6697,26 @@ function computeFit(n,natW,natH,W,H,gap){
   if(n<=2){ const s=Math.min(H/natH,(W-gap*(n-1))/(n*natW)); return {scale:Math.max(s,0.05),center:true}; }
   return {scale:Math.max(H/natH,0.05),center:false};
 }
+/* Eine Notiz-Seite auf ein fertiges Blatt zeichnen. Der Editor arbeitet in
+   einer anderen Groesse als die Buehne, deshalb traegt jede Seite ihre eigene
+   Bezugsgroesse; hier wird auf das Verhaeltnis umgerechnet. `drawStroke`
+   selbst bleibt unberuehrt — es ist derselbe Baustein, den der Editor nutzt,
+   und damit sieht die Notiz auf der Buehne genauso aus wie beim Schreiben. */
+function notizZeichnen(cvs, seite){
+  if(!cvs || !seite || !seite.strokes || !seite.strokes.length) return;
+  /* Erst auf eine EIGENE, durchsichtige Flaeche, dann als Ganzes aufs Blatt.
+     Direkt auf das Blatt zu zeichnen waere kuerzer und falsch: Der Radierer
+     arbeitet mit `destination-out` und wuerde dann Loecher in die Noten
+     reissen statt nur die eigenen Striche zu entfernen. Im Editor liegt die
+     Zeichenflaeche aus demselben Grund ueber dem Blatt und nicht darauf. */
+  const f = seite.w ? cvs.width/seite.w : 1;
+  const eb = document.createElement('canvas');
+  eb.width = cvs.width; eb.height = cvs.height;
+  const e = eb.getContext('2d');
+  e.scale(f,f);
+  seite.strokes.forEach(s=>{ try{ drawStroke(e,s); }catch(err){} });
+  cvs.getContext('2d').drawImage(eb,0,0);
+}
 const _pdfCache={};
 async function loadPdf(url){
   if(_pdfCache[url])return _pdfCache[url];
@@ -6801,13 +6834,18 @@ async function renderPdfFit(t){
        das alte Blatt stehen; erst am Ende wird in einem Zug ersetzt. Vorher
        war die Flaeche waehrend des Zeichnens leer, und beim Drehen sah man das
        als Flackern. */
+    /* Die handschriftliche Notiz liegt als eigener Satz daneben und wird hier
+       ueber das fertige Blatt gelegt. Sie wird NICHT ins PDF geschrieben —
+       das Blatt bleibt unberuehrt und laesst sich jederzeit blank zeigen. */
+    const ebene = t.bsId ? await BS.notizLesen(t.bsId).catch(()=>null) : null;
     const neu=document.createDocumentFragment();
     const dpr=Math.min(window.devicePixelRatio||1,2);
     for(let i=1;i<=n;i++){ const page=await doc.getPage(i); const vp=page.getViewport({scale:scale*dpr});
       const cvs=document.createElement('canvas'); cvs.className='pg';
       cvs.width=Math.round(vp.width); cvs.height=Math.round(vp.height);
       cvs.style.width=(vp.width/dpr)+'px'; cvs.style.height=(vp.height/dpr)+'px';
-      neu.append(cvs); await page.render({canvasContext:cvs.getContext('2d'),viewport:vp}).promise; }
+      neu.append(cvs); await page.render({canvasContext:cvs.getContext('2d'),viewport:vp}).promise;
+      notizZeichnen(cvs, ebene && ebene.seiten && ebene.seiten[i-1]); }
     fit.replaceChildren(neu);
     passeBlattEin();
     /* Dauer des Blatts nach einem Drehen nachtragen — siehe Setup, „Über". */
@@ -7312,6 +7350,51 @@ const BS = (function(){
     try{ URL.revokeObjectURL(da.url); }catch(e){}
     _leihe.delete(id);
   }
+
+  /* ---- Notiz-Ebenen ------------------------------------------------------
+     Eine handschriftliche Notiz liegt NEBEN dem Blatt, nicht darin: Das PDF
+     bleibt unberuehrt, die Striche stehen in einem eigenen Satz und werden
+     beim Zeigen darueber gelegt. Das ist der Speicher, den das Datenmodell
+     vom 30. Juli vorgesehen hat und der bis zum 8. August leer blieb.
+
+     Gespeichert werden die STRICHE, nicht ein Bild. Das ist ein Bruchteil so
+     gross, laesst sich weiterzeichnen und einzeln zuruecknehmen. Weil der
+     Editor anders skaliert als die Buehne, traegt jede Seite ihre eigene
+     Bezugsgroesse; gezeichnet wird auf das Verhaeltnis umgerechnet.
+
+     Bis zum 8. August erzeugte der Stift auf einem vorhandenen Blatt statt
+     dessen ein EIGENES Stueck in „Sonstiges Material". Jens hat darauf
+     geschrieben, das Blatt geschlossen und die Notiz nicht wiedergefunden —
+     sie lag unter anderem Namen an anderer Stelle. */
+  async function notizLesen(elementId){
+    if(!elementId) return null;
+    return tx(S_NOTIZ,'readonly', st=>new Promise((res,rej)=>{
+      const g=st.get(elementId); g.onsuccess=()=>res(g.result||null); g.onerror=()=>rej(g.error); }));
+  }
+  async function notizSchreiben(elementId, seiten){
+    if(!elementId) throw new Error('Eine Notiz braucht ein Element.');
+    /* Leere Seiten ueberall: Der Satz wird geloescht statt leer gespeichert,
+       sonst haengt an jedem je einmal geoeffneten Blatt eine leere Notiz. */
+    const leer=!seiten || !seiten.some(s=>s && s.strokes && s.strokes.length);
+    if(leer) return notizLoeschen(elementId);
+    const rec={ id:elementId, elementId, seiten, geaendert:jetzt() };
+    await tx(S_NOTIZ,'readwrite', st=>st.put(rec));
+    return rec;
+  }
+  async function notizLoeschen(elementId){
+    if(!elementId) return null;
+    await tx(S_NOTIZ,'readwrite', st=>st.delete(elementId));
+    return null;
+  }
+  /* Welche Elemente tragen eine Notiz? Einmal gelesen, damit die Liste und
+     der Reiter „Bearbeitet" nicht je Zeile in die Datenbank greifen. */
+  async function notizKennungen(){
+    const alle=await tx(S_NOTIZ,'readonly', st=>new Promise((res,rej)=>{
+      const out=[], c=st.openCursor();
+      c.onsuccess=e=>{ const cu=e.target.result; if(cu){ out.push(cu.value.elementId); cu.continue(); } else res(out); };
+      c.onerror=()=>rej(c.error); }));
+    return new Set(alle);
+  }
   function leiheLeeren(){ for(const [,v] of _leihe) try{ URL.revokeObjectURL(v.url); }catch(e){}
     _leihe.clear(); }
 
@@ -7597,6 +7680,7 @@ const BS = (function(){
            katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
            verschieben, kopieren,
            bytes, urlLeihen, urlZurueck, urlVergessen, leiheLeeren,
+           notizLesen, notizSchreiben, notizLoeschen, notizKennungen,
            loeschen, korb, wiederherstellen, korbLeeren,
            sicherung, sicherungen, sicherungAlsDatei,
            exportieren, exportAlsDatei, speicherFest,
@@ -7631,7 +7715,12 @@ function diag(tag,e){ if(!DIAG)return; const o=document.getElementById('eDiag');
 async function openEditor(t){
   const stage=document.getElementById('eStage'); stage.innerHTML='<div style="color:#e6eef6;margin:auto">Lädt…</div>';
   document.getElementById('editor').classList.add('open');
-  document.getElementById('eTitle').value=t.t+' (Edits)';
+  /* Der Titel steht hier nur zur Auskunft: Seit die Notiz auf ihrem Blatt
+     bleibt, entsteht kein zweites Stueck mehr, dem man einen Namen geben
+     muesste. Frueher hiess es „… (Edits)" — das war der Name des neuen
+     Eintrags, den es nicht mehr gibt. */
+  const feld=document.getElementById('eTitle');
+  feld.value=t.t+(t.stimme?' · '+t.stimme:''); feld.readOnly=true;
   /* Die Knoepfe stehen sofort da, `ED` entsteht erst nach dem Laden des
      Blattes. Wer in dieser Luecke auf eine Farbe tippt, griff bis zum
      8. August ins Leere: ein Fehler in der Konsole, die Auszeichnung sprang
@@ -7674,6 +7763,23 @@ async function openEditor(t){
     .findIndex(x=>x.classList.contains('on')); return i<0?ersatz:i; };
   const iFarbe=anIndex('#ePens .pen',0), iStaerke=anIndex('#eWidths .penw',1);
   ED={tune:t,pages,cur:0,tool:'pen',color:PEN_COLORS[iFarbe],sizeIdx:iStaerke,drawing:false,penSeen:false,stroke:null,drawC:null,zoom:1,panX:0,panY:0,stackEl:null};
+  /* Eine vorhandene Notiz kommt mit herein, damit man weiterschreiben und
+     einzelne Striche zuruecknehmen kann. Sie wurde in einer anderen Groesse
+     geschrieben — deshalb auf die jetzige umrechnen. */
+  if(t.bsId){
+    try{
+      const ebene=await BS.notizLesen(t.bsId);
+      if(ebene && ebene.seiten) ebene.seiten.forEach((se,i)=>{
+        const pg=ED.pages[i]; if(!pg || !se || !se.strokes) return;
+        const f = se.w ? pg.w/se.w : 1;
+        pg.strokes = se.strokes.map(s=>({...s, w:(s.w||1)*f,
+          pts:(s.pts||[]).map(p=>({...p, x:p.x*f, y:p.y*f})) }));
+      });
+    }catch(e){}
+  }
+  /* Der Stand beim Aufschlagen. Daran erkennt der Editor beim Verlassen, ob
+     ueberhaupt etwas zu sichern ist. */
+  ED.stand = JSON.stringify(ED.pages.map(p=>p.strokes.length));
   buildPageNav(); showEditorPage(0);
 }
 function buildPageNav(){ const nav=document.getElementById('ePageNav');
@@ -7807,80 +7913,84 @@ document.getElementById('eHL').onclick=()=>{ if(!ED)return; setTool(ED.tool==='h
     stage.addEventListener(n,e=>{ e.preventDefault(); },{passive:false})); }
 })();
 document.getElementById('eUndo').onclick=()=>{ if(!ED)return; ED.pages[ED.cur].strokes.pop(); redrawStrokes(); };
-document.getElementById('eCancel').onclick=()=>{ document.getElementById('editor').classList.remove('open'); ED=null; };
+
+/* ---------- Notizen sichern ----------
+   Seit dem 8. August gibt es EINEN Weg fuer alle Notizen: Die Striche liegen
+   als eigene Ebene neben dem Blatt, das Blatt selbst bleibt unberuehrt.
+
+   Vorher gab es zwei. Der Stift auf einem vorhandenen Notenblatt erzeugte ein
+   EIGENES Stueck in „Sonstiges Material" — Jens hat darauf geschrieben, das
+   Blatt geschlossen und die Notiz nicht wiedergefunden. Das Notizblatt dagegen
+   nahm die Striche in sich auf. Zwei Wege, zwei Speicher, ein Name.
+
+   Gesichert wird jetzt bei JEDEM Verlassen, nicht nur auf Knopfdruck. „Wer
+   vergisst zu speichern, verliert die Notiz" ist kein tragbarer Zustand fuer
+   etwas, das man auf der Buehne benutzt. Nur „Abbrechen" verwirft — und fragt
+   vorher nach. */
+
+/* Was steht jetzt auf dem Blatt? Wird mit dem Stand beim Aufschlagen
+   verglichen, damit ein blosses Ansehen nichts schreibt. */
+function edVeraendert(){
+  if(!ED) return false;
+  return JSON.stringify(ED.pages.map(p=>p.strokes.length)) !== ED.stand;
+}
+/* Die Striche in den Notiz-Speicher, je Seite mit ihrer Bezugsgroesse. */
+async function edSichern(){
+  if(!ED || !ED.tune) return false;
+  const t=ED.tune;
+  if(!t.bsId) return false;                 // fremdes Material ohne eigene Kennung
+  const seiten=ED.pages.map(pg=>({ w:pg.w, h:pg.h, strokes:pg.strokes||[] }));
+  await BS.notizSchreiben(t.bsId, seiten);
+  return true;
+}
+/* Editor zu, Blatt neu zeichnen, Liste auffrischen. */
+async function edSchliessen(neuZeichnen){
+  document.getElementById('editor').classList.remove('open');
+  const bsId = ED && ED.tune && ED.tune.bsId;
+  ED=null;
+  if(neuZeichnen && bsId){
+    /* Der Betrachter haelt das gerenderte Blatt fest; die Notiz liegt jetzt
+       darueber und muss mitgezeichnet werden. */
+    if(typeof NOTIZ_KENNUNGEN!=='undefined'){
+      try{ NOTIZ_KENNUNGEN = await BS.notizKennungen(); }catch(e){}
+    }
+    render();
+    if(document.getElementById('viewer').classList.contains('open')
+       && typeof blattNeuZeichnen==='function') blattNeuZeichnen(true);
+  } else render();
+}
+document.getElementById('eCancel').onclick=async()=>{
+  if(!ED) return;
+  if(edVeraendert() && !confirm('Deine Änderungen an dieser Notiz verwerfen?')) return;
+  await edSchliessen(false);
+};
 document.getElementById('eSave').onclick=async()=>{
   if(!ED)return;
-  /* Ein NOTIZBLATT nimmt seine Striche in sich auf, statt einen zweiten
-     Eintrag zu erzeugen. Fuer jedes andere Blatt bleibt es beim alten Weg:
-     Dort ist das Original fremdes Notenmaterial und darf nicht ueberschrieben
-     werden, hier ist das Blatt eigens zum Beschreiben angelegt worden.
-
-     Jens am 8. August: „Ich kann darauf schreiben, es wird bestaetigt, aber
-     danach ist das Notizblatt leer." Die Notiz lag als eigener Eintrag unter
-     „Bearbeitet" — nicht verloren, aber nicht dort, wo er sie suchte.
-
-     Angefasst wird nur dieser Speicherweg, nicht die Zeicheneingabe. */
-  /* Nur ein EINSEITIGES Notizblatt nimmt die Striche in sich auf. Der Weg
-     unten schreibt Seite 1 und sonst nichts; bei mehreren Seiten waeren die
-     uebrigen verloren. Ein Notizblatt entsteht heute immer einseitig — sollte
-     das je anders kommen, greift ohne weiteres Zutun der alte Weg. */
-  if(ED.tune && ED.tune.art==='notizblatt' && ED.tune.bsId && ED.pages.length===1){
-    try{
-      const pg=ED.pages[0];
-      const out=document.createElement('canvas'); out.width=pg.w; out.height=pg.h;
-      const ctx=out.getContext('2d');
-      ctx.fillStyle='#fff'; ctx.fillRect(0,0,pg.w,pg.h); ctx.drawImage(pg.bg,0,0);
-      pg.strokes.forEach(x=>drawStroke(ctx,x));
-      const jpg=await new Promise(res=>out.toBlob(res,'image/jpeg',0.92));
-      const pdf=pdfMitBild(new Uint8Array(await jpg.arrayBuffer()), out.width, out.height);
-      const id=ED.tune.bsId;
-      await BS._intern.tx(['bytes','elemente'],'readwrite',(by,el)=>{
-        by.put({id, blob:pdf});
-        const g=el.get(id);
-        g.onsuccess=()=>{ const r=g.result; if(r){ r.groesse=pdf.size; r.geaendert=Date.now(); el.put(r); } };
-      });
-      /* Drei Zwischenlager zeigen jetzt noch auf die alten Bytes, und alle
-         drei muessen geraeumt werden — sonst steht das Blatt nach dem
-         Speichern unveraendert da. Gemessen am 8. August: geschrieben wurde
-         richtig, gezeigt wurde das leere Blatt.
-           `_pdfCache`   — das gelesene PDF, an der Adresse geschluesselt
-           `_urlHalter`  — der Vorrat der Oberflaeche
-           die Leihe in BS — sie gibt die Adresse sonst erst her, wenn zwoelf
-                             andere Blaetter sie verdraengt haben
-         `LIBTUNES` steht mit `let` auf oberster Ebene und liegt NICHT auf
-         `window` — ein `window.LIBTUNES` liest hier immer eine leere Liste. */
-      const alt=LIBTUNES.find(x=>x.bsId===id);
-      if(alt && alt.f) delete _pdfCache[alt.f];
-      if(alt) urlFreigeben(alt);
-      BS.urlVergessen(id);
-      document.getElementById('editor').classList.remove('open'); ED=null;
-      await loadLibrary();
-      /* Der Betrachter haelt den ALTEN Satz fest; nach dem Neuladen ist dessen
-         Adresse tot. Er bekommt deshalb den neuen Satz und zeichnet noch
-         einmal — der Nutzer landet ja unmittelbar wieder auf dem Blatt. */
-      const neu=LIBTUNES.find(x=>x.bsId===id);
-      if(neu && CURRENT && CURRENT.bsId===id) CURRENT=neu;
-      render();
-      if(neu && document.getElementById('viewer').classList.contains('open')
-         && typeof blattNeuZeichnen==='function') blattNeuZeichnen(true);
-      return;
-    }catch(e){
-      alert('Speichern auf dem Notizblatt fehlgeschlagen: '+(e&&e.message||e)
-        +'\n\nEs wird stattdessen als eigene Notiz abgelegt.');
-    }
+  try{
+    const ok=await edSichern();
+    if(!ok){ alert('Auf diesem Blatt lässt sich nichts speichern — es stammt nicht aus Deinem eigenen Bestand.'); return; }
+    await edSchliessen(true);
+  }catch(e){
+    alert('Die Notiz konnte nicht gespeichert werden: '+(e&&e.message||e)
+      +'\n\nDer Editor bleibt offen, damit nichts verlorengeht.');
   }
-  const name=getEditorName();
-  const title=(document.getElementById('eTitle').value.trim())||(ED.tune.t+' (Edits)');
-  const uk='user|'+uid('u');
-  const dataURLs=ED.pages.map(pg=>{ const out=document.createElement('canvas'); out.width=pg.w; out.height=pg.h;
-    const ctx=out.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,pg.w,pg.h); ctx.drawImage(pg.bg,0,0);
-    pg.strokes.forEach(s=>drawStroke(ctx,s)); return out.toDataURL('image/png'); });
-  await idbPutPages(uk,dataURLs);
-  USER.push({key:uk,t:title,editor:name,editedAt:Date.now(),isEdit:true,book:ED.tune.b,bid:'user',baseKey:ED.tune.key,np:ED.pages.length,c:'',pg:'Notiz'});
-  saveUser();
-  document.getElementById('editor').classList.remove('open'); ED=null; render();
-  alert('Notiz gespeichert.'+(name?'':' Tipp: trage im Zahnrad-Menü deinen Namen ein, damit du deine Edits leichter wiederfindest.'));
 };
+
+/* Das Netz unter dem Ganzen: Wer die App weglegt, den Reiter wechselt oder
+   das Fenster schliesst, waehrend der Editor offen ist, soll seine Notiz
+   trotzdem behalten. `visibilitychange` ist der Weg, den iOS zuverlaessig
+   feuert — `beforeunload` tut es dort NICHT, wenn die App aus dem
+   Multitasking geworfen wird.
+
+   Geschrieben wird nur, wenn sich wirklich etwas geaendert hat; sonst
+   bekaeme jedes blosse Aufschlagen einen Schreibvorgang. */
+function edNetz(){
+  if(!ED || !edVeraendert()) return;
+  try{ edSichern(); }catch(e){}
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) edNetz(); });
+window.addEventListener('pagehide', edNetz);
+window.addEventListener('beforeunload', edNetz);
 
 /* Hinweis, wenn per Doppelklick (file://) geöffnet – dann kann der Browser die Noten nicht einpassen */
 if(location.protocol==='file:'){
@@ -7894,7 +8004,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-08 · Ruhigere Zeile, Notizen an einem Ort';
+const APP_BUILD='2026-08-09 · Notiz bleibt auf ihrem Blatt';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
