@@ -5948,6 +5948,127 @@ async function dockFotoHinzu(t){
   }, 'image/*', true, true);
 }
 
+/* ---------- Umzug der alten „(Edits)"-Notizen ----------
+   Bis zum 9. August erzeugte der Stift auf einem vorhandenen Blatt ein
+   EIGENES Stueck in „Sonstiges Material" — als Bild in der alten Datenbank
+   `realbook`/`pages`, mit einem Eintrag in `rb_usertunes`. Diese Notizen
+   liegen weiter herum und gehoeren dorthin, wo sie entstanden sind.
+
+   Aus einem Bild lassen sich die STRICHE nicht zurueckgewinnen: Noten und
+   Handschrift sind darin fest ineinander gebrannt. Eine echte Notiz-Ebene
+   kann daraus also nicht werden. Was geht, ist der halbe Weg — und der ist
+   den ganzen Nutzen wert: Aus jeder alten Notiz wird ein NOTIZBLATT am
+   Ursprungstitel. Es sieht aus wie damals, haengt aber am richtigen Stueck,
+   steht in der Stimmenwahl, blaettert mit und geht in den Export.
+
+   Mehrseitige Notizen ergeben je Seite ein Blatt; `pdfMitBild` baut nur
+   einseitige PDFs, und eine Seite wegzuwerfen kommt nicht in Frage. */
+
+/* Zu welchem Titel gehoert eine alte Notiz? Ueber `baseKey` — den Schluessel
+   des Blattes, auf dem geschrieben wurde. */
+function altNotizZiel(u){
+  const basis = u && u.baseKey ? byKey[u.baseKey] : null;
+  if(basis && basis.bsId){
+    const el=(BS_KATALOG.elemente||[]).find(e=>e.id===basis.bsId);
+    if(el) return { titelId:el.titelId, titel:basis.t };
+  }
+  return null;
+}
+/* Was der Umzug vorfindet — zum Anzeigen, bevor etwas geschrieben wird. */
+function altNotizenSchau(){
+  const alle=USER.filter(u=>u.isEdit);
+  const zuordenbar=[], heimatlos=[];
+  alle.forEach(u=>{ (altNotizZiel(u) ? zuordenbar : heimatlos).push(u); });
+  const seiten=alle.reduce((n,u)=>n+(u.np||1),0);
+  return { alle, zuordenbar, heimatlos, seiten };
+}
+async function altNotizenUmziehen(){
+  const schau=altNotizenSchau();
+  if(!schau.alle.length){ alert('Es liegen keine alten Notizen vor.'); return; }
+
+  let text='Es liegen '+zahlwortEins(schau.alle.length,'alte Notiz','alte Notizen')
+    +' mit '+zahlwortEins(schau.seiten,'Seite','Seiten')+' vor.\n\n';
+  if(schau.zuordenbar.length)
+    text+='• '+schau.zuordenbar.length+(schau.zuordenbar.length===1
+        ? ' davon wandert an ihren Ursprungstitel.\n'
+        : ' davon wandern an ihren Ursprungstitel.\n');
+  if(schau.heimatlos.length)
+    text+='• '+schau.heimatlos.length+(schau.heimatlos.length===1
+        ? ' findet ihr Stück nicht mehr und kommt'
+        : ' finden ihr Stück nicht mehr und kommen')
+        +' in ein neues Buch „Übernommene Notizen".\n';
+  text+='\nJede wird ein Notizblatt: Sie sieht aus wie bisher, hängt aber am Stück, '
+      +'blättert mit und geht in den Export.\n\n'
+      +'Vorher wird gesichert. Fortfahren?';
+  if(!confirm(text)) return;
+
+  await beiArbeit('Notizen ziehen um…','', async ()=>{
+    let umgezogen=0, blaetter=0; const schief=[];
+    try{ await BS.sicherung('vor dem Umzug der alten Notizen'); }catch(e){}
+
+    /* Das Auffangbuch entsteht nur, wenn es gebraucht wird. */
+    let heimatBuch=null;
+    const heimatTitel={};
+
+    for(const u of schau.alle){
+      try{
+        const seiten=await idbGetPages(u.key);
+        if(!seiten.length){ schief.push(u.t+' (keine Seiten)'); continue; }
+
+        let titelId=null;
+        const ziel=altNotizZiel(u);
+        if(ziel) titelId=ziel.titelId;
+        else{
+          if(!heimatBuch){
+            const vorhanden=USERBOOKS.find(b=>b.name==='Übernommene Notizen');
+            heimatBuch = vorhanden ? {id:vorhanden.bid}
+                                   : await BS.buchAnlegen({name:'Übernommene Notizen', chip:'NOTIZ'});
+          }
+          const name=(u.t||'Notiz').replace(/\s*\(Edits\)\s*$/,'') || 'Notiz';
+          if(!heimatTitel[name]){
+            const ti=await BS.titelAnlegen({buchId:heimatBuch.id, titel:name, komponist:u.c||''});
+            heimatTitel[name]=ti.id;
+          }
+          titelId=heimatTitel[name];
+        }
+
+        for(let i=0;i<seiten.length;i++){
+          /* PNG → JPEG, weil `pdfMitBild` einen DCTDecode-Strom traegt. */
+          const im=await loadImg(seiten[i]);
+          const c=document.createElement('canvas'); c.width=im.naturalWidth; c.height=im.naturalHeight;
+          const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
+          g.drawImage(im,0,0);
+          const jpg=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
+          const pdf=pdfMitBild(new Uint8Array(await jpg.arrayBuffer()), c.width, c.height);
+          const wieviel=(BS_KATALOG.elemente||[]).filter(e=>e.titelId===titelId && e.art==='notizblatt').length;
+          const etikett='Notiz'+(seiten.length>1 ? ' '+(i+1)+'/'+seiten.length
+                                                 : (wieviel? ' '+(wieviel+1) : ''));
+          await BS.elementAnlegen({ titelId, art:'notizblatt', etikett,
+            dateiname:(u.t||'Notiz')+(seiten.length>1?' S'+(i+1):'')+'.pdf', blob:pdf, np:1 });
+          blaetter++;
+          /* Der Katalog wird zwischendurch aufgefrischt, sonst zaehlt die
+             Etikett-Vergabe der naechsten Seite noch am alten Stand. */
+          BS_KATALOG=await BS.katalog();
+        }
+
+        /* Erst wenn die Seiten sicher drueben sind, faellt das Alte weg. */
+        try{ await idbDeletePages(u.key); }catch(e){}
+        USER=USER.filter(x=>x.key!==u.key);
+        delete S.tuneTags[u.key]; S.fav.delete(u.key); S.prac.delete(u.key);
+        umgezogen++;
+      }catch(e){ schief.push((u.t||'eine Notiz')+' — '+(e&&e.message||e)); }
+    }
+
+    saveUser(); save();
+    await loadLibrary(); render();
+    alert(zahlwortEins(umgezogen,'Notiz ist','Notizen sind')+' umgezogen, '
+      +zahlwortEins(blaetter,'Blatt','Blätter')+' angelegt.'
+      + (schief.length ? '\n\nNicht umgezogen:\n• '+schief.join('\n• ')
+                        +'\n\nDiese Notizen liegen unverändert weiter unter „Bearbeitet".' : ''));
+  });
+}
+window.altNotizenUmziehen=altNotizenUmziehen;
+
 async function dockNotizblatt(t){
   const tid=dockTitelId(t);
   if(!tid){ alert('An dieses Stück lässt sich nichts anhängen — es stammt nicht aus Deinem eigenen Bestand.'); return; }
@@ -8004,7 +8125,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-09 · Notiz bleibt auf ihrem Blatt';
+const APP_BUILD='2026-08-09 · Alte Notizen ziehen um';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10660,6 +10781,22 @@ setTimeout(ablageAnmelden, 0);
           + 'Ging der Stapel ins falsche Buch, holt das alles wieder heraus — '
           + 'in den Papierkorb, nicht endgültig weg.'));
       }).catch(()=>{});
+
+      /* Die alten „(Edits)"-Notizen. Auch diese Zeile erledigt sich selbst:
+         Ist nichts mehr da, steht sie nicht mehr da. */
+      const altN=altNotizenSchau();
+      if(altN.alle.length){
+        const z_alt=zeile('Alte Notizen',
+          zahlwortEins(altN.alle.length,'Notiz','Notizen')+' aus der Zeit vor dem 9. August · '
+          + (altN.zuordenbar.length ? altN.zuordenbar.length+' finden ihr Stück wieder' : '')
+          + (altN.zuordenbar.length && altN.heimatlos.length ? ' · ' : '')
+          + (altN.heimatlos.length ? altN.heimatlos.length+' ohne Stück' : ''));
+        z_alt._ctl.append(knopf('Umziehen', async()=>{ await altNotizenUmziehen(); zeichne(); }));
+        w.append(karte('Notizen aufräumen',[z_alt],
+          'Sie stehen heute als eigene Stücke in „Sonstiges Material" und gehen beim Export '
+          +'nicht mit. Der Umzug macht aus jeder ein Notizblatt am Ursprungstitel — es sieht aus '
+          +'wie bisher, hängt aber am Stück und blättert mit. Vorher wird gesichert.'));
+      }
 
       /* Die Zeile steht nur da, solange es etwas aufzuraeumen gibt — danach
          verschwindet sie von selbst. Ein Angebot, das sich erledigt, muss
