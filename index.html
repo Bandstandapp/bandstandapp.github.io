@@ -7403,6 +7403,50 @@ const BS = (function(){
     throw new Error('Verschieben gibt es nur für Titel und Elemente.');
   }
 
+  /* ---- Zusammenfuehren --------------------------------------------------
+     Aus mehreren Titeln wird einer. Das Datenmodell kannte bis zum 9. August
+     nur Verschieben und Kopieren — und beides legt zwei gleichnamige Titel
+     zwar ins selbe Buch, aber nicht in denselben Titel.
+
+     Der Fall aus der Praxis: „Blue Bossa" liegt in vier Real Books, je eine
+     Ausgabe. Das sind vier Titel mit je einem Blatt, wo einer mit vier
+     Stimmen hingehoert. Von Hand kostet das vier Griffe je Titel — bei
+     vierhundert Titeln mit drei Zusatzausgaben viertausendachthundert.
+
+     Der ERSTE der Kennungen ist das Ziel; sein Name und sein Komponist
+     gelten, und er behaelt sein Buch. Die Blaetter der uebrigen haengen sich
+     an ihn, die leer gewordenen Titel wandern in den Papierkorb.
+
+     Die Element-Kennungen bleiben unveraendert. Daran haengen Favoriten,
+     Tags, Setlisten und Notizen — sie ueberstehen das Zusammenfuehren
+     deshalb ohne Zutun.                                                    */
+  async function titelZusammenfuehren(ids, anlass){
+    ids=[].concat(ids||[]).filter(Boolean);
+    if(ids.length<2) throw new Error('Zum Zusammenführen braucht es mindestens zwei Titel.');
+    const k=await katalog();
+    const ziel=k.titel.find(t=>t.id===ids[0]);
+    if(!ziel) throw new Error('Den Ziel-Titel gibt es nicht mehr.');
+    const weitere=ids.slice(1).filter(id=>k.titel.some(t=>t.id===id));
+    if(!weitere.length) return { ziel:ziel.id, titel:0, elemente:0 };
+
+    /* Die neuen Blaetter reihen sich HINTER die vorhandenen. */
+    let r=k.elemente.filter(e=>e.titelId===ziel.id)
+          .reduce((a,e)=>Math.max(a,(e.reihung||0)+1),0);
+    const umzuhaengen=k.elemente
+      .filter(e=>weitere.includes(e.titelId))
+      .sort((a,b)=>weitere.indexOf(a.titelId)-weitere.indexOf(b.titelId)
+                 || (a.reihung||0)-(b.reihung||0));
+    if(umzuhaengen.length){
+      await tx(S_EL,'readwrite',st=>{ umzuhaengen.forEach(e=>{
+        st.put({...e, titelId:ziel.id, reihung:r++, geaendert:jetzt()}); }); });
+    }
+    /* Erst wenn die Blaetter sicher am Ziel haengen, gehen die leeren Titel
+       in den Papierkorb — sonst naehme ein Fehlschlag sie mit. */
+    await loeschen('titel', weitere, anlass||'beim Zusammenführen geleert');
+    await tx(S_TITEL,'readwrite',st=>st.put({...ziel, geaendert:jetzt()}));
+    return { ziel:ziel.id, titel:weitere.length, elemente:umzuhaengen.length };
+  }
+
   /* ---- Kopieren ---------------------------------------------------------
      Anders als das Verschieben entstehen hier NEUE Kennungen und die Bytes
      werden ein zweites Mal abgelegt. Eine Kopie ist ein eigenes Ding; sonst
@@ -7799,7 +7843,7 @@ const BS = (function(){
   return { DB, VER, ARTEN, oeffnen, schliessen, geraet, kennung,
            seitenzahlAusBytes, seitenzahl,
            katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
-           verschieben, kopieren,
+           verschieben, kopieren, titelZusammenfuehren,
            bytes, urlLeihen, urlZurueck, urlVergessen, leiheLeeren,
            notizLesen, notizSchreiben, notizLoeschen, notizKennungen,
            loeschen, korb, wiederherstellen, korbLeeren,
@@ -8125,7 +8169,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-09 · Alte Notizen ziehen um';
+const APP_BUILD='2026-08-09 · Titel zusammenführen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10441,6 +10485,15 @@ setTimeout(ablageAnmelden, 0);
     if(reihen.length) z._ctl.append(knopf(n===reihen.length?'Auswahl aufheben':'Alle auswählen', ()=>{
       if(n===reihen.length) cWahl=new Set(); else cWahl=new Set(reihen.map(r=>r.id));
       zeichne(); }));
+    /* Der Hebel: Bei vierhundert Titeln von Hand die Doppelten zu suchen ist
+       die eigentliche Arbeit — nicht das Zusammenführen selbst. Der Knopf
+       steht nur da, wenn es wirklich etwas anzuhaken gibt. */
+    if(eb==='titel'){
+      const doppelt=cDoppelteNamen(reihen);
+      if(doppelt.ids.length) z._ctl.append(knopf(
+        'Gleiche Namen anhaken ('+doppelt.namen+')',
+        ()=>{ cWahl=new Set(doppelt.ids); zeichne(); }));
+    }
     if(!n) return z;
     if(eb!=='buch'){
       z._ctl.append(
@@ -10451,9 +10504,83 @@ setTimeout(ablageAnmelden, 0);
        fuer ein anderes BandStand. Die Hauptliste reicht mit „Weitergeben" lose
        PDFs an das Teilen-Blatt des Geraets — zwei verschiedene Dinge, die bis
        zum 30. Juli beide „Teilen" hiessen. */
+    if(eb==='titel' && n>=2) z._ctl.append(knopf('Zusammenführen', ()=>cZusammenfuehren(ids)));
     if(eb==='titel') z._ctl.append(knopf('Als Paket teilen', ()=>cTeilen(ids)));
     z._ctl.append(knopf(cMenge(eb,n)+' entfernen', ()=>cEntfernen(eb, ids), 'warn'));
     return z;
+  }
+
+  /* ---- Zusammenfuehren ---------------------------------------------------
+     Gruppiert wird nach dem NAMEN, nicht stumpf alles zu einem. Bei einer
+     Handvoll Titel ist das dasselbe; bei vierhundert ist es der Unterschied
+     zwischen „ein Durchgang" und „ein einziger Riesen-Titel mit
+     zwoelfhundert Blaettern". Verglichen wird ueber `norm()` — dieselbe
+     Normalisierung, nach der auch sortiert und gesucht wird, damit „The Girl
+     From Ipanema" und „Girl from Ipanema" zusammenfinden. */
+  /* Welche der sichtbaren Titel tragen einen Namen, der mehrfach vorkommt? */
+  function cDoppelteNamen(reihen){
+    const K=BS_KATALOG, nach=new Map();
+    (reihen||[]).forEach(r=>{ const t=(K.titel||[]).find(x=>x.id===r.id); if(!t) return;
+      const s=norm(t.titel||''); if(!s) return;
+      if(!nach.has(s)) nach.set(s,[]); nach.get(s).push(t.id); });
+    const gruppen=[...nach.values()].filter(g=>g.length>1);
+    return { ids:gruppen.flat(), namen:gruppen.length };
+  }
+  function cGruppenNachNamen(ids){
+    const K=BS_KATALOG, nach=new Map();
+    ids.forEach(id=>{ const t=(K.titel||[]).find(x=>x.id===id); if(!t) return;
+      const s=norm(t.titel||''); if(!nach.has(s)) nach.set(s,[]); nach.get(s).push(t); });
+    return [...nach.values()];
+  }
+  async function cZusammenfuehren(ids){
+    const K=BS_KATALOG;
+    const gruppen=cGruppenNachNamen(ids).filter(g=>g.length>1);
+    const zahl=t=>(K.elemente||[]).filter(e=>e.titelId===t.id).length;
+
+    let auswahl=gruppen, alleZuEinem=false;
+    if(!gruppen.length){
+      /* Kein Name kommt doppelt vor. Entweder ein Fehlgriff — oder jemand
+         will zwei verschieden benannte Ausgaben desselben Stuecks vereinen.
+         Das zweite ist selten, aber legitim, und wird deshalb angeboten
+         statt verboten. */
+      const titel=ids.map(id=>(K.titel||[]).find(t=>t.id===id)).filter(Boolean);
+      if(titel.length<2) return;
+      if(!confirm('Unter den '+titel.length+' gewählten Titeln kommt kein Name doppelt vor.\n\n'
+        +'Trotzdem alle zu einem Titel „'+(titel[0].titel||'(ohne Titel)')+'" zusammenführen?\n\n'
+        +'Sonst brich ab und hake nur zusammengehörende Titel an.')) return;
+      auswahl=[titel]; alleZuEinem=true;
+    }
+
+    const titelWeg=auswahl.reduce((n,g)=>n+g.length-1,0);
+    const blaetter=auswahl.reduce((n,g)=>n+g.slice(1).reduce((m,t)=>m+zahl(t),0),0);
+    if(!alleZuEinem){
+      const beispiel=auswahl[0];
+      const text=(auswahl.length===1
+          ? zahlwortEins(beispiel.length,'Titel','Titel')+' „'+(beispiel[0].titel||'(ohne Titel)')+'" werden zu einem.'
+          : auswahl.length+' Namen kommen mehrfach vor · '
+            +zahlwortEins(titelWeg+auswahl.length,'Titel wird','Titel werden')+' zu '
+            +zahlwortEins(auswahl.length,'Titel','Titeln')+'.')
+        +'\n\n'+zahlwortEins(blaetter,'Blatt wandert','Blätter wandern')+' mit. '
+        +'Name und Komponist des jeweils ersten gelten; die leeren Titel gehen in den Papierkorb.'
+        +'\n\nFavoriten, Tags, Setlisten und Notizen bleiben an ihren Blättern hängen.'
+        +'\n\nVorher wird gesichert. Fortfahren?';
+      if(!confirm(text)) return;
+    }
+
+    await beiArbeit('Titel werden zusammengeführt…','', async ()=>{
+      try{ await BS.sicherung('vor dem Zusammenführen von Titeln'); }catch(e){}
+      let gemacht=0, geerbt=0; const schief=[];
+      for(const g of auswahl){
+        try{ const r=await BS.titelZusammenfuehren(g.map(t=>t.id));
+             gemacht+=r.titel; geerbt+=r.elemente; }
+        catch(e){ schief.push((g[0].titel||'ein Titel')+' — '+(e&&e.message||e)); }
+      }
+      cZuruecksetzen();
+      await loadLibrary(); render(); zeichne();
+      alert(zahlwortEins(gemacht,'Titel ist','Titel sind')+' aufgegangen, '
+        +zahlwortEins(geerbt,'Blatt','Blätter')+' umgehängt.'
+        +(schief.length ? '\n\nNicht zusammengeführt:\n• '+schief.join('\n• ') : ''));
+    });
   }
 
   async function cEntfernen(eb, ids){
