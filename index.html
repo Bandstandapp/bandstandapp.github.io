@@ -4663,10 +4663,6 @@ function openViewer(t, keepNav){
        eigenen Bestand. Gesetzt wird es trotzdem und nicht angezeigt. */
     frame.style.display='none'; frame.src='about:blank';
     fit.style.display='flex'; document.getElementById('vTab').style.display='none';
-    /* Der Stift kommt in Stufe 3. Eine Notiz haengt an einer AUSGABE, also am
-       Paar aus Quelle und Tonart, und dieser Zusammenhang ist noch nicht
-       gebaut. Bis dahin waere der Knopf ein Versprechen ohne Deckung. */
-    document.getElementById('vEditBtn').style.display='none';
     lsKnopfBeschriften(t);
     fitOn=true; renderLeadFit(t);
   } else if(t.isEdit){
@@ -7131,48 +7127,55 @@ async function renderLeadFit(t){
   if(!stehtSchon) fit.innerHTML='<div class="lslade">Lädt…</div>';
   const sagen = txt=>{ if(!fit.querySelector('.pg')) fit.innerHTML='<div class="lslade">'+esc(txt)+'</div>'; };
   try{
-    const quelle = await leadQuelle(t);
-    LS.filterEinbauen();
     const e = LS.E();
-    /* Die gewaehlte Ausgabe: Tonart, Notation, Stimme. Steht nichts da, wird
-       das Stueck gezeigt, wie es geliefert wurde. */
-    const a = LS.ausgabe(t.bsId);
-    const org = LS.tonartLesen(quelle);
-    const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
-    const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
-    /* Fuer den Knopf und die Zeile unter dem Titel merken. */
-    t._lsOrg = org; t._lsZiel = ziel; t._lsGelesen = um.gelesen;
-    const r = await LS.setze(quelle, { tonart:um.transpose, stimme:a.stimme||'', sagen });
-    const n = r.seiten.length;
+    /* Steht zu dieser Ausgabe schon eine Notiz, kommt ihr EINGEFRORENES
+       Blatt — nicht ein neu gesetztes. Sonst wanderte die Notiz. */
+    const b = await lsBlaetter(t, sagen);
+    const n = b.svgs.length;
     if(!n) throw new Error('Aus dieser Datei ist kein Blatt geworden.');
+    const notiz = b.notiz;
 
     /* Das Verhaeltnis ist bei einem Leadsheet fest — A4 hochkant, so
        entschieden am 19. August. Die Buehnenbreite folgt daraus. */
-    if(window.SHEET_RATIO!==undefined && Math.abs(r.verhaeltnis-window.SHEET_RATIO)>0.002){
-      window.SHEET_RATIO=r.verhaeltnis; if(window.layout) window.layout();
+    if(window.SHEET_RATIO!==undefined && Math.abs(LS.A4_VERH-window.SHEET_RATIO)>0.002){
+      window.SHEET_RATIO=LS.A4_VERH; if(window.layout) window.layout();
     }
     const fsMode=document.getElementById('viewer').classList.contains('fullscreen');
     const box=fit.getBoundingClientRect(); const rand=fitRand(fit);
     const W=(fsMode?window.innerWidth:(box.width||window.innerWidth))-rand.x-4;
     const H=(fsMode?window.innerHeight:(box.height||window.innerHeight))-rand.y;
     const einBlatt = !(fsMode && document.body.dataset.o==='land');
-    const natH=1000, natW=Math.round(natH*r.verhaeltnis);
+    const natH=1000, natW=Math.round(natH*LS.A4_VERH);
     const {scale,center} = einBlatt
       ? { scale: Math.max(Math.min(H/natH, W/natW), 0.05), center:(n===1) }
       : computeFit(n,natW,natH,W,H,14);
     fit.classList.toggle('center',center);
 
     const halter=document.createDocumentFragment();
-    r.seiten.forEach(svg=>{
+    b.svgs.forEach((svg,i)=>{
       const d=document.createElement('div'); d.className='pg ls';
-      d.style.width=(natW*scale)+'px'; d.style.height=(natH*scale)+'px';
+      const bw=natW*scale, bh=natH*scale;
+      d.style.width=bw+'px'; d.style.height=bh+'px';
+      d.style.position='relative';
+      /* Schrift, Farbe und Handschrift stecken seit Stufe 3 IM Blatt. Die
+         alten Regeln bleiben als Rückfall für Blätter, die vor dem
+         20. August eingefroren wurden. */
       d.style.setProperty('--ls-linie', e.farbe);
-      if(e.hand>0) d.style.filter='url(#lsW'+e.hand+')';
-      /* Die Seite bringt feste Masse mit; sie sollen sich in die Kachel
-         einpassen und nicht ueberstehen. */
       d.innerHTML = svg.replace(/^<svg([^>]*)>/, (m,a)=>
         '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'')
         +' viewBox="0 0 '+LS_BREITE+' '+LS_HOEHE+'" preserveAspectRatio="xMidYMid meet">');
+
+      /* Die handschriftliche Notiz liegt DARÜBER und wird nicht ins Blatt
+         geschrieben — dasselbe Verhältnis wie beim gescannten Blatt. */
+      const seite = notiz && notiz.seiten && notiz.seiten[i];
+      if(seite && seite.strokes && seite.strokes.length){
+        const dpr=Math.min(window.devicePixelRatio||1,2);
+        const cv=document.createElement('canvas');
+        cv.width=Math.round(bw*dpr); cv.height=Math.round(bh*dpr);
+        cv.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none';
+        notizZeichnen(cv, seite);
+        d.append(cv);
+      }
       halter.append(d);
     });
     fit.replaceChildren(halter);
@@ -7184,6 +7187,65 @@ async function renderLeadFit(t){
   }
 }
 const LS_BREITE=2100, LS_HOEHE=2970;
+
+/* ---- Die Blätter einer Ausgabe (Stufe 3, 20. August) ---------------------
+   Steht zu dieser Ausgabe schon eine Notiz, ist ihr Blatt EINGEFROREN: Es
+   wird nicht neu gesetzt, sondern so gezeigt, wie es beim ersten Strich
+   aussah. Sonst wanderte die Notiz beim nächsten Setzen — eine neue Fassung
+   des Setzers, ein anderer Umbruch, und der Fingersatz steht über dem
+   falschen Takt.
+
+   Zurück kommen eigenständige SVGs: Schrift und Handschrift-Welle stecken
+   darin, nicht im Stylesheet der Seite. */
+async function lsBlaetter(t, sagen){
+  const a = LS.ausgabe(t.bsId);
+  const schluessel = LS.notizSchluessel(t.bsId, a);
+  let notiz=null;
+  try{ notiz = await BS.notizLesen(schluessel); }catch(e){}
+  if(notiz && notiz.blatt && notiz.blatt.length)
+    return { svgs:notiz.blatt, schluessel, notiz, eingefroren:true };
+
+  const quelle = await leadQuelle(t);
+  const org = LS.tonartLesen(quelle);
+  const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
+  const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
+  t._lsOrg = org; t._lsZiel = ziel; t._lsGelesen = um.gelesen;
+  const r = await LS.setze(quelle, { tonart:um.transpose, stimme:a.stimme||'', sagen });
+  const e = LS.E();
+  const svgs = [];
+  for(const svg of r.seiten) svgs.push(await LS.eigenstaendig(svg, e));
+  return { svgs, schluessel, notiz, eingefroren:false };
+}
+
+/* Ein SVG in ein Bild — der Weg in die Leinwand des Editors. */
+function svgAlsBild(svg){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+    const im=new Image();
+    im.onload=()=>{ URL.revokeObjectURL(url); res(im); };
+    im.onerror=()=>{ URL.revokeObjectURL(url); rej(new Error('Das Blatt ließ sich nicht zeichnen.')); };
+    im.src=url;
+  });
+}
+/* Die Seiten für den Editor: dieselbe Form wie beim PDF-Weg, damit alles
+   dahinter unverändert bleibt — die Zeicheneingabe wird nicht angefasst. */
+async function lsEditorSeiten(t){
+  const {svgs, schluessel} = await lsBlaetter(t);
+  const seiten=[];
+  for(const svg of svgs){
+    const im=await svgAlsBild(svg);
+    const breite=Math.min(1240, im.naturalWidth||LS_BREITE);
+    const f=breite/(im.naturalWidth||LS_BREITE);
+    const bg=document.createElement('canvas');
+    bg.width=Math.round((im.naturalWidth||LS_BREITE)*f);
+    bg.height=Math.round((im.naturalHeight||LS_HOEHE)*f);
+    const g=bg.getContext('2d');
+    g.fillStyle='#fff'; g.fillRect(0,0,bg.width,bg.height);
+    g.drawImage(im,0,0,bg.width,bg.height);
+    seiten.push({bg, w:bg.width, h:bg.height, strokes:[]});
+  }
+  return { seiten, schluessel, svgs };
+}
 
 /* Auf dem Knopf steht, was man gerade liest — nicht das Wort „Tonart".
    Wer eine Stimme in B♭ vor sich hat, will das sehen, ohne zu tippen. */
@@ -7305,6 +7367,21 @@ async function openTonartSheet(t){
     const erg=document.createElement('div'); erg.className='muted';
     erg.style.cssText='margin:16px 0 0;padding:10px 12px;background:var(--card2,rgba(255,255,255,.04));border-radius:8px';
     card.append(erg); zeigen();
+
+    /* Steht auf diesem Blatt schon etwas geschrieben, gehoert die Notiz zu
+       DIESER Ausgabe. Ein Tonartwechsel laesst sie nicht verschwinden — er
+       fuehrt auf ein anderes Blatt, das noch leer ist. Das soll man vorher
+       wissen und nicht erst, wenn die Anmerkungen weg zu sein scheinen. */
+    BS.notizAusgaben ? BS.notizAusgaben(t.bsId).then(liste=>{
+      if(!liste || liste.length<1) return;
+      const h=document.createElement('div'); h.className='shint';
+      h.style.cssText='margin:10px 0 0';
+      h.innerHTML='Auf '+(liste.length===1?'einer Fassung':liste.length+' Fassungen')
+        +' dieses Stücks steht schon etwas geschrieben. Eine Notiz gehört zu der '
+        +'Tonart, in der sie entstanden ist — beim Wechsel liegt sie weiter dort '
+        +'und wartet, bis Du zurückkommst.';
+      card.insertBefore(h, erg.nextSibling);
+    }).catch(()=>{}) : null;
 
     const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
     row.innerHTML='<button class="btn" id="kOk" style="flex:2">Setzen</button>'
@@ -7450,7 +7527,11 @@ const LS = (function(){
   /* ---- Die Handschrift ----------------------------------------------------
      Vier Stufen. Die Welle ist ein Filter des Browsers und wirkt einmal beim
      Zeichnen; sie kostet nichts und macht aus exakt geraden Linien die
-     Unregelmaessigkeit einer Feder. Stufe 0 laesst alles gerade. */
+     Unregelmaessigkeit einer Feder. Stufe 0 laesst alles gerade.
+
+     Seit Stufe 3 steckt der Filter IM Blatt und nicht mehr im Dokument —
+     `eigenstaendig` legt ihn hinein. `filterEinbauen` bleibt fuer den Fall,
+     dass ein Blatt aus der Zeit davor gezeigt wird. */
   const WELLE = [null, [0.012,2.2], [0.02,3.5], [0.035,5]];
   function filterEinbauen(){
     if(document.getElementById('lsFilter')) return;
@@ -7636,6 +7717,68 @@ const LS = (function(){
              gelesen:nameVonQuinten(w), gelesenQ:w };
   }
 
+  /* ---- Ein Blatt, das fuer sich allein steht (Stufe 3, 20. August) -------
+     Das SVG aus dem Setzer ist nicht vollstaendig: Die Jazz-Schrift fuer die
+     Akkorde und die Handschrift-Welle kommen aus dem Stylesheet der Seite.
+     Solange das Blatt IM Dokument haengt, faellt das nicht auf. Sobald es in
+     eine Leinwand gezeichnet oder weggelegt wird, faellt beides weg — im
+     Editor stuenden die Akkorde in einer Systemschrift, und das eingefrorene
+     Blatt saehe anders aus als das, worauf geschrieben wurde.
+
+     `eigenstaendig` legt deshalb beides INS SVG: die Schrift als Datenblock,
+     die Welle als eigener Filter. Was dabei herauskommt, sieht ueberall
+     gleich aus — im Fenster, in der Leinwand, in einem Jahr. */
+  let _schrift=null;
+  async function schriftBase64(){
+    if(_schrift!==null) return _schrift;
+    try{
+      const r=await fetch(new URL('fonts/PetalumaScript.otf', location.href).href);
+      const b=new Uint8Array(await r.arrayBuffer());
+      let bin=''; const N=0x8000;
+      for(let i=0;i<b.length;i+=N) bin+=String.fromCharCode.apply(null, b.subarray(i,i+N));
+      _schrift=btoa(bin);
+    }catch(e){ _schrift=''; }
+    return _schrift;
+  }
+  async function eigenstaendig(svg, e){
+    e = e || E();
+    const b64 = await schriftBase64();
+    const w = WELLE[e.hand];
+    const filterId = 'lsw'+e.hand;
+    const stil = '<style>'
+      + (b64 ? "@font-face{font-family:'PetalumaScript';src:url(data:font/otf;base64,"+b64+") format('opentype')}" : '')
+      + "svg{font-family:'PetalumaScript',sans-serif}"
+      + "g.staff>path{stroke:"+e.farbe+"}"
+      + '</style>';
+    const filter = w ? '<filter id="'+filterId+'">'
+      + '<feTurbulence type="fractalNoise" baseFrequency="'+w[0]+'" numOctaves="2" seed="7" result="n"/>'
+      + '<feDisplacementMap in="SourceGraphic" in2="n" scale="'+w[1]+'" '
+      + 'xChannelSelector="R" yChannelSelector="G"/></filter>' : '';
+    /* Der Filter liegt auf einer Gruppe um ALLES — auf dem Wurzelelement
+       wuerde Safari ihn am Rand beschneiden. */
+    let out = svg.replace(/^(<svg[^>]*>)/, '$1' + stil + (filter ? '<defs>'+filter+'</defs>' : '')
+      + (w ? '<g filter="url(#'+filterId+')">' : ''));
+    if(w) out = out.replace(/<\/svg>\s*$/, '</g></svg>');
+    return out;
+  }
+
+  /* Die Kennung einer Ausgabe. Sie haengt an der Notiz: Wer in B ueber Takt
+     zwoelf schreibt, findet es in B wieder und nicht in C. Ist nichts
+     eingestellt, ist die Kennung leer und die Notiz haengt am Element wie bei
+     einem gescannten Blatt — so bleiben die alten Notizen, wo sie sind. */
+  function ausgabeKuerzel(a){
+    a = a || {};
+    const teile=[];
+    if(a.tonart!==undefined && a.tonart!=='') teile.push('t'+a.tonart);
+    if(a.notation && a.notation!=='C') teile.push('n'+a.notation);
+    if(a.stimme) teile.push('s'+a.stimme);
+    return teile.join('_');
+  }
+  function notizSchluessel(elementId, a){
+    const k=ausgabeKuerzel(a);
+    return k ? elementId+'|'+k : elementId;
+  }
+
   /* ---- Was der Nutzer gewaehlt hat --------------------------------------
      Die Ausgabe ist eine BESCHREIBUNG und keine Datei: Tonart, Notation,
      Stimme. Sie haengt an der Element-Kennung und wiegt nichts. */
@@ -7703,7 +7846,8 @@ const LS = (function(){
   return { E, setzen, VORGABE, WELLE, filterEinbauen, setze, stimmen,
            bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
            QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
-           ausgabe, ausgabeSetzen };
+           ausgabe, ausgabeSetzen, eigenstaendig, ausgabeKuerzel, notizSchluessel,
+           schriftBase64 };
 })();
 window.LS = LS;
 
@@ -8231,13 +8375,25 @@ const BS = (function(){
     return tx(S_NOTIZ,'readonly', st=>new Promise((res,rej)=>{
       const g=st.get(elementId); g.onsuccess=()=>res(g.result||null); g.onerror=()=>rej(g.error); }));
   }
-  async function notizSchreiben(elementId, seiten){
-    if(!elementId) throw new Error('Eine Notiz braucht ein Element.');
-    /* Leere Seiten ueberall: Der Satz wird geloescht statt leer gespeichert,
-       sonst haengt an jedem je einmal geoeffneten Blatt eine leere Notiz. */
+  /* `schluessel` ist bei einem gescannten Blatt die Element-Kennung selbst.
+     Bei einem Leadsheet traegt er die AUSGABE mit — Tonart, Notation, Stimme
+     — denn dort haengt die Notiz an dem, was auf dem Blatt steht, und nicht
+     an der Quelle. `zusatz.elementId` bleibt in beiden Faellen die nackte
+     Element-Kennung, damit die Liste weiter weiss, wer eine Notiz traegt.
+     `zusatz.blatt` ist das eingefrorene Blatt: Ab dem ersten Strich steht der
+     Satz fest, sonst wanderte die Notiz beim naechsten Setzen. */
+  async function notizSchreiben(schluessel, seiten, zusatz){
+    if(!schluessel) throw new Error('Eine Notiz braucht ein Element.');
     const leer=!seiten || !seiten.some(s=>s && s.strokes && s.strokes.length);
-    if(leer) return notizLoeschen(elementId);
-    const rec={ id:elementId, elementId, seiten, geaendert:jetzt() };
+    if(leer) return notizLoeschen(schluessel);
+    const alt = await notizLesen(schluessel);
+    const rec={ id:schluessel,
+                elementId:(zusatz && zusatz.elementId) || (alt && alt.elementId) || schluessel,
+                seiten, geaendert:jetzt() };
+    const blatt = (zusatz && zusatz.blatt) || (alt && alt.blatt);
+    if(blatt) rec.blatt = blatt;
+    if(zusatz && zusatz.ausgabe) rec.ausgabe = zusatz.ausgabe;
+    else if(alt && alt.ausgabe) rec.ausgabe = alt.ausgabe;
     await tx(S_NOTIZ,'readwrite', st=>st.put(rec));
     return rec;
   }
@@ -8246,6 +8402,20 @@ const BS = (function(){
     await tx(S_NOTIZ,'readwrite', st=>st.delete(elementId));
     return null;
   }
+  /* Zu welchen AUSGABEN eines Elements liegt eine Notiz? Der Index laeuft
+     ueber `elementId`; die Kennung selbst traegt die Ausgabe hinter dem
+     senkrechten Strich. */
+  async function notizAusgaben(elementId){
+    if(!elementId) return [];
+    return tx(S_NOTIZ,'readonly', st=>new Promise((res,rej)=>{
+      const out=[], ix=st.index('elementId'), c=ix.openCursor(IDBKeyRange.only(elementId));
+      c.onsuccess=e=>{ const cu=e.target.result;
+        if(cu){ out.push({ id:cu.value.id, ausgabe:cu.value.ausgabe||null,
+                           seiten:(cu.value.seiten||[]).length }); cu.continue(); }
+        else res(out); };
+      c.onerror=()=>rej(c.error); }));
+  }
+
   /* Welche Elemente tragen eine Notiz? Einmal gelesen, damit die Liste und
      der Reiter „Bearbeitet" nicht je Zeile in die Datenbank greifen. */
   async function notizKennungen(){
@@ -8538,7 +8708,7 @@ const BS = (function(){
   return { DB, VER, ARTEN, oeffnen, schliessen, geraet, kennung,
            seitenzahlAusBytes, seitenzahl,
            katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben,
-           schreibtGerade, aendern,
+           schreibtGerade, notizAusgaben, aendern,
            verschieben, kopieren, titelZusammenfuehren,
            bytes, urlLeihen, urlZurueck, urlVergessen, leiheLeeren,
            notizLesen, notizSchreiben, notizLoeschen, notizKennungen,
@@ -8599,37 +8769,50 @@ async function openEditor(t){
     widths.append(el); });
   /* Schlaegt das Laden fehl, blieb hier frueher stumm „Lädt…" stehen: alle
      Knoepfe da, kein Stueck. Jetzt steht der Grund auf der Flaeche. */
-  let doc;
+  /* Zwei Wege zu denselben Seiten. Was danach kommt — Zeicheneingabe,
+     Radierer, Zurücknehmen — ist für beide dasselbe und wird nicht angefasst.
+     Ein Leadsheet hat kein PDF; sein Blatt wird gesetzt und in eine Leinwand
+     gezeichnet. Ab dem ersten Strich steht es fest (siehe `lsBlaetter`). */
+  const istLead = t.art==='leadsheet';
+  let pages, lsSchluessel=null, lsSvgs=null;
   try{
-    await urlSichern(t);
-    if(!t.f) throw new Error('Für diesen Titel ist keine Datei hinterlegt.');
-    doc=await loadPdf(t.f);
+    if(istLead){
+      const r=await lsEditorSeiten(t);
+      pages=r.seiten; lsSchluessel=r.schluessel; lsSvgs=r.svgs;
+      if(!pages.length) throw new Error('Aus dieser Datei ist kein Blatt geworden.');
+    } else {
+      await urlSichern(t);
+      if(!t.f) throw new Error('Für diesen Titel ist keine Datei hinterlegt.');
+      const doc=await loadPdf(t.f);
+      const n=doc.numPages;
+      const p1=await doc.getPage(1); const v1=p1.getViewport({scale:1});
+      const R=Math.min(1240/v1.width,2.2);
+      pages=[];
+      for(let i=1;i<=n;i++){ const page=await doc.getPage(i); const vp=page.getViewport({scale:R});
+        const bg=document.createElement('canvas'); bg.width=Math.round(vp.width); bg.height=Math.round(vp.height);
+        await page.render({canvasContext:bg.getContext('2d'),viewport:vp}).promise;
+        pages.push({bg,w:bg.width,h:bg.height,strokes:[]}); }
+    }
   }catch(err){
     stage.innerHTML='<div style="color:#e6eef6;margin:auto;text-align:center;padding:24px;max-width:34em">'
       +'<div style="font-weight:700;margin-bottom:8px">Die Noten konnten nicht geladen werden.</div>'
       +'<div style="font-size:13px;opacity:.8">'+esc(String(err&&err.message||err))+'</div>'
-      +'<div style="font-size:13px;opacity:.8;margin-top:8px">'+esc(t.f||'(ohne Datei)')+'</div></div>';
+      +(istLead?'':'<div style="font-size:13px;opacity:.8;margin-top:8px">'+esc(t.f||'(ohne Datei)')+'</div>')+'</div>';
     return;
   }
-  const n=doc.numPages;
-  const p1=await doc.getPage(1); const v1=p1.getViewport({scale:1});
-  const R=Math.min(1240/v1.width,2.2);
-  const pages=[];
-  for(let i=1;i<=n;i++){ const page=await doc.getPage(i); const vp=page.getViewport({scale:R});
-    const bg=document.createElement('canvas'); bg.width=Math.round(vp.width); bg.height=Math.round(vp.height);
-    await page.render({canvasContext:bg.getContext('2d'),viewport:vp}).promise; pages.push({bg,w:bg.width,h:bg.height,strokes:[]}); }
   /* Was in der Leiste ausgezeichnet steht, gilt — auch wenn waehrend des
      Ladens getippt wurde. Ohne Auszeichnung bleibt es beim Ersatzwert. */
   const anIndex=(wahl,ersatz)=>{ const i=[...document.querySelectorAll(wahl)]
     .findIndex(x=>x.classList.contains('on')); return i<0?ersatz:i; };
   const iFarbe=anIndex('#ePens .pen',0), iStaerke=anIndex('#eWidths .penw',1);
-  ED={tune:t,pages,cur:0,tool:'pen',color:PEN_COLORS[iFarbe],sizeIdx:iStaerke,drawing:false,penSeen:false,stroke:null,drawC:null,zoom:1,panX:0,panY:0,stackEl:null};
+  ED={tune:t,pages,cur:0,tool:'pen',color:PEN_COLORS[iFarbe],sizeIdx:iStaerke,drawing:false,penSeen:false,stroke:null,drawC:null,zoom:1,panX:0,panY:0,stackEl:null,
+      lsSchluessel, lsSvgs};
   /* Eine vorhandene Notiz kommt mit herein, damit man weiterschreiben und
      einzelne Striche zuruecknehmen kann. Sie wurde in einer anderen Groesse
      geschrieben — deshalb auf die jetzige umrechnen. */
   if(t.bsId){
     try{
-      const ebene=await BS.notizLesen(t.bsId);
+      const ebene=await BS.notizLesen(lsSchluessel || t.bsId);
       if(ebene && ebene.seiten) ebene.seiten.forEach((se,i)=>{
         const pg=ED.pages[i]; if(!pg || !se || !se.strokes) return;
         const f = se.w ? pg.w/se.w : 1;
@@ -8801,7 +8984,13 @@ async function edSichern(){
   const t=ED.tune;
   if(!t.bsId) return false;                 // fremdes Material ohne eigene Kennung
   const seiten=ED.pages.map(pg=>({ w:pg.w, h:pg.h, strokes:pg.strokes||[] }));
-  await BS.notizSchreiben(t.bsId, seiten);
+  /* Mit dem ersten Strich friert das Blatt ein. Ab jetzt wird diese Ausgabe
+     nicht mehr gesetzt, sondern gezeigt — sonst wanderte die Notiz beim
+     nächsten Mal. Die Quelle bleibt liegen; eine andere Tonart entsteht
+     daraus jederzeit neu, mit ihrer eigenen Notiz. */
+  await BS.notizSchreiben(ED.lsSchluessel || t.bsId, seiten,
+    ED.lsSchluessel ? { elementId:t.bsId, blatt:ED.lsSvgs,
+                        ausgabe:LS.ausgabe(t.bsId) } : null);
   return true;
 }
 /* Editor zu, Blatt neu zeichnen, Liste auffrischen. */
@@ -8865,7 +9054,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20g · Handlungen wandern in die Leiste';
+const APP_BUILD='2026-08-20h · Notizen auf Leadsheets';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10321,11 +10510,10 @@ setTimeout(ablageAnmelden, 0);
     /* Der Stimmen-Knopf ist am 28. Juli entfallen. Der Schalter auf dem
        Blatt liegt in jeder Ausrichtung ueber den Noten und tut dasselbe;
        zwei Wege zum selben Ziel haetten das Dock nur voll gehalten. */
-    /* Der Stift ist bei einem Leadsheet noch nichts: Eine Notiz haengt an
-       einer AUSGABE, also am Paar aus Quelle und Tonart, und das ist Stufe 3.
-       Ein Knopf, der den PDF-Editor auf gesetzte Noten loslaesst, waere ein
-       Versprechen ohne Deckung. */
-    knopf.note.disabled = !!t.isEdit || t.art==='leadsheet';
+    /* Seit Stufe 3 nimmt auch ein Leadsheet den Stift an. Die Notiz haengt
+       dort an der AUSGABE — am Paar aus Quelle und Tonart — und friert das
+       Blatt ein, damit sie liegen bleibt, wo sie geschrieben wurde. */
+    knopf.note.disabled = !!t.isEdit;
     if(typeof lsKnopfBeschriften==='function') lsKnopfBeschriften(t);
     const voll = viewer.classList.contains('fullscreen');
     const sym  = knopf.full.querySelector('.i');
@@ -10376,7 +10564,7 @@ setTimeout(ablageAnmelden, 0);
   knopf.prac .onclick = () => { if(CURRENT) toggle(S.prac, CURRENT.key); };
   knopf.tag  .onclick = () => { if(CURRENT) assignTagsFlow(CURRENT); };
   knopf.set  .onclick = () => { if(CURRENT) addToSetlistFlow(CURRENT); };
-  knopf.note .onclick = () => { if(CURRENT && !CURRENT.isEdit && CURRENT.art!=='leadsheet') openEditor(CURRENT); };
+  knopf.note .onclick = () => { if(CURRENT && !CURRENT.isEdit) openEditor(CURRENT); };
   if(knopf.key) knopf.key.onclick = () => { if(CURRENT) openTonartSheet(CURRENT); };
   /* Foto und leeres Notizblatt direkt aus der Notenansicht. Am 7. August von
      Jens verlangt: Wer an einem Stück arbeitet, will dafür nicht ins Setup
