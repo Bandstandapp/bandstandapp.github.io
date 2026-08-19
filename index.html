@@ -7210,7 +7210,8 @@ async function lsBlaetter(t, sagen){
   const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
   const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
   t._lsOrg = org; t._lsZiel = ziel; t._lsGelesen = um.gelesen;
-  const r = await LS.setze(quelle, { tonart:um.transpose, stimme:a.stimme||'', sagen });
+  const r = await LS.setze(quelle, { tonart:um.transpose, stimme:a.stimme||'', sagen,
+    titel:t.t||'', komponist:t.c||'' });
   const e = LS.E();
   const svgs = [];
   for(const svg of r.seiten) svgs.push(await LS.eigenstaendig(svg, e));
@@ -7506,7 +7507,7 @@ const LS = (function(){
      Vier Regler aus Setup › Darstellung. Farbe und Staerke der Notenlinien
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
-  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang' };
+  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -7519,7 +7520,8 @@ const LS = (function(){
          also duenner statt dicker. Am 19. August beim Pruefen aufgefallen. */
       linie:   Math.max(0.10, Math.min(0.30, z('bs_ls_linie', VORGABE.linie))),
       hals:    Math.max(0.10, Math.min(0.50, z('bs_ls_hals',  VORGABE.hals))),
-      akkorde: localStorage.getItem('bs_ls_akkorde') || VORGABE.akkorde
+      akkorde: localStorage.getItem('bs_ls_akkorde') || VORGABE.akkorde,
+      raster:  localStorage.getItem('bs_ls_raster') !== '0'
     };
   }
   function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
@@ -7794,6 +7796,138 @@ const LS = (function(){
     try{ localStorage.setItem('bs_ls_ausgabe', JSON.stringify(a)); }catch(e){}
   }
 
+  /* ---- Der Kopf des Blattes (20. August) ---------------------------------
+     Titel und Komponist kommen aus DEINEM Bestand, nicht aus der Datei. Was
+     dort in den `credit`-Blöcken steht, ist bei den meisten Quellen Beiwerk
+     — „C Lead Sheet", der Arrangeur, eine Sammlungsnummer. Der Setzer würde
+     genau das oben hinschreiben.
+
+     Gesetzt wird deshalb selbst, in dieselbe Handschrift wie die Akkorde und
+     in Versalien wie im Real Book. Der Platz dafür kommt aus dem oberen Rand;
+     ohne Titel bleibt er schmal. */
+  const KOPF_HOEHE = 210;
+  function kopfEinsetzen(svg, titel, komponist){
+    if(!titel && !komponist) return svg;
+    const mitte = Math.round(A4.pageWidth/2);
+    const rechts = A4.pageWidth - A4.pageMarginRight;
+    const t = String(titel||'').toUpperCase();
+    const teile = [];
+    if(t) teile.push('<text x="'+mitte+'" y="150" text-anchor="middle" '
+      + 'font-size="72" font-weight="bold">'+esc(t)+'</text>');
+    if(komponist) teile.push('<text x="'+rechts+'" y="232" text-anchor="end" '
+      + 'font-size="40">'+esc(String(komponist))+'</text>');
+    return svg.replace(/^(<svg[^>]*>)/, '$1<g class="bskopf">'+teile.join('')+'</g>');
+  }
+
+  /* ---- Das Taktraster (20. August) ---------------------------------------
+     Ein Takt ist ein Zeitmaß. Steht er überall gleich breit, liest man am
+     Bild ab, ob die Noten dicht aufeinander folgen oder weit auseinander —
+     genau das, was ein Leadsheet leisten soll.
+
+     Der Setzer macht das von sich aus NICHT: Er gibt jedem Takt so viel
+     Platz, wie sein Inhalt braucht. Gemessen an drei Stücken schwanken die
+     Taktbreiten dabei um 31 bis 54 Prozent, und keine seiner Einstellungen
+     ändert daran etwas — `spacingLinear`, `spacingNonLinear` und
+     `measureMinWidth` wurden durchprobiert.
+
+     Also wird nachgerechnet: Je System bekommt jeder Takt denselben Anteil an
+     der Breite, und die Inhalte werden entsprechend verschoben. Verschoben,
+     nicht gedehnt — Notenköpfe, Hälse und Schrift behalten ihre Größe, es
+     ändern sich nur ihre Abstände. Der erste Takt eines Systems trägt
+     Schlüssel und Vorzeichen; dieser Vorspann bleibt unangetastet. */
+  function xAbbilden(el, f){
+    /* `f` bildet eine x-Lage ab. Größen bleiben, wie sie sind. */
+    const t = el.getAttribute && el.getAttribute('transform');
+    if(t && /translate\(/.test(t))
+      el.setAttribute('transform', t.replace(/translate\(\s*(-?[\d.]+)/, (m,x)=>'translate('+f(+x)));
+    if(el.hasAttribute && el.hasAttribute('x')) el.setAttribute('x', f(+el.getAttribute('x')));
+    if(el.hasAttribute && el.hasAttribute('cx')) el.setAttribute('cx', f(+el.getAttribute('cx')));
+    const d = el.getAttribute && el.getAttribute('d');
+    if(d){
+      let i=0;
+      el.setAttribute('d', d.replace(/(-?[\d.]+)(\s+)(-?[\d.]+)/g, (m,a,sp,b)=>{
+        /* In Pfaddaten wechseln sich x und y ab; abgebildet wird nur x. */
+        return f(+a)+sp+b;
+      }));
+    }
+  }
+  function taktraster(svgText){
+    let doc;
+    try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(e){ return svgText; }
+    if(!doc || doc.querySelector('parsererror')) return svgText;
+    doc.querySelectorAll('g.system').forEach(sys=>{
+      const takte = [...sys.children].filter(k=>k.classList && k.classList.contains('measure'));
+      if(takte.length<2) return;
+      /* Rechte Kante jedes Takts: der aeusserste Taktstrich darin. */
+      const kante = t=>{
+        let x=null;
+        t.querySelectorAll('g.barLine path').forEach(p=>{
+          const m=/M\s*(-?[\d.]+)/.exec(p.getAttribute('d')||''); if(!m) return;
+          const v=+m[1]; if(x===null || v>x) x=v; });
+        return x;
+      };
+      const enden = takte.map(kante);
+      if(enden.some(x=>x===null)) return;
+      /* Wo hoert der Vorspann auf? Beim ersten, was in einer Notenzeile steht. */
+      let musikStart=null;
+      const l1 = takte[0].querySelector('g.layer');
+      if(l1) l1.querySelectorAll('use,path,text').forEach(el=>{
+        const t=el.getAttribute('transform')||'';
+        let v=null;
+        const mt=/translate\(\s*(-?[\d.]+)/.exec(t);
+        if(mt) v=+mt[1];
+        else { const md=/M\s*(-?[\d.]+)/.exec(el.getAttribute('d')||''); if(md) v=+md[1];
+               else if(el.hasAttribute('x')) v=+el.getAttribute('x'); }
+        if(v===null) return;
+        if(musikStart===null || v<musikStart) musikStart=v;
+      });
+      if(musikStart===null) return;
+      const gesamt = enden[enden.length-1] - musikStart;
+      if(!(gesamt>0)) return;
+      const w = gesamt/takte.length;
+
+      /* EIN Weg fuer das ganze System, nicht einer je Takt. Ein Bindebogen
+         beginnt im einen Takt und endet im naechsten; bekaeme er die
+         Streckung nur eines der beiden, liefe sein Ende ins Leere — genau das
+         ist beim ersten Versuch passiert, und es sah aus wie eine Girlande
+         unter dem Blatt. */
+      const stuetzen=[{von:musikStart, nach:musikStart}];
+      for(let i=0;i<takte.length;i++)
+        stuetzen.push({von:enden[i], nach:musikStart + w*(i+1)});
+      let gleich=true;
+      for(const st of stuetzen) if(Math.abs(st.von-st.nach)>1) gleich=false;
+      if(gleich) return;
+      const F = x=>{
+        if(x<=stuetzen[0].von) return x;                       /* Vorspann bleibt */
+        for(let i=1;i<stuetzen.length;i++){
+          const a=stuetzen[i-1], b=stuetzen[i];
+          if(x<=b.von || i===stuetzen.length-1){
+            const spanne=b.von-a.von;
+            if(spanne<=0) return b.nach;
+            return Math.round((a.nach + (x-a.von)/spanne*(b.nach-a.nach))*100)/100;
+          }
+        }
+        return x;
+      };
+
+      /* Hilfslinien behalten ihre Laenge und wandern nur mit ihrer Mitte —
+         sonst waere eine Hilfslinie unter dem Notenkopf mal zu lang, mal zu
+         kurz. */
+      const fertig=new Set();
+      sys.querySelectorAll('g.ledgerLines path').forEach(p=>{
+        const d=p.getAttribute('d')||'';
+        const m=/M\s*(-?[\d.]+)\s+(-?[\d.]+)\s*L\s*(-?[\d.]+)\s+(-?[\d.]+)/.exec(d);
+        if(!m) return;
+        const x1=+m[1], x2=+m[3], laenge=x2-x1, mitte=F((x1+x2)/2);
+        p.setAttribute('d','M'+Math.round(mitte-laenge/2)+' '+m[2]
+                          +' L'+Math.round(mitte+laenge/2)+' '+m[4]);
+        fertig.add(p);
+      });
+      sys.querySelectorAll('*').forEach(el=>{ if(!fertig.has(el)) xAbbilden(el, F); });
+    });
+    try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
+  }
+
   /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
   let _tk=null, _laeuft=null;
   function bereit(){ return !!_tk; }
@@ -7827,19 +7961,30 @@ const LS = (function(){
     if(e.akkorde==='kurz') xml = akkordeKuerzen(xml);
     xml = umbrechen(xml, 4);
 
+    const kopf = !!(opt.titel || opt.komponist);
     const o = Object.assign({}, A4, {
       scale:100, unit:9, font:'Petaluma', breaks:'line',
       header:'none', footer:'none', harmDist:2.2, spacingStaff:12,
       staffLineWidth:e.linie, stemWidth:e.hals,
       barLineWidth:0.5, thickBarlineThickness:1.5, ledgerLineThickness:0.34,
-      transpose: opt.tonart || ''
+      transpose: opt.tonart || '',
+      /* Der Titel braucht Platz, und zwar NUR auf der ersten Seite. Verovio
+         kennt keinen Rand je Seite; deshalb bekommt das ganze Stück den
+         größeren oberen Rand, sobald ein Titel gesetzt wird. Bei einem
+         einseitigen Leadsheet — drei von vier — fällt das nicht ins Gewicht. */
+      pageMarginTop: A4.pageMarginTop + (kopf ? KOPF_HOEHE : 0)
     });
     tk.setOptions(o);
     const t0 = (window.performance||Date).now();
     tk.loadData(xml);
     const n = tk.getPageCount();
     const seiten=[];
-    for(let i=1;i<=n;i++) seiten.push(tk.renderToSVG(i));
+    for(let i=1;i<=n;i++){
+      let svg = tk.renderToSVG(i);
+      if(e.raster) svg = taktraster(svg);
+      if(kopf && i===1) svg = kopfEinsetzen(svg, opt.titel, opt.komponist);
+      seiten.push(svg);
+    }
     return { seiten, verhaeltnis:A4_VERH, ms:Math.round((window.performance||Date).now()-t0) };
   }
 
@@ -7847,7 +7992,7 @@ const LS = (function(){
            bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
            QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
            ausgabe, ausgabeSetzen, eigenstaendig, ausgabeKuerzel, notizSchluessel,
-           schriftBase64 };
+           schriftBase64, taktraster, kopfEinsetzen, KOPF_HOEHE };
 })();
 window.LS = LS;
 
@@ -9054,7 +9199,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20h · Notizen auf Leadsheets';
+const APP_BUILD='2026-08-20i · Titel und gleich breite Takte';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -12615,10 +12760,13 @@ setTimeout(ablageAnmelden, 0);
     const z_ls=zeile('Stärke der Notenhälse','Getrennt von den Linien — das macht den Unterschied');
     z_ls._ctl.append(regler(0.10, 0.50, 0.02, eLS.hals,
       v=>{ LS.setzen('hals',v); lsNeu(); }, v=>v.toFixed(2)));
+    const z_lr=zeile('Gleich breite Takte',
+      'Ein Takt ist ein Zeitmaß — gleiche Breite zeigt, wie dicht die Noten stehen');
+    z_lr._ctl.append(schalter(eLS.raster, an=>{ LS.setzen('raster', an?'1':'0'); lsNeu(); }));
     const z_la=zeile('Akkordschrift','Wie geliefert oder in der Schreibweise des Real Book');
     z_la._ctl.append(wahl([['lang','Cmin7'],['kurz','C-7']],
       eLS.akkorde, v=>{ LS.setzen('akkorde',v); lsNeu(); }));
-    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_la],
+    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_la],
       'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
       +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
   }
