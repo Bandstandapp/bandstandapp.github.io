@@ -4922,11 +4922,26 @@ async function fetchAsFile(t){
     const bl=await (await fetch(pages[0])).blob(); return new File([bl], safeName(t.t)+'.png',{type:'image/png'}); }
   /* Aus der neuen Ablage direkt die Bytes nehmen, ohne Umweg ueber eine URL. */
   if(t.bsId){ const bl=await BS.bytes(t.bsId); if(!bl) return null;
+    /* Ein Leadsheet ist kein PDF. Es unter falschem Namen weiterzugeben
+       hiesse, dem Empfaenger eine Datei zu schicken, die kein Programm
+       oeffnet. Die Endung kommt vom Dateinamen im Bestand. */
+    if(t.art==='leadsheet'){
+      const el=(BS_KATALOG.elemente||[]).find(x=>x.id===t.bsId)||{};
+      const nm=el.dateiname || (safeName(t.t)+'.musicxml');
+      const endung=(/\.([a-z0-9]+)$/i.exec(nm)||[,'xml'])[1].toLowerCase();
+      const typ = endung==='mxl' ? 'application/vnd.recordare.musicxml'
+                : endung==='abc' ? 'text/vnd.abc' : 'application/vnd.recordare.musicxml+xml';
+      return new File([bl], safeName(t.t)+'.'+endung, {type:typ});
+    }
     return new File([bl], safeName(t.t)+'.pdf',{type:'application/pdf'}); }
   const bl=await (await fetch(encodeURI(t.f))).blob(); return new File([bl], safeName(t.t)+'.pdf',{type:'application/pdf'});
 }
 async function shareTune(t){
   if(!t) return;
+  /* Ein Leadsheet laesst sich auf drei Arten weitergeben, und sie meinen
+     Verschiedenes. Deshalb wird gefragt, statt eine davon zu erraten.
+     So verlangt es das Konzept unter „Notizen, Einfrieren und Teilen". */
+  if(t.art==='leadsheet'){ return lsTeilenBlatt(t); }
   await urlSichern(t);
   /* Ein Blatt aus der eigenen Ablage hat keine teilbare Adresse — sein Verweis
      gilt nur in dieser Sitzung. Geteilt wird dann die Datei, nicht die URL. */
@@ -7095,6 +7110,195 @@ async function renderPdfFit(t){
     frame.src=encodeURI(t.f)+'#toolbar=0&navpanes=0&view=FitH';
   }
 }
+/* ---- Stufe 4: Weitergeben und iReal Pro (20. August) ---------------------
+   Ein Leadsheet laesst sich auf drei Arten weitergeben, und sie meinen
+   Verschiedenes. Die Quelle ist ein paar Kilobyte gross und laesst dem
+   Empfaenger seine eigene Tonart — das ist die Weitergabe unter Kollegen,
+   die BandStand haben. Das Blatt als Bild sieht bei allen gleich aus und
+   braucht kein Programm. Das Blatt mit den Notizen ist eine Probenvorlage. */
+
+/* Die Akkorde des GESETZTEN Blattes, Takt fuer Takt. Sie stehen dort schon
+   in der richtigen Tonart; aus der Quelle gelesen waeren sie die alte. */
+/* Die Vorzeichen IN einem Akkordnamen sind eigene Zeichen der Notenschrift
+   und keine Buchstaben. Sie stehen nicht dort, wo man sie vermutet: Verovio
+   nimmt für Akkordsymbole nicht die Zeichen der Noten (U+E260 ff.), sondern
+   die eigenen Kurzformen U+EA64 und U+EA66. Am 20. August aus dem fertigen
+   Blatt ausgelesen, nachdem die erste Vermutung stumm danebenlag — aus
+   „E♭maj7" wurde „Emaj7". */
+const SMUFL_B='\uea64', SMUFL_KREUZ='\uea66', SMUFL_AUFL='\uea65';
+function lsAkkorde(svgs){
+  const takte=[];
+  for(const svg of svgs){
+    let doc; try{ doc=new DOMParser().parseFromString(svg,'image/svg+xml'); }catch(e){ continue; }
+    doc.querySelectorAll('g.measure').forEach(m=>{
+      const namen=[];
+      m.querySelectorAll('g.harm').forEach(h=>{
+        const roh=(h.textContent||'').replace(/\s+/g,'');
+        const t=roh.split(SMUFL_B).join('b').split(SMUFL_KREUZ).join('#')
+                   .split(SMUFL_AUFL).join('').trim();
+        if(t) namen.push(t);
+      });
+      takte.push(namen);
+    });
+  }
+  return takte;
+}
+/* Von unserer Schreibweise in die von iReal Pro. Dort heisst die grosse
+   Septime `^`, die kleine Terz `-`, halbvermindert `h` und vermindert `o`. */
+function irealAkkord(a){
+  let s=String(a||'').trim();
+  if(!s) return '';
+  const m=/^([A-G][b#]?)(.*)$/.exec(s);
+  if(!m) return '';
+  let grund=m[1], rest=m[2];
+  let bass='';
+  const bm=/\/([A-G][b#]?)\s*$/.exec(rest);
+  if(bm){ bass='/'+bm[1]; rest=rest.slice(0, bm.index); }
+  rest=rest.replace(/[()]/g,'');
+  /* „add" ist in iReal Pro nicht nötig: D7(add#11) heißt dort D7#11. */
+  rest=rest.replace(/add/gi,'');
+  rest=rest.replace(/^min7b5$/i,'h7').replace(/^-7b5$/,'h7')
+           .replace(/^m7b5$/i,'h7').replace(/^ø7?$/,'h7')
+           .replace(/^dim7$/i,'o7').replace(/^°7$/,'o7')
+           .replace(/^dim$/i,'o').replace(/^°$/,'o')
+           .replace(/^maj/i,'^').replace(/^ma(?=\d|$)/i,'^').replace(/^△/,'^').replace(/^Δ/,'^')
+           .replace(/^min/i,'-').replace(/^mi(?=\d|$)/i,'-').replace(/^m(?=\d|$)/,'-')
+           .replace(/^aug$/i,'+')
+           .replace(/^\^$/,'');   /* ein blosses „maj" ist der Dreiklang */
+  return grund+rest+bass;
+}
+/* Die Taktart der Quelle — iReal Pro will sie vorweg. */
+function lsTaktart(quelle){
+  const m=/<beats>\s*(\d+)\s*<\/beats>\s*<beat-type>\s*(\d+)\s*<\/beat-type>/.exec(quelle||'');
+  if(m) return m[1]+m[2];
+  const a=/(^|\n)M:\s*(\d+)\s*\/\s*(\d+)/.exec(quelle||'');
+  if(a) return a[2]+a[3];
+  return '44';
+}
+async function irealAdresse(t){
+  const b = await lsBlaetter(t);
+  const takte = lsAkkorde(b.svgs);
+  if(!takte.length || !takte.some(x=>x.length)) return null;
+  let quelle=''; try{ quelle=await leadQuelle(t); }catch(e){}
+  const taktart = lsTaktart(quelle);
+  /* Ein Takt ohne eigenen Akkord uebernimmt den vorigen — iReal Pro schreibt
+     dafuer einen Schraegstrich. */
+  const stuecke = takte.map(namen=>
+    namen.length ? namen.map(irealAkkord).filter(Boolean).join(' ') : ' ');
+  const folge = 'T'+taktart+'*A' + stuecke.map(x=>x+' |').join('');
+  const teile = [ (t.t||'Stück'), (t.c||''), 'Medium Swing',
+                  (t._lsGelesen||'C'), 'n', folge ];
+  return 'irealbook://' + teile.map(x=>encodeURIComponent(String(x))).join('=');
+}
+
+/* Das Blatt als Bild — mit oder ohne die eigenen Notizen. */
+async function lsAlsBild(t, mitNotiz){
+  const b = await lsBlaetter(t);
+  const notiz = mitNotiz ? b.notiz : null;
+  const bilder=[];
+  for(let i=0;i<b.svgs.length;i++){
+    const im = await svgAlsBild(b.svgs[i]);
+    const bw = im.naturalWidth||LS_BREITE, bh = im.naturalHeight||LS_HOEHE;
+    const cv=document.createElement('canvas');
+    cv.width=bw; cv.height=bh;
+    const g=cv.getContext('2d');
+    g.fillStyle='#fff'; g.fillRect(0,0,bw,bh);
+    g.drawImage(im,0,0,bw,bh);
+    const seite = notiz && notiz.seiten && notiz.seiten[i];
+    if(seite && seite.strokes && seite.strokes.length) notizZeichnen(cv, seite);
+    const blob = await new Promise(r=>cv.toBlob(r,'image/png'));
+    bilder.push(new File([blob],
+      safeName(t.t) + (b.svgs.length>1 ? ' '+(i+1) : '')
+      + (t._lsGelesen ? ' ('+t._lsGelesen+')' : '') + '.png', {type:'image/png'}));
+  }
+  return bilder;
+}
+
+async function lsWeitergeben(dateien, titel){
+  if(!dateien || !dateien.length) return;
+  try{
+    if(navigator.canShare && navigator.canShare({files:dateien})){
+      await navigator.share({files:dateien, title:titel}); return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  /* Ohne Teilen-Blatt bleibt der Weg über einen Verweis, den man selbst
+     sichert. Auf dem Mac im Browser ist das der Normalfall. */
+  const d=dateien[0];
+  const url=URL.createObjectURL(d);
+  const a=document.createElement('a'); a.href=url; a.download=d.name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+
+function lsTeilenBlatt(t){
+  openSheet(card=>{
+    card.innerHTML='<h2>Weitergeben</h2><div class="muted" style="margin:-6px 0 14px">'
+      +'Drei Wege, und sie meinen Verschiedenes.</div>';
+    const zeilen=[];
+    const mach=(titel, unter, knopfText, tu)=>{
+      const z=document.createElement('div'); z.className='srow';
+      z.innerHTML='<div style="flex:1;min-width:0"><div style="font-weight:600">'+esc(titel)+'</div>'
+        +'<div class="sb">'+unter+'</div></div>';
+      const b=document.createElement('button'); b.className='btn ghost'; b.textContent=knopfText;
+      b.onclick=async()=>{ closeSheet();
+        try{ await beiArbeit('Wird vorbereitet…','', tu); }
+        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); } };
+      z.append(b); zeilen.push(z);
+    };
+
+    mach('Die Noten selbst',
+      'Ein paar Kilobyte. Wer sie bekommt, wählt seine eigene Tonart und seine eigene Stimme.',
+      'Datei', async()=>{
+        const f=await fetchAsFile(t);
+        if(!f) throw new Error('Zu diesem Leadsheet ist keine Datei hinterlegt.');
+        await lsWeitergeben([f], t.t);
+      });
+
+    mach('Dieses Blatt als Bild',
+      'So, wie es gerade vor Dir liegt — in dieser Tonart und dieser Notation. '
+      +'Braucht kein Programm und sieht bei allen gleich aus.',
+      'Bild', async()=>{ await lsWeitergeben(await lsAlsBild(t, false), t.t); });
+
+    BS.notizLesen(LS.notizSchluessel(t.bsId, LS.ausgabe(t.bsId))).then(n=>{
+      if(!n || !n.seiten || !n.seiten.some(x=>x&&x.strokes&&x.strokes.length)) return;
+      const z=document.createElement('div'); z.className='srow';
+      z.innerHTML='<div style="flex:1;min-width:0"><div style="font-weight:600">Blatt mit Deinen Notizen</div>'
+        +'<div class="sb">Dasselbe Bild, mit dem, was Du daraufgeschrieben hast — eine Probenvorlage.</div></div>';
+      const b=document.createElement('button'); b.className='btn ghost'; b.textContent='Bild mit Notiz';
+      b.onclick=async()=>{ closeSheet();
+        try{ await beiArbeit('Wird vorbereitet…','', async()=>{
+          await lsWeitergeben(await lsAlsBild(t, true), t.t); }); }
+        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); } };
+      z.append(b);
+      const karte2=card.querySelector('.scard'); if(karte2) karte2.append(z);
+    }).catch(()=>{});
+
+    const c=document.createElement('div'); c.className='scard';
+    zeilen.forEach(z=>c.append(z)); card.append(c);
+
+    /* iReal Pro — die Changes, nicht das Blatt. Aus den Akkordsymbolen des
+       gesetzten Blattes, also in der Tonart, die gerade eingestellt ist. */
+    const ir=document.createElement('div'); ir.className='scard'; ir.style.marginTop='12px';
+    const zr=document.createElement('div'); zr.className='srow';
+    zr.innerHTML='<div style="flex:1;min-width:0"><div style="font-weight:600">Changes an iReal Pro</div>'
+      +'<div class="sb">Nur die Akkorde, in der eingestellten Tonart — dort spielt die Begleitband dazu.</div></div>';
+    const bi=document.createElement('button'); bi.className='btn ghost'; bi.textContent='Öffnen';
+    bi.onclick=async()=>{
+      try{
+        const adr=await irealAdresse(t);
+        if(!adr){ alert('Auf diesem Blatt stehen keine Akkordsymbole.'); return; }
+        closeSheet(); location.href=adr;
+      }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+    };
+    zr.append(bi); ir.append(zr); card.append(ir);
+
+    const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
+    row.innerHTML='<button class="btn ghost" id="tAb" style="flex:1">Schließen</button>';
+    card.append(row);
+    row.querySelector('#tAb').onclick=closeSheet;
+  });
+}
+
 /* ---- Ein Leadsheet auf die Buehne -----------------------------------------
    Derselbe Platz, dieselbe Einpassung wie ein Blatt — nur entsteht die Seite
    hier beim Zeigen und liegt nicht fertig vor. Das kostet auf dem Mac rund
@@ -9199,7 +9403,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20i · Titel und gleich breite Takte';
+const APP_BUILD='2026-08-20j · Weitergeben und iReal Pro';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
