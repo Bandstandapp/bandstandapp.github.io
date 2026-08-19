@@ -5607,24 +5607,16 @@ async function importStapel(bid, saetze, fortschritt){
     return 0;
   }
 
-  /* Kommt der Satz aus einem Archiv, liegen seine Bytes noch darin. Jetzt ist
-     der Zeitpunkt, sie zu holen — einzeln, damit nie mehr als eine Datei
-     zusaetzlich im Speicher steht. Was sich nicht auspacken laesst, faellt
-     einzeln aus und haelt den Stapel nicht auf. */
+  /* Die Bytes bleiben, wo sie sind. Ausgepackt wird erst ganz unten, in
+     `stueckeSchreiben`, unmittelbar bevor ein Block in die Datenbank geht.
+
+     Der 20. August hat gezeigt, warum das hier NICHT passieren darf: Ein
+     erster Versuch holte an dieser Stelle alle Dateien auf einmal — und
+     verschob den Speicherberg damit nur vom Lesen zum Schreiben. Auf Jens'
+     iPad hat Safari die Seite daraufhin abgeraeumt: weisser Bildschirm,
+     App neu geladen, Buch angelegt und leer. */
+  const bereit=gueltig;
   const fehlerBeimHolen=[];
-  for(const s of gueltig){
-    if(s.file && typeof s.file.hole==='function'){
-      try{ s.file=await s.file.hole(); }
-      catch(e){ fehlerBeimHolen.push({name:s.file.name||'ohne Namen',
-                                      grund:'liess sich nicht auspacken'}); s.file=null; }
-    }
-  }
-  const bereit=gueltig.filter(s=>s.file);
-  if(!bereit.length){
-    window._letzterImport={stuecke:0, angedockt:0, glatt:0, elemente:0,
-      abgewiesen:abgewiesen.concat(fehlerBeimHolen), gelesen:alle.length, fehler:[]};
-    return 0;
-  }
 
   /* Buendeln. Die Vorschau liefert je Satz seinen Titel; gleiche Titel in
      derselben Reihenfolge gehoeren zum selben Stueck. Ein zweites Stueck mit
@@ -7626,8 +7618,25 @@ const BS = (function(){
      Gemessen: 0,10 ms je Blatt gegenueber 1,65 ms auf dem alten Weg, weil die
      alte Fassung je Blatt eine eigene Verbindung und Transaktion aufbaute.   */
   const BLOCK_ELEMENTE=500;   /* am echten Bestand vermessen */
+  /* Und eine zweite Schranke, in Bytes. Fuenfhundert gescannte Blaetter sind
+     ein Block von rund 25 MB — auf dem Mac unauffaellig, auf dem iPad der
+     Grund, aus dem Safari am 20. August die Seite abgeraeumt hat. Was in eine
+     Transaktion geht, bleibt jetzt unter vier Megabyte, und zwischen zwei
+     Bloecken hat der Browser Luft zum Aufraeumen. */
+  const BLOCK_BYTES=2*1024*1024;
+  /* Ein Zaehler statt eines Schalters: Mehrere Buecher in einem Durchgang
+     laufen nacheinander durch diese Funktion, und der erste, der fertig ist,
+     darf den Reload nicht freigeben, solange der naechste noch schreibt. */
+  let _schreibt=0;
+  function schreibtGerade(){ return _schreibt>0; }
+
   async function stueckeSchreiben(buchId, gruppen, fortschritt){
     if(!buchId) throw new Error('Ohne Buch kann nichts geschrieben werden.');
+    _schreibt++;
+    try{ return await stueckeSchreibenTun(buchId, gruppen, fortschritt); }
+    finally{ _schreibt--; }
+  }
+  async function stueckeSchreibenTun(buchId, gruppen, fortschritt){
     /* Fuer das Andocken: die hoechste bisherige Reihung je Stueck, damit die
        neuen Blaetter hinten anschliessen und nicht auf Platz 0 landen. */
     const andock=(gruppen||[]).some(g=>g && g.titelId);
@@ -7659,10 +7668,10 @@ const BS = (function(){
        Ohne das Buendeln waere ein Real Book der langsame Fall, weil dort ein
        Stueck ein einzelnes Blatt ist: 6.231 Stuecke sind 6.231 Transaktionen.
        Gemessen kostet das 1,65 ms je Blatt statt 0,10 ms.                    */
-    let stapel=[], stapelEl=0, letzterTitel='';
+    let stapel=[], stapelEl=0, stapelBytes=0, letzterTitel='';
     async function stapelSchreiben(){
       if(!stapel.length) return;
-      const jetztStapel=stapel; stapel=[]; stapelEl=0;
+      const jetztStapel=stapel; stapel=[]; stapelEl=0; stapelBytes=0;
       await tx([S_TITEL,S_EL,S_BYTE],'readwrite',(t,el,by)=>{
         /* Beim Andocken wird der Titel NICHT geschrieben: Er steht schon da,
            und ein `put` wuerde seinen Komponisten und seinen Zeitstempel mit
@@ -7671,8 +7680,10 @@ const BS = (function(){
           s.eRecs.forEach(r=>el.put(r)); s.bRecs.forEach(r=>by.put(r)); });
       });
       jetztStapel.forEach(s=>{
+        /* Ein Stueck, das ueber mehrere Bloecke ging, zaehlt trotzdem als
+           EINES. Die Fortsetzungen tragen `nurTeil` und werden uebergangen. */
         if(s.tRec){ bericht.stuecke++; bericht.neueTitel.push(s.tRec.id); }
-        else bericht.angedockt++;
+        else if(!s.nurTeil) bericht.angedockt++;
         /* Auch die Elemente eines NEUEN Titels werden einzeln vermerkt. Beim
            Rückgängigmachen genügt zwar der Titel, weil er seine Blätter
            mitnimmt — aber die Zahl daneben soll stimmen, und angedockte
@@ -7691,22 +7702,51 @@ const BS = (function(){
             angelegt:jetzt(), geaendert:jetzt() };
       const tid = anhaengen ? g.titelId : tRec.id;
       const eRecs=[], bRecs=[];
+      /* Wird ein Stueck auf mehrere Bloecke verteilt, darf sein Titel nur
+         EINMAL mitgehen — sonst zaehlt der Bericht ihn mehrfach. */
+      let titelSchonDabei=false;
       let reihung = anhaengen ? (maxReihung[tid]||0) : 0;
       for(const e of (g.elemente||[])){
         if(!artOk(e.art)){ bericht.uebergangen.push({grund:'unbekannte Art', art:e.art, name:e.dateiname||''}); continue; }
+        /* Liegt die Datei noch in einem Archiv, wird sie JETZT ausgepackt —
+           kurz vor ihrem Block und nicht vorher. Was sich nicht auspacken
+           laesst, faellt einzeln aus und haelt den Stapel nicht auf. */
+        let blob=e.blob;
+        if(blob && typeof blob.hole==='function'){
+          try{ blob=await blob.hole(); }
+          catch(err){ bericht.uebergangen.push({grund:'liess sich nicht auspacken',
+                        art:e.art, name:e.dateiname||''}); continue; }
+        }
         const id=kennung('el');
-        const groesse=(e.blob&&e.blob.size)||0;
+        const groesse=(blob&&blob.size)||0;
         eRecs.push({ id, titelId:tid, art:e.art,
                      etikett:(e.etikett||'').trim(), instrument:e.instrument||'',
                      reihung:reihung++, np:e.np||1,
                      dateiname:e.dateiname||'', groesse, ziel:e.ziel||'',
                      angelegt:jetzt(), geaendert:jetzt() });
-        if(ARTEN[e.art].bytes && e.blob) bRecs.push({id, blob:e.blob});
+        if(ARTEN[e.art].bytes && blob){ bRecs.push({id, blob}); stapelBytes+=groesse; }
+        /* Ein einzelnes Stueck kann selbst schon schwer sein — ein Real Book
+           mit vierhundert Blaettern an EINEM Titel etwa. Deshalb wird auch
+           mitten im Stueck abgeriegelt, sobald der Block voll ist. */
+        if(stapelBytes>=BLOCK_BYTES && eRecs.length){
+          const kopf = titelSchonDabei ? null : tRec;
+          titelSchonDabei = true;
+          const teil = {tRec:kopf, nurTeil:titelSchonDabei && !kopf,
+                        eRecs:eRecs.splice(0), bRecs:bRecs.splice(0)};
+          stapelEl += teil.eRecs.length;
+          stapel.push(teil);
+          letzterTitel = anhaengen ? ((g.titel&&g.titel.titel)||'Stück') : tRec.titel;
+          await stapelSchreiben();
+        }
       }
+      /* Ist der Rest leer, ist das Stueck schon vollstaendig geschrieben —
+         beim Andocken ebenso wie bei einem neuen Titel. */
       if(!eRecs.length){ continue; }
-      stapel.push({tRec, eRecs, bRecs}); stapelEl+=eRecs.length;
+      stapel.push({tRec: titelSchonDabei ? null : tRec, nurTeil:titelSchonDabei,
+                   eRecs, bRecs});
+      stapelEl+=eRecs.length;
       letzterTitel = anhaengen ? ((g.titel&&g.titel.titel)||'Stück') : tRec.titel;
-      if(stapelEl>=BLOCK_ELEMENTE) await stapelSchreiben();
+      if(stapelEl>=BLOCK_ELEMENTE || stapelBytes>=BLOCK_BYTES) await stapelSchreiben();
     }
     await stapelSchreiben();
     /* Nach dem Schreiben nachzaehlen. Nicht als Zierde: Wenn hier eine andere
@@ -8216,7 +8256,8 @@ const BS = (function(){
 
   return { DB, VER, ARTEN, oeffnen, schliessen, geraet, kennung,
            seitenzahlAusBytes, seitenzahl,
-           katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben, aendern,
+           katalog, zahlen, buchAnlegen, titelAnlegen, elementAnlegen, stueckeSchreiben,
+           schreibtGerade, aendern,
            verschieben, kopieren, titelZusammenfuehren,
            bytes, urlLeihen, urlZurueck, urlVergessen, leiheLeeren,
            notizLesen, notizSchreiben, notizLoeschen, notizKennungen,
@@ -8543,7 +8584,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20 · Archiv-Import ohne Speicherberg';
+const APP_BUILD='2026-08-20b · Import in kleinen Schritten';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -8589,9 +8630,29 @@ function infoToggle(){
 
 /* register service worker (offline / installable) + Auto-Update:
    sobald eine neue Version aktiv wird, die Seite einmal automatisch neu laden. */
+/* ---- Der Auto-Reload und das Schreiben (20. August) ----------------------
+   Wird eine neue Fassung aktiv, laedt die Seite sich EINMAL neu. Das ist der
+   Weg, auf dem eine Aenderung ueberhaupt auf das installierte iPad kommt.
+
+   Er darf aber nicht mitten in einen Schreibvorgang fallen. Ein Import von
+   dreihundert Blaettern laeuft eine Weile; ein `location.reload()` dazwischen
+   sieht genau so aus, wie Jens es am 20. August beschrieben hat — die
+   Fortschrittsanzeige laeuft, der Bildschirm wird ein bis zwei Sekunden
+   weiss, die App ist wieder da, und das Buch ist angelegt und leer.
+
+   `BS.schreibtGerade()` sagt, ob gerade geschrieben wird. Ist es so, wartet
+   der Reload, bis der Vorgang durch ist. Fallen lassen wird er nie — sonst
+   bliebe das Geraet auf dem alten Stand stehen. */
 if('serviceWorker' in navigator){
   let _swReloaded=false;
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(_swReloaded)return; _swReloaded=true; location.reload(); });
+  const jetztLaden=()=>{
+    if(_swReloaded) return;
+    if(window.BS && BS.schreibtGerade && BS.schreibtGerade()){
+      setTimeout(jetztLaden, 1000); return;
+    }
+    _swReloaded=true; location.reload();
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', jetztLaden);
   window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').then(r=>{ try{ r.update(); }catch(e){} }).catch(()=>{}); });
 }
 
