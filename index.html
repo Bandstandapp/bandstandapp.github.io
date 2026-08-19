@@ -431,6 +431,9 @@
   .fitwrap .pg.ls g.staff>path{stroke:var(--ls-linie,#333)}
   .lslade{color:var(--sub);font-size:14px;text-align:center;padding:24px;line-height:1.5}
   .sreg{flex:1;min-width:120px;max-width:210px;accent-color:var(--accent-bright)}
+  /* Die Wahlknöpfe im Tonart-Blatt. Ohne diese Regel sagt `aria-pressed` nur
+     der Vorlesesoftware, was gewählt ist, und dem Auge nichts. */
+  .wahlk[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--white)}
   .fitwrap img.pg{display:block}
 
   /* annotation editor */
@@ -1621,6 +1624,7 @@
     <div id="seqnav" style="display:none;gap:6px"></div>
     <button class="btn ghost" id="vFitBtn" title="Vollbild – ganze Seite, ohne Menüs"><i class="i ic-maximize"></i> Vollbild</button>
     <button class="btn ghost" id="vEditBtn" title="Handschriftliche Notiz"><i class="i ic-pencil"></i> Notiz</button>
+    <button class="btn ghost" id="vKeyBtn" title="Tonart und Notation" style="display:none"><i class="i ic-music"></i> <span id="vKeyTxt">Tonart</span></button>
     <button class="btn ghost" id="vMetaBtn" title="Titel &amp; Komponist korrigieren" style="display:none"><i class="i ic-pencil"></i> Titel</button>
     <button class="btn ghost" id="vShare" title="Weitergeben — die Datei über das Teilen-Blatt des Geräts"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Weitergeben</button>
     <button class="btn ghost" id="vPrint" title="Drucken"><i class="i ic-printer"></i> Drucken</button>
@@ -4617,6 +4621,7 @@ function openViewer(t, keepNav){
   document.getElementById('vFitBtn').classList.remove('on');
   document.getElementById('vFitBtn').style.display='flex';
   document.getElementById('vEditBtn').style.display = t.isEdit ? 'none':'flex';
+  { const kb=document.getElementById('vKeyBtn'); if(kb) kb.style.display='none'; }
   const vMeta=document.getElementById('vMetaBtn');
   vMeta.style.display = 'flex';                                     // Titel/Komponist – Großsammlung, importierte Stücke UND Notizen
   vMeta.onclick=()=>openMetaSheet(t);
@@ -4633,6 +4638,7 @@ function openViewer(t, keepNav){
        Paar aus Quelle und Tonart, und dieser Zusammenhang ist noch nicht
        gebaut. Bis dahin waere der Knopf ein Versprechen ohne Deckung. */
     document.getElementById('vEditBtn').style.display='none';
+    lsKnopfBeschriften(t);
     fitOn=true; renderLeadFit(t);
   } else if(t.isEdit){
     frame.style.display='none'; frame.src='about:blank';
@@ -7099,7 +7105,15 @@ async function renderLeadFit(t){
     const quelle = await leadQuelle(t);
     LS.filterEinbauen();
     const e = LS.E();
-    const r = await LS.setze(quelle, { tonart:t.lsTonart||'', stimme:t.lsStimme||'', sagen });
+    /* Die gewaehlte Ausgabe: Tonart, Notation, Stimme. Steht nichts da, wird
+       das Stueck gezeigt, wie es geliefert wurde. */
+    const a = LS.ausgabe(t.bsId);
+    const org = LS.tonartLesen(quelle);
+    const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
+    const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
+    /* Fuer den Knopf und die Zeile unter dem Titel merken. */
+    t._lsOrg = org; t._lsZiel = ziel; t._lsGelesen = um.gelesen;
+    const r = await LS.setze(quelle, { tonart:um.transpose, stimme:a.stimme||'', sagen });
     const n = r.seiten.length;
     if(!n) throw new Error('Aus dieser Datei ist kein Blatt geworden.');
 
@@ -7134,12 +7148,128 @@ async function renderLeadFit(t){
     });
     fit.replaceChildren(halter);
     passeBlattEin();
+    lsKnopfBeschriften(t);
   }catch(err){
     fit.innerHTML='<div class="lslade">Dieses Leadsheet lässt sich nicht setzen.<br>'
       + esc((err&&err.message)||String(err)) + '</div>';
   }
 }
 const LS_BREITE=2100, LS_HOEHE=2970;
+
+/* Auf dem Knopf steht, was man gerade liest — nicht das Wort „Tonart".
+   Wer eine Stimme in B♭ vor sich hat, will das sehen, ohne zu tippen. */
+function lsKnopfBeschriften(t){
+  const b=document.getElementById('vKeyBtn'), x=document.getElementById('vKeyTxt');
+  if(!b||!x) return;
+  if(!t || t.art!=='leadsheet'){ b.style.display='none'; return; }
+  b.style.display='flex';
+  const a=LS.ausgabe(t.bsId);
+  const n=(LS.NOTATION.find(y=>y.wert===(a.notation||'C'))||LS.NOTATION[0]);
+  const ton=t._lsGelesen ? t._lsGelesen.replace('b','♭').replace('#','♯') : '—';
+  x.textContent = ton + (t._lsOrg&&t._lsOrg.moll?'m':'') + (n.wert==='C'?'':' · '+n.kurz);
+  b.onclick=()=>openTonartSheet(t);
+}
+
+/* Tonart, Notation, Stimme — die drei Achsen einer Ausgabe. */
+async function openTonartSheet(t){
+  if(!t || t.art!=='leadsheet') return;
+  /* Erst die Quelle lesen, dann das Blatt oeffnen. Sonst waechst es dem
+     Nutzer unter den Fingern, und die Tastaturbedienung geht an den spaeter
+     angehaengten Knoepfen vorbei. */
+  let quelle=null, stimmen=[];
+  try{ quelle=await leadQuelle(t); stimmen=LS.stimmen(quelle); }
+  catch(e){ alert('Die Datei zu diesem Leadsheet lässt sich nicht lesen.'); return; }
+  const orgGelesen=LS.tonartLesen(quelle);
+  openSheet(card=>{
+    card.innerHTML='<h2>Tonart &amp; Notation</h2>'
+      +'<div class="muted" style="margin:-6px 0 14px">Das Blatt wird neu gesetzt. '
+      +'Die Datei bleibt unberührt, und die Wahl gilt nur für dieses Stück.</div>';
+    const org=orgGelesen;
+    const jetzt=LS.ausgabe(t.bsId);
+    const zielJetzt=(jetzt.tonart===undefined||jetzt.tonart==='')?org.q:+jetzt.tonart;
+    const notJetzt=jetzt.notation||'C';
+
+    const bau=(titel, hinweis)=>{ const h=document.createElement('div');
+      h.className='lbl'; h.style.cssText='margin:14px 0 6px'; h.textContent=titel;
+      card.append(h);
+      if(hinweis){ const p=document.createElement('div'); p.className='muted';
+        p.style.cssText='margin:-2px 0 8px'; p.textContent=hinweis; card.append(p); }
+      const r=document.createElement('div'); r.className='row';
+      r.style.cssText='flex-wrap:wrap;gap:6px'; card.append(r); return r; };
+
+    const zeigen=()=>{
+      const um=LS.rechne(org.q, zielJetzt2, notJetzt2, org.moll);
+      erg.innerHTML='Gelesen wird <b>'+esc(um.gelesen.replace('b','♭').replace('#','♯'))
+        +(org.moll?'-Moll':'-Dur')+'</b>'
+        +(um.transpose?' · gesetzt um '+esc(um.transpose):' · wie geliefert');
+    };
+    let zielJetzt2=zielJetzt, notJetzt2=notJetzt;
+
+    /* Klingende Tonart: die zwölf, in Quintenordnung — so denkt eine Band. */
+    const rT=bau('Klingende Tonart', 'Was die Band spielt, nicht was Du liest.');
+    const tKnoepfe=[];
+    ['Db','Ab','Eb','Bb','F','C','G','D','A','E','B','F#'].forEach(nm=>{
+      const q=LS.quintenVon(nm);
+      const b=document.createElement('button'); b.className='btn ghost sm wahlk';
+      b.textContent=nm.replace('b','♭').replace('#','♯');
+      b.onclick=()=>{ zielJetzt2=q; markiere(); zeigen(); };
+      rT.append(b); tKnoepfe.push({b,q});
+    });
+    const zurueck=document.createElement('button'); zurueck.className='btn ghost sm wahlk';
+    zurueck.textContent='wie geliefert';
+    zurueck.onclick=()=>{ zielJetzt2=org.q; markiere(); zeigen(); };
+    rT.append(zurueck); tKnoepfe.push({b:zurueck, q:null});
+    const markiere=()=>tKnoepfe.forEach(x=>x.b.setAttribute('aria-pressed',
+      x.q===null ? (zielJetzt2===org.q) : (x.q===zielJetzt2 && zielJetzt2!==org.q)));
+    markiere();
+
+    /* Notation: was auf DEINEM Pult steht. */
+    const rN=bau('Notation', 'Dein Instrument. Die klingende Tonart bleibt dieselbe.');
+    const nKnoepfe=[];
+    LS.NOTATION.forEach(n=>{
+      const b=document.createElement('button'); b.className='btn ghost sm wahlk';
+      b.textContent=n.kurz; b.title=n.name;
+      b.onclick=()=>{ notJetzt2=n.wert; nKnoepfe.forEach(x=>x.b.setAttribute('aria-pressed', x.w===n.wert)); zeigen(); };
+      rN.append(b); nKnoepfe.push({b,w:n.wert});
+    });
+    nKnoepfe.forEach(x=>x.b.setAttribute('aria-pressed', x.w===notJetzt2));
+
+    /* Stimme — nur, wenn die Quelle mehrere hat. */
+    let stimmeJetzt=jetzt.stimme||'';
+    if(stimmen.length>1){
+      const rS=bau('Stimme', 'Der Satz hat mehrere. Die Akkorde gehen mit, gleich aus welcher sie stammen.');
+      const sK=[];
+      const alle=document.createElement('button'); alle.className='btn ghost sm wahlk';
+      alle.textContent='ganzer Satz';
+      alle.onclick=()=>{ stimmeJetzt=''; sK.forEach(x=>x.b.setAttribute('aria-pressed', x.w==='')); };
+      rS.append(alle); sK.push({b:alle,w:''});
+      stimmen.forEach(st=>{
+        const b=document.createElement('button'); b.className='btn ghost sm wahlk'; b.textContent=st.name;
+        b.onclick=()=>{ stimmeJetzt=st.id; sK.forEach(x=>x.b.setAttribute('aria-pressed', x.w===st.id)); };
+        rS.append(b); sK.push({b,w:st.id});
+      });
+      sK.forEach(x=>x.b.setAttribute('aria-pressed', x.w===stimmeJetzt));
+    }
+
+    const erg=document.createElement('div'); erg.className='muted';
+    erg.style.cssText='margin:16px 0 0;padding:10px 12px;background:var(--card2,rgba(255,255,255,.04));border-radius:8px';
+    card.append(erg); zeigen();
+
+    const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
+    row.innerHTML='<button class="btn" id="kOk" style="flex:2">Setzen</button>'
+      +'<button class="btn ghost" id="kWeg" style="flex:1">Zurücksetzen</button>'
+      +'<button class="btn ghost" id="kAb" style="flex:1">Abbrechen</button>';
+    card.append(row);
+    row.querySelector('#kOk').onclick=()=>{
+      LS.ausgabeSetzen(t.bsId, {tonart:String(zielJetzt2), notation:notJetzt2, stimme:stimmeJetzt});
+      closeSheet(); blattNeuZeichnen(true);
+    };
+    row.querySelector('#kWeg').onclick=()=>{
+      LS.ausgabeSetzen(t.bsId, null); closeSheet(); blattNeuZeichnen(true);
+    };
+    row.querySelector('#kAb').onclick=closeSheet;
+  });
+}
 function resetFrameStyle(){
   const frame=document.getElementById('vFrame'), holder=frame.parentElement;
   frame.style.width=''; frame.style.height=''; frame.style.margin='';
@@ -7337,8 +7467,14 @@ const LS = (function(){
     const re=/<score-part id="([^"]+)"[^>]*>([\s\S]*?)<\/score-part>/g;
     let m; while((m=re.exec(xml))){
       const n=/<part-name[^>]*>([\s\S]*?)<\/part-name>/.exec(m[2]);
-      out.push({ id:m[1], name:(n?n[1]:'').replace(/<[^>]*>/g,'').trim() || m[1] });
+      out.push({ id:m[1], name:(n?n[1]:'').replace(/<[^>]*>/g,'').trim() });
     }
+    /* Viele Dateien tragen keinen brauchbaren Stimmen-Namen — aus Finale
+       kommt dreimal „MusicXML Part". Ein Name, der bei allen gleich ist,
+       hilft niemandem beim Waehlen; dann wird durchgezaehlt. */
+    const brauchbar = n => n && !/^musicxml\s*part$/i.test(n) && !/^part\b/i.test(n);
+    const eindeutig = new Set(out.map(x=>x.name)).size === out.length;
+    out.forEach((x,i)=>{ if(!brauchbar(x.name) || !eindeutig) x.name='Stimme '+(i+1); });
     return out;
   }
   function teileTakte(rumpf){ return [...rumpf.matchAll(/<measure\b[^>]*>[\s\S]*?<\/measure>/g)].map(x=>x[0]); }
@@ -7370,6 +7506,98 @@ const LS = (function(){
       .replace(/<part id="([^"]+)">[\s\S]*?<\/part>/g, (m,p)=>
         p===partId ? '<part id="'+p+'">'+rumpf+'</part>' : '')
       .replace(/<score-part id="([^"]+)">[\s\S]*?<\/score-part>/g, (m,p)=>p===partId?m:'');
+  }
+
+  /* ---- Tonart und Notation (Stufe 2, 20. August) --------------------------
+     Gerechnet wird in QUINTEN, nicht in Halbtoenen: Nur so kommt beim
+     Transponieren die richtige Schreibweise heraus. Ges-Dur und Fis-Dur
+     klingen gleich und sehen verschieden aus, und auf dem Pult zaehlt, was
+     man liest.
+
+     Die Rechnung ist gegen den Setzer geprueft: drei Quellen, dreizehn
+     Tonarten, fuenf Notationen — 195 Faelle, 195 Treffer. */
+  const QUINTEN=['Cb','Gb','Db','Ab','Eb','Bb','F','C','G','D','A','E','B','F#','C#']; /* -7 … +7 */
+  const quintenVon = n => QUINTEN.indexOf(n)-7;
+  function nameVonQuinten(q){ while(q>7)q-=12; while(q<-7)q+=12; return QUINTEN[q+7]; }
+  const klang = q => ((q*7)%12+12)%12;
+
+  const DUR=[0,2,4,5,7,9,11];      /* Halbtoene der Stufen 1 bis 7 */
+  const REIN=new Set([0,3,4]);     /* Prim, Quart, Quint sind rein, nicht gross */
+  function intervall(quinten, halbtoene){
+    const ab=halbtoene<0, H=Math.abs(halbtoene), Q=ab?-quinten:quinten;
+    const stufen=(((Q*4)%7)+7)%7;
+    const okt=Math.max(0, Math.round((H-DUR[stufen])/12));
+    const natur=DUR[stufen]+12*okt, abw=H-natur, zahl=stufen+7*okt+1;
+    const art = REIN.has(stufen)
+      ? (abw===0?'P' : abw>0?'A'.repeat(abw) : 'd'.repeat(-abw))
+      : (abw===0?'M' : abw===-1?'m' : abw>0?'A'.repeat(abw) : 'd'.repeat(-abw-1));
+    return (ab?'-':'+')+art+zahl;
+  }
+
+  /* Was ein Spieler liest, gemessen am Klang. Die Oktavlage ist Konvention
+     und keine Rechnung: Ein Alt liest eine grosse Sexte darueber, ein Tenor
+     eine grosse None. So bleibt der Ton im Griffbereich. */
+  const NOTATION=[
+    {wert:'C',   kurz:'C',       name:'C — Klavier, Gitarre, Flöte, Posaune', q:0, h:0},
+    {wert:'Bb',  kurz:'B♭',      name:'B♭ — Trompete, Klarinette, Sopran',    q:2, h:2},
+    {wert:'Eb',  kurz:'E♭',      name:'E♭ — Alt, Bariton',                    q:3, h:9},
+    {wert:'Bb9', kurz:'B♭ tief', name:'B♭ tief — Tenor, Bassklarinette',      q:2, h:14},
+    {wert:'F',   kurz:'F',       name:'F — Horn',                             q:1, h:7},
+  ];
+
+  /* Die Tonart der Quelle. MusicXML sagt sie als Vorzeichenzahl, ABC als
+     Buchstabe. Zurueck kommt der GRUNDTON in Quinten, dazu das Geschlecht —
+     ein Stueck in c-Moll traegt drei Be und heisst trotzdem c. */
+  function tonartLesen(quelle){
+    const x=String(quelle||'');
+    let m=/<fifths>\s*(-?\d+)\s*<\/fifths>/.exec(x);
+    if(m){
+      const sig=+m[1];
+      const moll=/<mode>\s*minor\s*<\/mode>/i.test(x);
+      return { q: sig + (moll?3:0), moll, sig };
+    }
+    m=/(^|\n)K:\s*([A-G])([b#]?)\s*(m|min|maj|dor|mix)?/i.exec(x);
+    if(m){
+      const grund=quintenVon(m[2].toUpperCase()+(m[3]||'').replace('#','#'));
+      const moll=/^m(in)?$/i.test(m[4]||'');
+      return { q: isNaN(grund)?0:grund, moll, sig:(isNaN(grund)?0:grund)-(moll?3:0) };
+    }
+    return { q:0, moll:false, sig:0 };
+  }
+
+  /* Was am Ende auf dem Blatt steht. Mehr als sieben Vorzeichen setzt
+     niemand, deshalb wird jenseits davon enharmonisch gedreht. */
+  function gelesene(zielQ, notationWert, moll){
+    const n=NOTATION.find(x=>x.wert===notationWert)||NOTATION[0];
+    let w=zielQ+n.q;
+    let sig=w-(moll?3:0);
+    if(sig>7){ w-=12; } else if(sig<-7){ w+=12; }
+    return w;
+  }
+
+  function rechne(originalQ, zielQ, notationWert, moll){
+    const n=NOTATION.find(x=>x.wert===notationWert)||NOTATION[0];
+    const w=gelesene(zielQ, notationWert, moll);
+    const dq=w-originalQ;
+    let s=(klang(zielQ)-klang(originalQ)+12)%12; if(s>6) s-=12;
+    const h=s+n.h;
+    return { transpose:(dq===0&&h===0)?'':intervall(dq,h),
+             gelesen:nameVonQuinten(w), gelesenQ:w };
+  }
+
+  /* ---- Was der Nutzer gewaehlt hat --------------------------------------
+     Die Ausgabe ist eine BESCHREIBUNG und keine Datei: Tonart, Notation,
+     Stimme. Sie haengt an der Element-Kennung und wiegt nichts. */
+  function ausgabeAlle(){
+    try{ return JSON.parse(localStorage.getItem('bs_ls_ausgabe')||'{}')||{}; }catch(e){ return {}; }
+  }
+  function ausgabe(id){ return (ausgabeAlle()[id])||{}; }
+  function ausgabeSetzen(id, wert){
+    const a=ausgabeAlle();
+    if(wert && (wert.tonart!==undefined || wert.notation || wert.stimme!==undefined))
+      a[id]=Object.assign({}, a[id], wert);
+    else delete a[id];
+    try{ localStorage.setItem('bs_ls_ausgabe', JSON.stringify(a)); }catch(e){}
   }
 
   /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
@@ -7422,7 +7650,9 @@ const LS = (function(){
   }
 
   return { E, setzen, VORGABE, WELLE, filterEinbauen, setze, stimmen,
-           bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH };
+           bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
+           QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
+           ausgabe, ausgabeSetzen };
 })();
 window.LS = LS;
 
@@ -8584,7 +8814,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20b · Import in kleinen Schritten';
+const APP_BUILD='2026-08-20c · Tonart und Notation';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
