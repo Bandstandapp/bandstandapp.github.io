@@ -8039,95 +8039,200 @@ const LS = (function(){
      nicht gedehnt — Notenköpfe, Hälse und Schrift behalten ihre Größe, es
      ändern sich nur ihre Abstände. Der erste Takt eines Systems trägt
      Schlüssel und Vorzeichen; dieser Vorspann bleibt unangetastet. */
-  function xAbbilden(el, f){
-    /* `f` bildet eine x-Lage ab. Größen bleiben, wie sie sind. */
-    const t = el.getAttribute && el.getAttribute('transform');
-    if(t && /translate\(/.test(t))
-      el.setAttribute('transform', t.replace(/translate\(\s*(-?[\d.]+)/, (m,x)=>'translate('+f(+x)));
-    if(el.hasAttribute && el.hasAttribute('x')) el.setAttribute('x', f(+el.getAttribute('x')));
-    if(el.hasAttribute && el.hasAttribute('cx')) el.setAttribute('cx', f(+el.getAttribute('cx')));
-    const d = el.getAttribute && el.getAttribute('d');
-    if(d){
-      let i=0;
-      el.setAttribute('d', d.replace(/(-?[\d.]+)(\s+)(-?[\d.]+)/g, (m,a,sp,b)=>{
-        /* In Pfaddaten wechseln sich x und y ab; abgebildet wird nur x. */
-        return f(+a)+sp+b;
-      }));
-    }
+  /* Der erste Versuch am 20. August hat ALLES gestreckt, was in einem System
+     stand — und damit auch die Abstände INNERHALB einer Note. Ein Notenhals
+     sitzt aber fest am Kopf, ein Balken fest auf den Hälsen, ein Haltebogen
+     fest an zwei Köpfen. Gestreckt sahen die Blätter so aus: Hälse mitten im
+     Kopf, Balken irgendwo, Bögen ins Leere. Jens hat es sofort gesehen.
+
+     Richtig ist: Eine Note wird als GANZES verschoben, nie gedehnt. Was
+     zwischen zwei Noten gespannt ist — Balken, Bögen —, folgt den Noten, an
+     denen es hängt. Nur Taktstriche und Notenlinien werden auf das Raster
+     gerechnet. */
+
+  /* Die x-Lage eines Elements: erst der Verschiebe-Wert, dann ein Pfad, dann
+     ein Attribut. */
+  function xVon(el){
+    const t=el.getAttribute && el.getAttribute('transform');
+    if(t){ const m=/translate\(\s*(-?[\d.]+)/.exec(t); if(m) return +m[1]; }
+    const d=el.getAttribute && el.getAttribute('d');
+    if(d){ const m=/M\s*(-?[\d.]+)/.exec(d); if(m) return +m[1]; }
+    if(el.hasAttribute && el.hasAttribute('x')) return +el.getAttribute('x');
+    if(el.hasAttribute && el.hasAttribute('cx')) return +el.getAttribute('cx');
+    const p=el.getAttribute && el.getAttribute('points');
+    if(p){ const m=/(-?[\d.]+)\s*,/.exec(p); if(m) return +m[1]; }
+    return null;
   }
+  /* Eine Gruppe im Ganzen verschieben. */
+  function schieben(el, dx){
+    if(!dx) return;
+    const t=el.getAttribute('transform')||'';
+    el.setAttribute('transform', 'translate('+Math.round(dx*100)/100+',0) '+t);
+  }
+  /* Einzelne x-Werte eines Pfades oder Vielecks abbilden. */
+  function xWerteAbbilden(el, f){
+    const d=el.getAttribute && el.getAttribute('d');
+    if(d) el.setAttribute('d', d.replace(/(-?[\d.]+)(\s+)(-?[\d.]+)/g,
+      (m,a,sp,b)=>(Math.round(f(+a)*100)/100)+sp+b));
+    const pts=el.getAttribute && el.getAttribute('points');
+    if(pts) el.setAttribute('points', pts.replace(/(-?[\d.]+)\s*,\s*(-?[\d.]+)/g,
+      (m,a,b)=>(Math.round(f(+a)*100)/100)+','+b));
+    if(el.hasAttribute && el.hasAttribute('x')) el.setAttribute('x', Math.round(f(+el.getAttribute('x'))*100)/100);
+    if(el.hasAttribute && el.hasAttribute('cx')) el.setAttribute('cx', Math.round(f(+el.getAttribute('cx'))*100)/100);
+  }
+
   function taktraster(svgText){
     let doc;
     try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(e){ return svgText; }
     if(!doc || doc.querySelector('parsererror')) return svgText;
+
     doc.querySelectorAll('g.system').forEach(sys=>{
       const takte = [...sys.children].filter(k=>k.classList && k.classList.contains('measure'));
       if(takte.length<2) return;
-      /* Rechte Kante jedes Takts: der aeusserste Taktstrich darin. */
-      const kante = t=>{
-        let x=null;
+
+      /* Rechte Kante jedes Takts: der äußerste Taktstrich darin. */
+      const kante = t=>{ let x=null;
         t.querySelectorAll('g.barLine path').forEach(p=>{
           const m=/M\s*(-?[\d.]+)/.exec(p.getAttribute('d')||''); if(!m) return;
           const v=+m[1]; if(x===null || v>x) x=v; });
-        return x;
-      };
+        return x; };
       const enden = takte.map(kante);
       if(enden.some(x=>x===null)) return;
-      /* Wo hoert der Vorspann auf? Beim ersten, was in einer Notenzeile steht. */
-      let musikStart=null;
-      const l1 = takte[0].querySelector('g.layer');
-      if(l1) l1.querySelectorAll('use,path,text').forEach(el=>{
-        const t=el.getAttribute('transform')||'';
-        let v=null;
-        const mt=/translate\(\s*(-?[\d.]+)/.exec(t);
-        if(mt) v=+mt[1];
-        else { const md=/M\s*(-?[\d.]+)/.exec(el.getAttribute('d')||''); if(md) v=+md[1];
-               else if(el.hasAttribute('x')) v=+el.getAttribute('x'); }
-        if(v===null) return;
-        if(musikStart===null || v<musikStart) musikStart=v;
-      });
-      if(musikStart===null) return;
-      const gesamt = enden[enden.length-1] - musikStart;
-      if(!(gesamt>0)) return;
-      const w = gesamt/takte.length;
 
-      /* EIN Weg fuer das ganze System, nicht einer je Takt. Ein Bindebogen
-         beginnt im einen Takt und endet im naechsten; bekaeme er die
-         Streckung nur eines der beiden, liefe sein Ende ins Leere — genau das
-         ist beim ersten Versuch passiert, und es sah aus wie eine Girlande
-         unter dem Blatt. */
-      const stuetzen=[{von:musikStart, nach:musikStart}];
-      for(let i=0;i<takte.length;i++)
-        stuetzen.push({von:enden[i], nach:musikStart + w*(i+1)});
-      let gleich=true;
-      for(const st of stuetzen) if(Math.abs(st.von-st.nach)>1) gleich=false;
-      if(gleich) return;
+      /* Der Vorspann mit Schlüssel und Vorzeichen bleibt, wo er ist. */
+      let musikStart=null;
+      const l1=takte[0].querySelector('g.layer');
+      if(l1) l1.querySelectorAll('g.note, g.rest, g.mRest, g.chord').forEach(el=>{
+        const v=xVon(el.querySelector('use, ellipse, path') || el);
+        if(v!==null && (musikStart===null || v<musikStart)) musikStart=v; });
+      if(musikStart===null) return;
+      const gesamt=enden[enden.length-1]-musikStart;
+      if(!(gesamt>0)) return;
+      const w=gesamt/takte.length;
+
+      /* Der grobe Weg — er sagt nur, WOHIN eine Note rückt. */
+      const st=[{von:musikStart, nach:musikStart}];
+      for(let i=0;i<takte.length;i++) st.push({von:enden[i], nach:musikStart+w*(i+1)});
+      if(st.every(x=>Math.abs(x.von-x.nach)<=1)) return;
       const F = x=>{
-        if(x<=stuetzen[0].von) return x;                       /* Vorspann bleibt */
-        for(let i=1;i<stuetzen.length;i++){
-          const a=stuetzen[i-1], b=stuetzen[i];
-          if(x<=b.von || i===stuetzen.length-1){
-            const spanne=b.von-a.von;
-            if(spanne<=0) return b.nach;
-            return Math.round((a.nach + (x-a.von)/spanne*(b.nach-a.nach))*100)/100;
+        if(x<=st[0].von) return x;
+        for(let i=1;i<st.length;i++){
+          const a=st[i-1], b=st[i];
+          if(x<=b.von || i===st.length-1){
+            const sp=b.von-a.von; if(sp<=0) return b.nach;
+            return a.nach + (x-a.von)/sp*(b.nach-a.nach);
           }
         }
         return x;
       };
 
-      /* Hilfslinien behalten ihre Laenge und wandern nur mit ihrer Mitte —
-         sonst waere eine Hilfslinie unter dem Notenkopf mal zu lang, mal zu
-         kurz. */
-      const fertig=new Set();
+      /* ---- 1. Jede Note, Pause und jeder Akkord als GANZES ---------------- */
+      const anker=[];   /* {x, dx} je Ereignis — daran hängt alles Weitere */
+      const erledigt=new Set();
+      sys.querySelectorAll('g.chord, g.note, g.rest, g.mRest').forEach(el=>{
+        let p=el.parentElement, drin=false;
+        while(p && p!==sys){ if(erledigt.has(p)) { drin=true; break; } p=p.parentElement; }
+        if(drin) return;
+        const kopf=el.querySelector('g.notehead use, use, ellipse, path');
+        const x=xVon(kopf||el);
+        if(x===null) return;
+        const dx=F(x)-x;
+        schieben(el, dx);
+        erledigt.add(el);
+        anker.push({x, dx});
+      });
+      if(!anker.length) return;
+      anker.sort((a,b)=>a.x-b.x);
+
+      /* Zwischen zwei Noten wird geradlinig überblendet — so bleibt ein Bogen
+         an beiden Enden hängen und behält dazwischen seine Form. */
+      const dxI = x=>{
+        if(x<=anker[0].x) return anker[0].dx;
+        if(x>=anker[anker.length-1].x) return anker[anker.length-1].dx;
+        for(let i=1;i<anker.length;i++){
+          if(x<=anker[i].x){
+            const a=anker[i-1], b=anker[i], sp=b.x-a.x;
+            return sp<=0 ? b.dx : a.dx + (x-a.x)/sp*(b.dx-a.dx);
+          }
+        }
+        return 0;
+      };
+
+      /* ---- 1b. Hilfslinien gehören zu einer Note, stehen aber woanders ----
+         Verovio zeichnet sie nicht in die Note, sondern in die Notenzeile.
+         Bleiben sie liegen, während ihre Note wandert, steht ein kurzer
+         Strich allein auf dem Blatt — genau das war nach dem Umbau im
+         zweiten System zu sehen. Sie wandern deshalb zur nächsten Note und
+         behalten dabei ihre Länge. */
+      const nahDx = x=>{
+        let best=anker[0], d=Math.abs(x-anker[0].x);
+        for(const a of anker){ const e=Math.abs(x-a.x); if(e<d){ d=e; best=a; } }
+        return best.dx;
+      };
       sys.querySelectorAll('g.ledgerLines path').forEach(p=>{
+        if(p.closest('g.note') || p.closest('g.chord')) return;   /* schon mitbewegt */
         const d=p.getAttribute('d')||'';
         const m=/M\s*(-?[\d.]+)\s+(-?[\d.]+)\s*L\s*(-?[\d.]+)\s+(-?[\d.]+)/.exec(d);
         if(!m) return;
-        const x1=+m[1], x2=+m[3], laenge=x2-x1, mitte=F((x1+x2)/2);
-        p.setAttribute('d','M'+Math.round(mitte-laenge/2)+' '+m[2]
-                          +' L'+Math.round(mitte+laenge/2)+' '+m[4]);
-        fertig.add(p);
+        const x1=+m[1], x2=+m[3], dx=nahDx((x1+x2)/2);
+        p.setAttribute('d','M'+Math.round(x1+dx)+' '+m[2]+' L'+Math.round(x2+dx)+' '+m[4]);
       });
-      sys.querySelectorAll('*').forEach(el=>{ if(!fertig.has(el)) xAbbilden(el, F); });
+
+      /* ---- 2. Balken folgen den Hälsen, an denen sie sitzen --------------- */
+      sys.querySelectorAll('g.beam').forEach(bm=>{
+        const haelse=[];
+        bm.querySelectorAll('g.note').forEach(n=>{
+          const p=n.querySelector('g.stem path'); if(!p) return;
+          const m=/M\s*(-?[\d.]+)/.exec(p.getAttribute('d')||''); if(!m) return;
+          const kopf=n.querySelector('g.notehead use');
+          const kx=xVon(kopf||n);
+          haelse.push({x:+m[1], dx: kx===null?0:(F(kx)-kx)});
+        });
+        if(!haelse.length) return;
+        /* Jede Ecke gehört zu genau einem Hals — dem nächstgelegenen. */
+        const naechster = x=>{
+          let best=haelse[0], d=Math.abs(x-haelse[0].x);
+          for(const h of haelse){ const e=Math.abs(x-h.x); if(e<d){ d=e; best=h; } }
+          return best.dx;
+        };
+        bm.querySelectorAll('polygon, path').forEach(el=>{
+          if(el.closest('g.note')) return;             /* gehört einer Note, ist schon bewegt */
+          xWerteAbbilden(el, x=>x+naechster(x));
+        });
+      });
+
+      /* ---- 3. Bögen hängen an zwei Noten ---------------------------------- */
+      sys.querySelectorAll('g.tie, g.slur, g.phrase').forEach(g=>{
+        g.querySelectorAll('path').forEach(p=>{
+          const d=p.getAttribute('d')||'';
+          const zahlen=[...d.matchAll(/(-?[\d.]+)(\s+)(-?[\d.]+)/g)];
+          if(zahlen.length<2) return;
+          const x0=+zahlen[0][1], x1=+zahlen[zahlen.length-1][1];
+          const d0=dxI(x0), d1=dxI(x1);
+          const sp=x1-x0;
+          xWerteAbbilden(p, x=> x + (sp<=0 ? d0 : d0 + (x-x0)/sp*(d1-d0)));
+        });
+      });
+
+      /* ---- 4. Was sonst zwischen den Noten gespannt ist -------------------- */
+      sys.querySelectorAll('g.hairpin, g.tupletBracket, g.octave, g.bracketSpan, g.ending')
+        .forEach(g=>g.querySelectorAll('path, polygon, text, tspan')
+          .forEach(el=>xWerteAbbilden(el, x=>x+dxI(x))));
+
+      /* ---- 5. Akkordnamen, Texte und Zahlen ------------------------------- */
+      sys.querySelectorAll('g.harm, g.dir, g.tempo, g.dynam, g.fing, g.tupletNum, g.mNum')
+        .forEach(g=>{ const x=xVon(g.querySelector('text, tspan, use')||g);
+          if(x!==null) schieben(g, F(x)-x); });
+
+      /* ---- 6. Taktstriche auf das Raster, Notenlinien mit ----------------- */
+      takte.forEach((t,i)=>{
+        t.querySelectorAll('g.barLine path, g.barLine use').forEach(el=>{
+          const x=xVon(el); if(x===null) return;
+          xWerteAbbilden(el, ()=>F(x));
+          if(el.tagName==='use') schieben(el, F(x)-x);
+        });
+        t.querySelectorAll('g.staff > path').forEach(p=>xWerteAbbilden(p, F));
+      });
     });
     try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
   }
@@ -9403,7 +9508,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20j · Weitergeben und iReal Pro';
+const APP_BUILD='2026-08-21 · Noten wandern, statt sich zu dehnen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
