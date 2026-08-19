@@ -1041,6 +1041,13 @@
   .gb[data-on=tag]{color:var(--accent-bright);background:var(--accent-wash-strong)}
   .gb[disabled]{opacity:.28;cursor:default}
   .gb[hidden]{display:none}
+  /* Der Tonart-Knopf traegt Text statt Symbol: Was man liest, soll man sehen,
+     ohne zu tippen. Bei „B♭ tief" wird es eng, deshalb schrumpft die Schrift
+     mit der Laenge. */
+  .gb.gkey{font-weight:700;font-size:14px;letter-spacing:-.02em;line-height:1;text-align:center}
+  .gb.gkey[data-lang="1"]{font-size:11px}
+  .gb.gkey[data-lang="2"]{font-size:9px}
+  .gb.gkey[data-on=um]{color:var(--accent-bright);background:var(--accent-wash-strong)}
   .gsep{width:1px;flex:none;background:var(--dock-line);margin:6px 3px}
   #dock[data-edge=left] .gsep,#dock[data-edge=right] .gsep{width:auto;height:1px;margin:3px 6px}
   /* ---- Fassung 2: eingeklappt, und je Ausrichtung ein eigener Satz ----
@@ -1644,6 +1651,7 @@
       <button class="gb" data-a="tag"   title="Tags"><i class="i ic-tag"></i></button>
       <button class="gb" data-a="set"   title="Zu Setlist"><i class="i ic-list-plus"></i></button>
       <span class="gsep"></span>
+      <button class="gb gkey" data-a="key" title="Tonart und Notation" hidden><span id="dockKeyTxt">♪</span></button>
       <button class="gb" data-a="note"  title="Handschriftliche Notiz"><i class="i ic-pencil"></i></button>
       <button class="gb" data-a="foto"  title="Foto an diesen Titel hängen"><i class="i ic-plus"></i></button>
       <button class="gb" data-a="blank" title="Leeres Notizblatt an diesen Titel"><i class="i ic-list-music"></i></button>
@@ -7159,15 +7167,37 @@ const LS_BREITE=2100, LS_HOEHE=2970;
 /* Auf dem Knopf steht, was man gerade liest — nicht das Wort „Tonart".
    Wer eine Stimme in B♭ vor sich hat, will das sehen, ohne zu tippen. */
 function lsKnopfBeschriften(t){
+  const leadsheet = !!(t && t.art==='leadsheet');
+  const a = leadsheet ? LS.ausgabe(t.bsId) : {};
+  const n = LS.NOTATION.find(y=>y.wert===(a.notation||'C'))||LS.NOTATION[0];
+  const ton = (leadsheet && t._lsGelesen) ? t._lsGelesen.replace('b','♭').replace('#','♯') : '';
+  const kurz = ton + (leadsheet && t._lsOrg && t._lsOrg.moll ? 'm' : '')
+             + (n.wert==='C' ? '' : ' '+n.kurz);
+  const gesetzt = leadsheet && (a.notation && a.notation!=='C'
+                  || (a.tonart!==undefined && a.tonart!=='' && t._lsOrg && +a.tonart!==t._lsOrg.q));
+
+  /* Das Dock — hier tippt man wirklich. Die Leiste darueber ist seit
+     Schritt 6 ausgeblendet; sie wird trotzdem mitgefuehrt, damit nichts
+     auseinanderlaeuft, falls sie je zurueckkommt. */
+  const d=document.getElementById('dockKeyTxt');
+  const db=d && d.parentElement;
+  if(db){
+    if(leadsheet){
+      db.removeAttribute('hidden');
+      d.textContent = kurz || '♪';
+      db.dataset.lang = kurz.length>5 ? '2' : kurz.length>2 ? '1' : '0';
+      if(gesetzt) db.dataset.on='um'; else db.removeAttribute('data-on');
+      db.title = kurz ? ('Gelesen: '+kurz+' — tippen für Tonart und Notation')
+                      : 'Tonart und Notation';
+    } else db.setAttribute('hidden','');
+  }
+
   const b=document.getElementById('vKeyBtn'), x=document.getElementById('vKeyTxt');
-  if(!b||!x) return;
-  if(!t || t.art!=='leadsheet'){ b.style.display='none'; return; }
-  b.style.display='flex';
-  const a=LS.ausgabe(t.bsId);
-  const n=(LS.NOTATION.find(y=>y.wert===(a.notation||'C'))||LS.NOTATION[0]);
-  const ton=t._lsGelesen ? t._lsGelesen.replace('b','♭').replace('#','♯') : '—';
-  x.textContent = ton + (t._lsOrg&&t._lsOrg.moll?'m':'') + (n.wert==='C'?'':' · '+n.kurz);
-  b.onclick=()=>openTonartSheet(t);
+  if(b&&x){
+    b.style.display = leadsheet ? 'flex' : 'none';
+    x.textContent = kurz || 'Tonart';
+    b.onclick=()=>openTonartSheet(t);
+  }
 }
 
 /* Tonart, Notation, Stimme — die drei Achsen einer Ausgabe. */
@@ -8814,7 +8844,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20c · Tonart und Notation';
+const APP_BUILD='2026-08-20d · Der Tonart-Knopf im Dock';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10270,7 +10300,12 @@ setTimeout(ablageAnmelden, 0);
     /* Der Stimmen-Knopf ist am 28. Juli entfallen. Der Schalter auf dem
        Blatt liegt in jeder Ausrichtung ueber den Noten und tut dasselbe;
        zwei Wege zum selben Ziel haetten das Dock nur voll gehalten. */
-    knopf.note.disabled = !!t.isEdit;
+    /* Der Stift ist bei einem Leadsheet noch nichts: Eine Notiz haengt an
+       einer AUSGABE, also am Paar aus Quelle und Tonart, und das ist Stufe 3.
+       Ein Knopf, der den PDF-Editor auf gesetzte Noten loslaesst, waere ein
+       Versprechen ohne Deckung. */
+    knopf.note.disabled = !!t.isEdit || t.art==='leadsheet';
+    if(typeof lsKnopfBeschriften==='function') lsKnopfBeschriften(t);
     const voll = viewer.classList.contains('fullscreen');
     const sym  = knopf.full.querySelector('.i');
     if(sym) sym.className = 'i ' + (voll ? 'ic-minimize' : 'ic-maximize');
@@ -10320,7 +10355,8 @@ setTimeout(ablageAnmelden, 0);
   knopf.prac .onclick = () => { if(CURRENT) toggle(S.prac, CURRENT.key); };
   knopf.tag  .onclick = () => { if(CURRENT) assignTagsFlow(CURRENT); };
   knopf.set  .onclick = () => { if(CURRENT) addToSetlistFlow(CURRENT); };
-  knopf.note .onclick = () => { if(CURRENT && !CURRENT.isEdit) openEditor(CURRENT); };
+  knopf.note .onclick = () => { if(CURRENT && !CURRENT.isEdit && CURRENT.art!=='leadsheet') openEditor(CURRENT); };
+  if(knopf.key) knopf.key.onclick = () => { if(CURRENT) openTonartSheet(CURRENT); };
   /* Foto und leeres Notizblatt direkt aus der Notenansicht. Am 7. August von
      Jens verlangt: Wer an einem Stück arbeitet, will dafür nicht ins Setup
      springen. In Content bleiben beide Wege stehen — dort ordnet man, hier

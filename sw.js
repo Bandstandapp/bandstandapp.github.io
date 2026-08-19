@@ -10,7 +10,7 @@
    Der Noten-Cache bleibt davon ausgenommen. Er heißt weiterhin 'tunes-rb-v1'; das Kürzel ist
    historisch und ohne Bedeutung, ein Umbenennen brächte nichts und riskierte nur, dass jemand
    seine offline gespeicherten Noten verliert. */
-const SHELL = 'shell-bs-51';
+const SHELL = 'shell-bs-52';
 const MINE  = /^shell-/;         // es gibt nur noch eine App auf dieser Adresse
 const TUNES = 'tunes-rb-v1';
 /* Der Notensetzer, 6,9 MB. Er gehoert BEWUSST nicht in die Shell: die wird bei
