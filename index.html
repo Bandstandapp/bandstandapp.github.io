@@ -5591,17 +5591,47 @@ async function importPdfs(bid, files, stumm){
    werden getrennt mitgeschrieben — damit ist Schritt 3 des Import-Konzepts
    erledigt, und auf dem Schalter steht „Alt 1" statt zweimal „Alt-Sax". */
 async function importStapel(bid, saetze, fortschritt){
-  const gueltig=(saetze||[]).filter(s=>s && s.file &&
+  const alle=(saetze||[]).filter(s=>s && s.file);
+  const gueltig=alle.filter(s=>
     (/pdf$/i.test(s.file.type||'') || /\.pdf$/i.test(s.file.name||'')
      || istLeadsheet(s.file.name, s.file.type)));
-  if(!gueltig.length) return 0;
+  /* Was hier haengenbleibt, wird gezaehlt und benannt. Vorher gab die Funktion
+     stumm 0 zurueck, und der Aufrufer zeigte trotzdem ein Erfolgsbild — genau
+     die Lage, in der Jens am 20. August ein leeres Buch vorfand und niemand
+     sagen konnte, warum. */
+  const abgewiesen=alle.filter(s=>!gueltig.includes(s))
+                       .map(s=>({name:(s.file.name||'ohne Namen'), grund:'kein bekanntes Format'}));
+  if(!gueltig.length){
+    window._letzterImport={stuecke:0, angedockt:0, glatt:0, elemente:0,
+      abgewiesen, gelesen:alle.length, fehler:[]};
+    return 0;
+  }
+
+  /* Kommt der Satz aus einem Archiv, liegen seine Bytes noch darin. Jetzt ist
+     der Zeitpunkt, sie zu holen — einzeln, damit nie mehr als eine Datei
+     zusaetzlich im Speicher steht. Was sich nicht auspacken laesst, faellt
+     einzeln aus und haelt den Stapel nicht auf. */
+  const fehlerBeimHolen=[];
+  for(const s of gueltig){
+    if(s.file && typeof s.file.hole==='function'){
+      try{ s.file=await s.file.hole(); }
+      catch(e){ fehlerBeimHolen.push({name:s.file.name||'ohne Namen',
+                                      grund:'liess sich nicht auspacken'}); s.file=null; }
+    }
+  }
+  const bereit=gueltig.filter(s=>s.file);
+  if(!bereit.length){
+    window._letzterImport={stuecke:0, angedockt:0, glatt:0, elemente:0,
+      abgewiesen:abgewiesen.concat(fehlerBeimHolen), gelesen:alle.length, fehler:[]};
+    return 0;
+  }
 
   /* Buendeln. Die Vorschau liefert je Satz seinen Titel; gleiche Titel in
      derselben Reihenfolge gehoeren zum selben Stueck. Ein zweites Stueck mit
      demselben Namen entsteht nur, wenn die Vorschau es getrennt fuehrt —
      dafuer traegt jeder Satz seine Gruppenkennung `gruppe`, sofern gesetzt. */
   const nachStueck=new Map();
-  for(const s of gueltig){
+  for(const s of bereit){
     const schl = s.gruppe || ('t:'+titelSchluessel(s.titel||'Stück'));
     if(!nachStueck.has(schl)) nachStueck.set(schl,
       { titel:{titel:s.titel||'Stück'}, elemente:[],
@@ -5657,7 +5687,10 @@ async function importStapel(bid, saetze, fortschritt){
     try{ await BS.aendern('element', g.id, {etikett:g.etikett}); glatt++; }catch(e){}
   }
   await loadLibrary(); render();
-  window._letzterImport = Object.assign({}, ber, {glatt});
+  window._letzterImport = Object.assign({}, ber, {glatt,
+    gelesen: alle.length,
+    abgewiesen: abgewiesen.concat(fehlerBeimHolen)
+                          .concat((ber.uebergangen||[]).map(u=>({name:u.name||'', grund:u.grund||''})))});
   /* Der Vermerk über diesen Lauf, dauerhaft. Er ist die Grundlage von
      „Letzten Import rückgängig machen" und muss einen Neustart überleben —
      genau dann braucht man ihn, wenn man den Fehler erst später bemerkt.
@@ -6264,14 +6297,28 @@ async function zipAlsOrdner(zip, zipName){
      etwas zu zeigen hat und der Stapel benennbar bleibt. */
   const ohneOrdner = echte.every(p=>!p.includes('/'));
   const eintraege=[];
+  /* Die Bytes bleiben im Archiv, bis geschrieben wird.
+
+     Bis zum 20. August wurde hier JEDE Datei sofort ausgepackt und als Blob
+     gehalten. Bei Jens' Leadsheet-Ordner sind das 361 Dateien und 28 MB — und
+     die lagen dann NEBEN dem noch offenen Archiv im Speicher, also doppelt,
+     waehrend die Vorschau davon nur die Namen braucht. Auf einem iPad ist das
+     der Unterschied zwischen „laeuft" und „Safari raeumt den Tab ab".
+
+     Statt des Blobs steht jetzt ein Platzhalter da: Name, Typ und Groesse wie
+     bei einer Datei, dazu `hole()`. Die Vorschau kommt damit aus; `importStapel`
+     packt erst unmittelbar vor dem Schreiben aus, eine Datei nach der anderen. */
   for(const pfad of echte){
-    try{
-      const blob=await zip.file(pfad).async('blob');
-      const datei=pfad.split('/').pop();
-      const typ = /\.pdf$/i.test(datei) ? 'application/pdf' : '';
-      eintraege.push({ file:new File([blob], datei, {type:typ}),
-                       pfad: ohneOrdner ? (wurzelName+'/'+pfad) : pfad });
-    }catch(e){ /* eine unlesbare Datei haelt das Archiv nicht auf */ }
+    const eintrag=zip.file(pfad); if(!eintrag) continue;
+    const datei=pfad.split('/').pop();
+    const typ = /\.pdf$/i.test(datei) ? 'application/pdf' : '';
+    /* `_size` ist die Groesse im ENTPACKTEN Zustand, so wie JSZip sie im
+       Verzeichnis des Archivs vorfindet. Sie dient nur der Anzeige. */
+    const groesse=(eintrag._data && eintrag._data.uncompressedSize) || 0;
+    eintraege.push({
+      file:{ name:datei, type:typ, size:groesse,
+             hole:()=>eintrag.async('blob').then(b=>new File([b], datei, {type:typ})) },
+      pfad: ohneOrdner ? (wurzelName+'/'+pfad) : pfad });
   }
   if(!eintraege.length){ alert('Keine Datei des Archivs liess sich lesen.'); return; }
 
@@ -8496,7 +8543,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-19 · Leadsheets sehen';
+const APP_BUILD='2026-08-20 · Archiv-Import ohne Speicherberg';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -12176,13 +12223,24 @@ setTimeout(ablageAnmelden, 0);
      gleichzeitig: „Alt 1" und „Alt 2" nebeneinander ist genau der Fall,
      fuer den es gebaut ist. */
   function vorschauKnopf(eintrag){
-    const b=knopf('Vorschau', ()=>window.pdfVorschau({
-      kennung: eintrag.kennung,
-      datei:   eintrag.file,
-      name:    eintrag.name,
-      unter:   eintrag.titel || '',
-      wahl:  { hole: wahlQuelle(eintrag.kennung), aufWahl: wahlSetzen(eintrag.kennung) }
-    }));
+    /* Kommt der Satz aus einem Archiv, liegen seine Bytes noch darin und
+       werden erst hier ausgepackt — fuer dieses eine Blatt. Siehe
+       `zipAlsOrdner`: Die Vorschau soll nicht 28 MB im Speicher halten,
+       damit man vielleicht eines davon ansieht. */
+    const b=knopf('Vorschau', async ()=>{
+      let datei=eintrag.file;
+      if(datei && typeof datei.hole==='function'){
+        try{ datei=await datei.hole(); }
+        catch(e){ alert('Diese Datei liess sich nicht aus dem Archiv holen.'); return; }
+      }
+      window.pdfVorschau({
+        kennung: eintrag.kennung,
+        datei,
+        name:    eintrag.name,
+        unter:   eintrag.titel || '',
+        wahl:  { hole: wahlQuelle(eintrag.kennung), aufWahl: wahlSetzen(eintrag.kennung) }
+      });
+    });
     b.title='Das Blatt ansehen';
     return b;
   }
@@ -12952,6 +13010,24 @@ setTimeout(ablageAnmelden, 0);
         f.buchName ? 'Geschrieben nach „<b>'+esc(f.buchName)+'</b>". '
           +'War das das falsche Buch, holt „Rückgängig" in Content alles wieder heraus.'
           : ''));
+      /* Null geschriebene Blätter sind kein Abschluss, sondern ein Fehlschlag.
+         Bis zum 20. August stand hier trotzdem „Import abgeschlossen" mit einer
+         Null daneben, und das Buch war leer — Jens hat genau das gemeldet, und
+         niemand konnte sagen, woran es lag. Jetzt sagt es die Karte selbst,
+         mit Namen und Grund der ersten fünf Dateien. */
+      const ab=(window._letzterImport||{}).abgewiesen||[];
+      if(!(f.elemente>0)){
+        titel.textContent='Import fehlgeschlagen';
+        const gruende={};
+        ab.forEach(x=>{ gruende[x.grund]=(gruende[x.grund]||0)+1; });
+        const liste=Object.entries(gruende).map(([g,n])=>n+'× '+g).join(', ');
+        k.append(karte('Es ist nichts geschrieben worden',
+          [zeile('Gelesen', '<b>'+((window._letzterImport||{}).gelesen||0)+'</b> Dateien'),
+           zeile('Davon abgewiesen', '<b>'+ab.length+'</b>'+(liste?' — '+esc(liste):'')),
+           zeile('Die ersten', esc(ab.slice(0,5).map(x=>x.name).join(', ')||'—'))],
+          'Das Buch ist angelegt, aber leer. Du kannst es in Content löschen und den '
+          +'Import erneut versuchen. Hilft das nicht, sag mir die Zahlen aus dieser Karte.'));
+      }
       knopfR('Fertig', ()=>{ assiZu(); }, 'wichtig');
     }
     /* Hineinziehen soll auch im Fenster gehen — sonst wäre der Assistent ein
