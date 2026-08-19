@@ -10,9 +10,17 @@
    Der Noten-Cache bleibt davon ausgenommen. Er heißt weiterhin 'tunes-rb-v1'; das Kürzel ist
    historisch und ohne Bedeutung, ein Umbenennen brächte nichts und riskierte nur, dass jemand
    seine offline gespeicherten Noten verliert. */
-const SHELL = 'shell-bs-47';
+const SHELL = 'shell-bs-48';
 const MINE  = /^shell-/;         // es gibt nur noch eine App auf dieser Adresse
 const TUNES = 'tunes-rb-v1';
+/* Der Notensetzer, 6,9 MB. Er gehoert BEWUSST nicht in die Shell: die wird bei
+   jedem Versionswechsel geloescht, und dann muessten die Megabytes neu ueber
+   die Leitung — im Zweifel im Proberaum, mit schwachem WLAN. Deshalb ein
+   eigener Cache, der den Wechsel ueberlebt, so wie der Noten-Cache. Er wird
+   NICHT beim Installieren gefuellt, sondern beim ersten Leadsheet.
+   Der Name faellt nicht unter MINE und bleibt beim Aufraeumen stehen. */
+const LIBS  = 'libs-bs-1';
+const LIBS_PFAD = /\/vendor\/verovio\/|\/fonts\/PetalumaScript\.otf$/;
 const SHELL_ASSETS = [
   './', './index.html', './data.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',
@@ -89,6 +97,21 @@ self.addEventListener('fetch', e => {
   }
 
   if (e.request.method !== 'GET') return;
+
+  /* Der Notensetzer und die Jazz-Schrift: cache-first in ihrem EIGENEN Cache.
+     Einmal geholt, bleiben sie liegen — auch wenn die Shell gewechselt wird.
+     Steht die Datei schon da, geht kein Byte mehr ins Netz. */
+  if (LIBS_PFAD.test(url.pathname)) {
+    e.respondWith((async () => {
+      const c = await caches.open(LIBS);
+      const hit = await c.match(e.request);
+      if (hit) return hit;
+      const resp = await fetch(e.request);
+      if (resp && resp.status === 200) c.put(e.request, resp.clone());
+      return resp;
+    })());
+    return;
+  }
 
   /* Die Bibliotheken: cache-first. Sie ändern sich innerhalb einer Version
      nie, und der Shell-Pfad zog sie bei JEDEM Start neu über das Netz. Beim

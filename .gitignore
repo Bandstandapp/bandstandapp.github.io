@@ -22,6 +22,16 @@ tunes/
 *.wav
 *.aac
 
+# Leadsheets sind Musik als Daten — und damit genauso fremdes Urheberrecht
+# wie ein Scan. Sie wiegen nur ein paar Kilobyte, und genau das macht sie
+# gefaehrlich: Sie rutschen unbemerkt in einen Commit. MusicXML kommt in der
+# Praxis meist als `.xml`; das Repo hat sonst keine XML-Dateien, deshalb die
+# Endung ohne Einschraenkung. Am 19. August aufgenommen.
+*.musicxml
+*.mxl
+*.abc
+*.xml
+
 # Lokale Arbeitsdateien – nie ins oeffentliche Repo pushen
 CLAUDE.md
 docs/

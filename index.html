@@ -417,6 +417,20 @@
     overflow:hidden;background:var(--bg-stage);padding:10px}
   .fitwrap.center{justify-content:center}
   .fitwrap .pg{background:var(--white);box-shadow:var(--shadow-sheet);flex:none}
+  /* Leadsheets: ein gesetztes Blatt ist SVG und kein Bild. Es sitzt in
+     derselben `.pg`, damit `passeBlattEin` es wie jede andere Seite behandelt.
+     Die Jazz-Schrift wird nur geladen, wenn eine Regel sie braucht — also
+     erst beim ersten Leadsheet. */
+  @font-face{font-family:'PetalumaScript';src:url('fonts/PetalumaScript.otf') format('opentype');font-display:swap}
+  .fitwrap .pg.ls{display:block;overflow:hidden}
+  .fitwrap .pg.ls svg{width:100%;height:100%;display:block}
+  /* Geerbt und NICHT erzwungen: Die Vorzeichen in einem Akkordnamen tragen
+     ihre eigene Schrift als Attribut. Ein `!important` hier macht aus `B♭7`
+     ein Kaestchen. */
+  .fitwrap .pg.ls svg{font-family:'PetalumaScript',ui-sans-serif,sans-serif}
+  .fitwrap .pg.ls g.staff>path{stroke:var(--ls-linie,#333)}
+  .lslade{color:var(--sub);font-size:14px;text-align:center;padding:24px;line-height:1.5}
+  .sreg{flex:1;min-width:120px;max-width:210px;accent-color:var(--accent-bright)}
   .fitwrap img.pg{display:block}
 
   /* annotation editor */
@@ -2080,7 +2094,15 @@ window.voiceAusText = voiceAusText;
    „Blue Bossa - Take 2" mit der Stimme „tp". */
 /* Genau die Endungen, die der Import kennt — und keine allgemeine Regel:
    „St. Thomas" oder „Nica´s Dream Vol.2" duerfen nicht beschnitten werden. */
-const ENDUNG=/\.(pdf|mp3|m4a|wav|aac|aif|aiff)$/i;
+const ENDUNG=/\.(pdf|mp3|m4a|wav|aac|aif|aiff|musicxml|mxl|xml|abc)$/i;
+/* Ein Leadsheet ist Musik als Daten. `.xml` ist streng genommen mehrdeutig,
+   in der Praxis aber genau das, was die Sammlungen liefern; taugt die Datei
+   nicht, sagt es der Setzer beim Aufschlagen und nicht der Import. */
+const LEAD_ENDUNG=/\.(musicxml|mxl|xml|abc)$/i;
+function istLeadsheet(name,typ){
+  return LEAD_ENDUNG.test(String(name||'')) || /musicxml/i.test(String(typ||''));
+}
+window.istLeadsheet=istLeadsheet;
 function nameZerlegen(dateiname, trenner){
   const ohne=String(dateiname||'').replace(ENDUNG,'').trim();
   const t=trenner||'-';
@@ -3880,8 +3902,11 @@ function titelBearbeiten(titelId){
     /* Text statt Symbol bei den beiden Foto-Wegen: Der Symbolsatz der App kennt
        weder Kamera noch Bild, und ein Emoji kommt nicht in Frage. Content
        beschriftet dieselben zwei Griffe ebenso. */
-    bl({html:'<i class="i ic-plus"></i> Blätter', tu:()=>waehle('application/pdf,.pdf', false,
-      async f=>({blob:f, art:'blatt', name:f.name||'Blatt.pdf'}))});
+    bl({html:'<i class="i ic-plus"></i> Blätter', tu:()=>waehle(
+      'application/pdf,.pdf,.musicxml,.mxl,.xml,.abc', false,
+      async f=>({blob:f,
+                 art: istLeadsheet(f.name, f.type) ? 'leadsheet' : 'blatt',
+                 name:f.name||'Blatt.pdf'}))});
     bl({html:'Kamera', tu:()=>waehle('image/*', true,
       async f=>({blob:await fotoAlsPDF(f), art:'foto',
                  name:String(f.name||'Foto').replace(/\.[^.]+$/,'')+'.pdf'}))});
@@ -4599,7 +4624,17 @@ function openViewer(t, keepNav){
   if(vt){ vt.style.cursor='pointer'; vt.title='Titel & Komponist bearbeiten'; vt.onclick=()=>openMetaSheet(CURRENT); }
   document.getElementById('vShare').onclick=()=>shareTune(t);
   document.getElementById('vPrint').onclick=()=>printCurrent(t);
-  if(t.isEdit){
+  if(t.art==='leadsheet'){
+    /* Zuerst geprueft, denn ein Leadsheet ist auch `isLib` — es kommt aus dem
+       eigenen Bestand. Gesetzt wird es trotzdem und nicht angezeigt. */
+    frame.style.display='none'; frame.src='about:blank';
+    fit.style.display='flex'; document.getElementById('vTab').style.display='none';
+    /* Der Stift kommt in Stufe 3. Eine Notiz haengt an einer AUSGABE, also am
+       Paar aus Quelle und Tonart, und dieser Zusammenhang ist noch nicht
+       gebaut. Bis dahin waere der Knopf ein Versprechen ohne Deckung. */
+    document.getElementById('vEditBtn').style.display='none';
+    fitOn=true; renderLeadFit(t);
+  } else if(t.isEdit){
     frame.style.display='none'; frame.src='about:blank';
     fit.style.display='flex'; document.getElementById('vTab').style.display='none';
     renderUserFit(t);
@@ -5557,7 +5592,8 @@ async function importPdfs(bid, files, stumm){
    erledigt, und auf dem Schalter steht „Alt 1" statt zweimal „Alt-Sax". */
 async function importStapel(bid, saetze, fortschritt){
   const gueltig=(saetze||[]).filter(s=>s && s.file &&
-    (/pdf$/i.test(s.file.type||'') || /\.pdf$/i.test(s.file.name||'')));
+    (/pdf$/i.test(s.file.type||'') || /\.pdf$/i.test(s.file.name||'')
+     || istLeadsheet(s.file.name, s.file.type)));
   if(!gueltig.length) return 0;
 
   /* Buendeln. Die Vorschau liefert je Satz seinen Titel; gleiche Titel in
@@ -5574,7 +5610,8 @@ async function importStapel(bid, saetze, fortschritt){
            der Vorschau und nur dort — hier wird nie nach Namen gesucht. */
         titelId: s.andockAn || null });
     const g=nachStueck.get(schl);
-    g.elemente.push({ art:'blatt', etikett:'', instrument:s.voice || '',
+    g.elemente.push({ art: istLeadsheet(s.file.name, s.file.type) ? 'leadsheet' : 'blatt',
+                      etikett:'', instrument:s.voice || '',
                       dateiname:s.file.name, blob:s.file, np:1, _rest:s.rest||'' });
   }
   const gruppen=[...nachStueck.values()];
@@ -5789,7 +5826,7 @@ function openLibrarySheet(){
     const doAdd=async()=>{ const v=nb.querySelector('#nbName').value; if(!v.trim())return;
       await createBook(v); nb.querySelector('#nbName').value=''; render(); openLibrarySheet(); };
     nb.querySelector('#nbAdd').onclick=doAdd;
-    card.insertAdjacentHTML('beforeend','<div class="muted" style="margin:0 2px 12px">Tipp: mehrere PDFs lassen sich in einem Rutsch auswählen.</div>');
+    card.insertAdjacentHTML('beforeend','<div class="muted" style="margin:0 2px 12px">Tipp: mehrere Dateien lassen sich in einem Rutsch auswählen — PDFs wie Leadsheets.</div>');
     // Bücher + Stücke
     if(!USERBOOKS.length){
       card.insertAdjacentHTML('beforeend','<div class="muted" style="border-top:1px solid var(--line);padding-top:12px">Noch keine eigenen Bücher. Lege oben eines an.</div>');
@@ -5811,7 +5848,7 @@ function openLibrarySheet(){
         +own.length+(own.length===1?' Blatt':' Blätter')+'</span></div>'
         +'<button class="btn ghost" data-imp style="padding:6px 10px">＋ PDF</button>'
         +'<button class="btn ghost" data-del style="padding:6px 10px"><i class="i ic-trash-2"></i></button>'
-        +'<input type="file" data-file accept="application/pdf,.pdf" multiple class="dateifeld">';
+        +'<input type="file" data-file accept="application/pdf,.pdf,.musicxml,.mxl,.xml,.abc" multiple class="dateifeld">';
       sec.append(head);
       const fi=head.querySelector('[data-file]');
       head.querySelector('[data-imp]').onclick=()=>fi.click();
@@ -6203,7 +6240,7 @@ function exportBlatt(z){
    keine Ordner auswaehlen. Ueber ein Archiv kommt die Ordnerstruktur trotzdem
    auf das Geraet — damit steht der Real-Book-Weg dort zum ersten Mal offen.
    ================================================================ */
-const ARCHIV_ENDUNG=/\.(pdf|mp3|m4a|wav|aac|aif|aiff)$/i;
+const ARCHIV_ENDUNG=/\.(pdf|mp3|m4a|wav|aac|aif|aiff|musicxml|mxl|xml|abc)$/i;
 async function zipAlsOrdner(zip, zipName){
   const wurzelName=(zipName||'Empfangen').replace(/\.zip$/i,'').trim() || 'Empfangen';
   const pfade=[];
@@ -6887,6 +6924,7 @@ function blattNeuZeichnen(sofort){
        denselben Weg wie ein importiertes PDF. */
     const stimme = window.aktiveStimme ? window.aktiveStimme() : null;
     if(stimme) renderPdfFit(stimme);
+    else if(CURRENT.art==='leadsheet') renderLeadFit(CURRENT);
     else if(CURRENT.isEdit) renderUserFit(CURRENT); else renderPdfFit(CURRENT);
   };
   if(sofort) tu(); else _blattUhr=setTimeout(tu,180);
@@ -6987,6 +7025,82 @@ async function renderPdfFit(t){
     frame.src=encodeURI(t.f)+'#toolbar=0&navpanes=0&view=FitH';
   }
 }
+/* ---- Ein Leadsheet auf die Buehne -----------------------------------------
+   Derselbe Platz, dieselbe Einpassung wie ein Blatt — nur entsteht die Seite
+   hier beim Zeigen und liegt nicht fertig vor. Das kostet auf dem Mac rund
+   dreissig Millisekunden je Blatt.
+
+   Die Seiten sind SVG und kommen in dieselbe `.pg` wie die Leinwaende des
+   PDF-Wegs. Damit gilt `passeBlattEin` unveraendert, und Wischen, Drehen und
+   Vollbild verhalten sich wie gewohnt. */
+async function leadQuelle(t){
+  const blob = await BS.bytes(t.bsId);
+  if(!blob) throw new Error('Zu diesem Leadsheet ist keine Datei hinterlegt.');
+  const kopf = new Uint8Array(await blob.slice(0,2).arrayBuffer());
+  /* Ein `.mxl` ist ein Archiv mit dem MusicXML darin. JSZip liegt ohnehin
+     schon in der App. */
+  if(kopf[0]===0x50 && kopf[1]===0x4B){
+    if(!window.JSZip) throw new Error('Gepackte Leadsheets brauchen JSZip, und das steht gerade nicht bereit.');
+    const zip = await JSZip.loadAsync(blob);
+    let name = null;
+    const cont = zip.file('META-INF/container.xml');
+    if(cont){ const m=/full-path="([^"]+)"/.exec(await cont.async('string')); if(m) name=m[1]; }
+    if(!name) name = Object.keys(zip.files).find(n=>/\.(musicxml|xml)$/i.test(n) && !/^META-INF\//.test(n));
+    if(!name) throw new Error('In diesem Archiv steht kein MusicXML.');
+    return await zip.file(name).async('string');
+  }
+  return await blob.text();
+}
+async function renderLeadFit(t){
+  const fit=document.getElementById('vFit'); fit.classList.remove('center');
+  const stehtSchon = !!fit.querySelector('.pg');
+  if(!stehtSchon) fit.innerHTML='<div class="lslade">Lädt…</div>';
+  const sagen = txt=>{ if(!fit.querySelector('.pg')) fit.innerHTML='<div class="lslade">'+esc(txt)+'</div>'; };
+  try{
+    const quelle = await leadQuelle(t);
+    LS.filterEinbauen();
+    const e = LS.E();
+    const r = await LS.setze(quelle, { tonart:t.lsTonart||'', stimme:t.lsStimme||'', sagen });
+    const n = r.seiten.length;
+    if(!n) throw new Error('Aus dieser Datei ist kein Blatt geworden.');
+
+    /* Das Verhaeltnis ist bei einem Leadsheet fest — A4 hochkant, so
+       entschieden am 19. August. Die Buehnenbreite folgt daraus. */
+    if(window.SHEET_RATIO!==undefined && Math.abs(r.verhaeltnis-window.SHEET_RATIO)>0.002){
+      window.SHEET_RATIO=r.verhaeltnis; if(window.layout) window.layout();
+    }
+    const fsMode=document.getElementById('viewer').classList.contains('fullscreen');
+    const box=fit.getBoundingClientRect(); const rand=fitRand(fit);
+    const W=(fsMode?window.innerWidth:(box.width||window.innerWidth))-rand.x-4;
+    const H=(fsMode?window.innerHeight:(box.height||window.innerHeight))-rand.y;
+    const einBlatt = !(fsMode && document.body.dataset.o==='land');
+    const natH=1000, natW=Math.round(natH*r.verhaeltnis);
+    const {scale,center} = einBlatt
+      ? { scale: Math.max(Math.min(H/natH, W/natW), 0.05), center:(n===1) }
+      : computeFit(n,natW,natH,W,H,14);
+    fit.classList.toggle('center',center);
+
+    const halter=document.createDocumentFragment();
+    r.seiten.forEach(svg=>{
+      const d=document.createElement('div'); d.className='pg ls';
+      d.style.width=(natW*scale)+'px'; d.style.height=(natH*scale)+'px';
+      d.style.setProperty('--ls-linie', e.farbe);
+      if(e.hand>0) d.style.filter='url(#lsW'+e.hand+')';
+      /* Die Seite bringt feste Masse mit; sie sollen sich in die Kachel
+         einpassen und nicht ueberstehen. */
+      d.innerHTML = svg.replace(/^<svg([^>]*)>/, (m,a)=>
+        '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'')
+        +' viewBox="0 0 '+LS_BREITE+' '+LS_HOEHE+'" preserveAspectRatio="xMidYMid meet">');
+      halter.append(d);
+    });
+    fit.replaceChildren(halter);
+    passeBlattEin();
+  }catch(err){
+    fit.innerHTML='<div class="lslade">Dieses Leadsheet lässt sich nicht setzen.<br>'
+      + esc((err&&err.message)||String(err)) + '</div>';
+  }
+}
+const LS_BREITE=2100, LS_HOEHE=2970;
 function resetFrameStyle(){
   const frame=document.getElementById('vFrame'), holder=frame.parentElement;
   frame.style.width=''; frame.style.height=''; frame.style.margin='';
@@ -7067,6 +7181,212 @@ async function idbDeletePages(uk){ const db=await idb(); return new Promise(res=
    lesen 136 ms statt 709 ms, und ein Blatt auf Zuruf 6,3 ms. Es gibt keinen
    Grund, 294 MB dauerhaft anzuheften, um ein Blatt zu oeffnen.
    ============================================================================ */
+/* ============================================================================
+   LS — der Notensetzer fuer Leadsheets                        (19. August 2026)
+
+   Ein Leadsheet ist keine Seite, sondern Musik als Daten: MusicXML oder ABC.
+   Daraus wird hier ein festes A4-Blatt gerechnet, in jeder Tonart und fuer
+   jedes Instrument. Der PDF-Betrachter wird dabei NICHT angefasst — dieser
+   Weg laeuft neben ihm, so wie das schwebende Fenster des Imports neben ihm
+   laeuft. Gemeinsam haben beide nur die Buehne, auf der sie landen.
+
+   Der Setzer heisst Verovio, kommt von RISM Digital und steht unter der
+   LGPL v3. Er wiegt 6,7 MB und wird deshalb ERST GEHOLT, wenn das erste
+   Leadsheet geoeffnet wird — und dann in einen eigenen Cache gelegt, der den
+   Versionswechsel ueberlebt (siehe sw.js, `libs-bs-1`). Auf der Buehne wird
+   nichts nachgeladen.
+   ========================================================================= */
+const LS = (function(){
+
+  /* A4 hochkant in Zehntel-Millimetern, wie Verovio sie zaehlt. Fest, nicht
+     nach Bildschirm: Nur so bleibt der Umbruch derselbe, egal ob Mac oder
+     iPad, und nur so passt eine Notiz spaeter noch auf ihre Stelle. */
+  const A4 = { pageWidth:2100, pageHeight:2970,
+    pageMarginLeft:110, pageMarginRight:110, pageMarginTop:90, pageMarginBottom:110 };
+  const A4_VERH = 2100/2970;
+
+  /* ---- Einstellungen ------------------------------------------------------
+     Vier Regler aus Setup › Darstellung. Farbe und Staerke der Notenlinien
+     sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
+     Handschrift naeher kommen als eine gleichmaessige Verdickung. */
+  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang' };
+  function E(){
+    const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
+    return {
+      hand:    Math.max(0, Math.min(3, z('bs_ls_hand', VORGABE.hand))),
+      farbe:   localStorage.getItem('bs_ls_farbe') || VORGABE.farbe,
+      /* Die Grenzen sind die des Setzers, nicht frei gewaehlt: Verovio nimmt
+         fuer die Notenlinie 0,10 bis 0,30 und fuer den Hals 0,10 bis 0,50.
+         Was darueber liegt, weist es zurueck und faellt auf seinen eigenen
+         Vorgabewert zurueck — die Linie wuerde am oberen Ende des Reglers
+         also duenner statt dicker. Am 19. August beim Pruefen aufgefallen. */
+      linie:   Math.max(0.10, Math.min(0.30, z('bs_ls_linie', VORGABE.linie))),
+      hals:    Math.max(0.10, Math.min(0.50, z('bs_ls_hals',  VORGABE.hals))),
+      akkorde: localStorage.getItem('bs_ls_akkorde') || VORGABE.akkorde
+    };
+  }
+  function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
+
+  /* ---- Die Handschrift ----------------------------------------------------
+     Vier Stufen. Die Welle ist ein Filter des Browsers und wirkt einmal beim
+     Zeichnen; sie kostet nichts und macht aus exakt geraden Linien die
+     Unregelmaessigkeit einer Feder. Stufe 0 laesst alles gerade. */
+  const WELLE = [null, [0.012,2.2], [0.02,3.5], [0.035,5]];
+  function filterEinbauen(){
+    if(document.getElementById('lsFilter')) return;
+    const d=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    d.id='lsFilter'; d.setAttribute('width','0'); d.setAttribute('height','0');
+    d.style.cssText='position:absolute;width:0;height:0';
+    d.innerHTML = WELLE.map((w,i)=> w ? '<filter id="lsW'+i+'">'
+      + '<feTurbulence type="fractalNoise" baseFrequency="'+w[0]+'" numOctaves="2" seed="7" result="n"/>'
+      + '<feDisplacementMap in="SourceGraphic" in2="n" scale="'+w[1]+'" '
+      + 'xChannelSelector="R" yChannelSelector="G"/></filter>' : '').join('');
+    document.body.appendChild(d);
+  }
+
+  /* ---- Akkordschrift ------------------------------------------------------
+     Die Dateien schreiben `min7` und `maj7` aus; das Real Book setzt `-7` und
+     `∆7`. Umgeschrieben wird das ANGEZEIGTE Kuerzel im MusicXML (`kind/@text`),
+     nicht der Akkord selbst — die Harmonie bleibt, was sie ist, und das
+     Transponieren rechnet unveraendert damit. */
+  const KURZ = {
+    'min':'-', 'mi':'-', 'min7':'-7', 'mi7':'-7', 'min9':'-9', 'min11':'-11',
+    'min13':'-13', 'min6':'-6', 'min(maj7)':'-(△7)',
+    'maj':'', 'maj7':'△7', 'ma7':'△7', 'maj9':'△9',
+    'maj13':'△13', 'maj6':'6', 'dim':'°', 'dim7':'°7'
+  };
+  function akkordeKuerzen(xml){
+    return xml.replace(/(<kind\b[^>]*\btext=")([^"]*)(")/g, (m,a,t,b)=>{
+      if(Object.prototype.hasOwnProperty.call(KURZ,t)) return a+KURZ[t]+b;
+      return a + t.replace(/^min/,'-').replace(/^maj/,'△').replace(/^dim/,'°') + b;
+    });
+  }
+
+  /* ---- Der feste Umbruch --------------------------------------------------
+     Vier Takte je Zeile, zwei bei vollen Takten, nie drei. Erst muessen die
+     Umbrueche AUS DEM HERKUNFTSPROGRAMM weg: Verovio haelt sich sonst an die
+     und nicht an unsere, und dann steht die Zeile mal mit einem, mal mit
+     sechs Takten da. */
+  function umbrechen(xml, proZeile){
+    proZeile = proZeile || 4;
+    xml = xml.replace(/<print\b[^>]*\/>/g,'').replace(/<print\b[^>]*>[\s\S]*?<\/print>/g,'');
+    const erster = /<part\b[^>]*>([\s\S]*?)<\/part>/.exec(xml);
+    const takte = [...(erster?erster[1]:xml).matchAll(/<measure\b[^>]*>([\s\S]*?)<\/measure>/g)];
+    const dicht = takte.map(m=>(m[1].match(/<note\b/g)||[]).length);
+    if(!dicht.length) return xml;
+    const voll=new Set(); dicht.forEach((n,i)=>{ if(n>11) voll.add(i); });
+    const grenzen=new Set();
+    for(let i=0;i<dicht.length;){
+      const g = (voll.has(i)||voll.has(i+1)||voll.has(i+2)||voll.has(i+3)) ? 2 : proZeile;
+      i+=g; if(i<dicht.length) grenzen.add(i);
+    }
+    let nr=-1;
+    return xml.replace(/<measure\b[^>]*>/g, m=>{
+      nr=(nr+1)%dicht.length;
+      return grenzen.has(nr) ? m+'<print new-system="yes"/>' : m;
+    });
+  }
+
+  /* ---- Eine Stimme herausziehen -------------------------------------------
+     Der Befund vom 19. August: Die Akkordsymbole stehen in mehrstimmigen
+     Dateien immer nur bei EINER Stimme, und welche das ist, wechselt von
+     Datei zu Datei — bei 23 von 57 die erste, sonst die zweite oder dritte.
+     Wer eine Stimme ohne Akkorde herauszieht, gibt dem Spieler seine Toene
+     ohne Changes. Deshalb wandern die Akkorde taktweise mit. */
+  function stimmen(xml){
+    const out=[];
+    const re=/<score-part id="([^"]+)"[^>]*>([\s\S]*?)<\/score-part>/g;
+    let m; while((m=re.exec(xml))){
+      const n=/<part-name[^>]*>([\s\S]*?)<\/part-name>/.exec(m[2]);
+      out.push({ id:m[1], name:(n?n[1]:'').replace(/<[^>]*>/g,'').trim() || m[1] });
+    }
+    return out;
+  }
+  function teileTakte(rumpf){ return [...rumpf.matchAll(/<measure\b[^>]*>[\s\S]*?<\/measure>/g)].map(x=>x[0]); }
+
+  function stimmeZiehen(xml, partId){
+    const teile=[...xml.matchAll(/<part id="([^"]+)">([\s\S]*?)<\/part>/g)];
+    if(teile.length<2) return xml;
+    const ziel=teile.find(t=>t[1]===partId); if(!ziel) return xml;
+
+    /* Wer traegt die Akkorde? Die Stimme mit den meisten. */
+    let geber=null, meiste=(ziel[2].match(/<harmony\b/g)||[]).length;
+    teile.forEach(t=>{ const n=(t[2].match(/<harmony\b/g)||[]).length;
+      if(n>meiste){ meiste=n; geber=t; } });
+
+    let rumpf=ziel[2];
+    if(geber){
+      const gt=teileTakte(geber[2]), zt=teileTakte(rumpf);
+      const neu=zt.map((takt,i)=>{
+        const q=gt[i]; if(!q) return takt;
+        const h=(q.match(/<harmony\b[\s\S]*?<\/harmony>/g)||[]).join('');
+        if(!h) return takt;
+        const p=takt.search(/<note\b/);
+        return p<0 ? takt.replace(/<\/measure>$/, h+'</measure>')
+                   : takt.slice(0,p)+h+takt.slice(p);
+      });
+      let k=-1; rumpf=rumpf.replace(/<measure\b[^>]*>[\s\S]*?<\/measure>/g, ()=>neu[++k]);
+    }
+    return xml
+      .replace(/<part id="([^"]+)">[\s\S]*?<\/part>/g, (m,p)=>
+        p===partId ? '<part id="'+p+'">'+rumpf+'</part>' : '')
+      .replace(/<score-part id="([^"]+)">[\s\S]*?<\/score-part>/g, (m,p)=>p===partId?m:'');
+  }
+
+  /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
+  let _tk=null, _laeuft=null;
+  function bereit(){ return !!_tk; }
+  function holen(sagen){
+    if(_tk) return Promise.resolve(_tk);
+    if(_laeuft) return _laeuft;
+    _laeuft = (async ()=>{
+      if(sagen) sagen('Der Notensetzer wird geholt — einmalig, danach liegt er auf dem Gerät.');
+      const wurzel = new URL('vendor/verovio/', location.href).href;
+      const [mod, kit] = await Promise.all([
+        import(wurzel+'verovio-module.mjs'),
+        import(wurzel+'verovio.mjs')
+      ]);
+      _tk = new kit.VerovioToolkit(await mod.default());
+      return _tk;
+    })();
+    _laeuft.catch(()=>{ _laeuft=null; });
+    return _laeuft;
+  }
+
+  /* ---- Setzen -------------------------------------------------------------
+     `opt.tonart`  Verovio-Schreibweise: '+M2', 'Eb', '' fuer wie geliefert
+     `opt.stimme`  Kennung der Stimme aus `stimmen()`, leer = alles
+     Zurueck kommt ein Satz fertiger Seiten als SVG. */
+  async function setze(quelle, opt){
+    opt = opt || {};
+    const e = E();
+    const tk = await holen(opt.sagen);
+    let xml = String(quelle);
+    if(opt.stimme) xml = stimmeZiehen(xml, opt.stimme);
+    if(e.akkorde==='kurz') xml = akkordeKuerzen(xml);
+    xml = umbrechen(xml, 4);
+
+    const o = Object.assign({}, A4, {
+      scale:100, unit:9, font:'Petaluma', breaks:'line',
+      header:'none', footer:'none', harmDist:2.2, spacingStaff:12,
+      staffLineWidth:e.linie, stemWidth:e.hals,
+      barLineWidth:0.5, thickBarlineThickness:1.5, ledgerLineThickness:0.34,
+      transpose: opt.tonart || ''
+    });
+    tk.setOptions(o);
+    const t0 = (window.performance||Date).now();
+    tk.loadData(xml);
+    const n = tk.getPageCount();
+    const seiten=[];
+    for(let i=1;i<=n;i++) seiten.push(tk.renderToSVG(i));
+    return { seiten, verhaeltnis:A4_VERH, ms:Math.round((window.performance||Date).now()-t0) };
+  }
+
+  return { E, setzen, VORGABE, WELLE, filterEinbauen, setze, stimmen,
+           bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH };
+})();
+window.LS = LS;
+
 const BS = (function(){
   const DB='bandstand', VER=1;
   const S_BUCH='buecher', S_TITEL='titel', S_EL='elemente', S_BYTE='bytes',
@@ -7092,6 +7412,13 @@ const BS = (function(){
        einem Workshop gibt man einem Bandkollegen vielleicht gern, dem Rest der
        Welt eher nicht. Am 1. August von Jens verlangt. */
     foto:      { name:'Foto',       bytes:true,  oeffnen:'buehne',  austausch:'zuruf',  endung:'.pdf' },
+    /* Ein Leadsheet ist Musik als Daten, nicht als Seite: MusicXML oder ABC.
+       Es bringt Bytes mit wie ein Blatt, wird aber nicht angezeigt, sondern
+       GESETZT — in jeder Tonart und fuer jedes Instrument. Deshalb ein
+       eigenes Verhalten beim Oeffnen; der PDF-Betrachter bleibt unberuehrt.
+       Beim Austausch ist es der guenstigste Fall im ganzen Bestand: ein paar
+       Kilobyte statt ein paar hundert. Am 19. August aufgenommen. */
+    leadsheet: { name:'Leadsheet',  bytes:true,  oeffnen:'noten',   austausch:'immer',  endung:'.musicxml' },
     verweis:   { name:'Verweis',    bytes:false, oeffnen:'extern',  austausch:'immer',  endung:'' },
   };
   const artOk = a => Object.prototype.hasOwnProperty.call(ARTEN,a);
@@ -8169,7 +8496,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-09 · Titel zusammenführen';
+const APP_BUILD='2026-08-19 · Leadsheets sehen';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -8906,7 +9233,7 @@ setTimeout(ablageAnmelden, 0);
       +(p.kind==='pdf'?'<button class="pdetach" title="Vom Stück lösen → Sonstiges Material"><i class="i ic-external-link"></i></button>':'')
       +'<button class="pdel" title="Ganz entfernen (Datei löschen)"><i class="i ic-trash-2"></i></button></div>').join('')+'</div>'; }
     html+='<button class="btn" id="pAdd" style="width:100%;margin-top:10px">＋ Datei(en) hochladen</button>'
-      +'<input type="file" id="pFile" accept="application/pdf,audio/*,.pdf,.mp3,.m4a,.wav" multiple class="dateifeld">';
+      +'<input type="file" id="pFile" accept="application/pdf,audio/*,.pdf,.mp3,.m4a,.wav,.musicxml,.mxl,.xml,.abc" multiple class="dateifeld">';
     sec.innerHTML=html;
     // Rolle je Zeile ändern
     sec.querySelectorAll('.prole-sel').forEach(sel=>{ sel.onchange=()=>{
@@ -9971,6 +10298,20 @@ setTimeout(ablageAnmelden, 0);
       s.append(b);
     });
     return s;
+  }
+  /* Ein Schieber fuer stufenlose Werte. Der Zahlenwert steht daneben, sonst
+     schiebt man ins Blinde. Geschrieben wird beim Loslassen und beim Ziehen —
+     die Vorschau auf der Buehne soll mitgehen. */
+  function regler(min, max, schritt, jetzt, tu, format){
+    const w=document.createElement('div'); w.className='row'; w.style.cssText='gap:10px;align-items:center';
+    const r=document.createElement('input'); r.type='range'; r.className='sreg';
+    r.min=min; r.max=max; r.step=schritt; r.value=jetzt;
+    const z=document.createElement('span'); z.className='muted';
+    z.style.cssText='min-width:42px;text-align:right;font-variant-numeric:tabular-nums';
+    const zeig=v=>{ z.textContent = format ? format(v) : String(v); };
+    zeig(jetzt);
+    r.oninput=()=>{ zeig(+r.value); tu(+r.value); };
+    w.append(r,z); return w;
   }
   function karte(titel, zeilen, erklaerung){
     const box=document.createDocumentFragment();
@@ -11472,6 +11813,34 @@ setTimeout(ablageAnmelden, 0);
       'An: Ein Notizblatt zählt wie eine weitere Seite des Stücks. Erst nach der '
       +'letzten Notiz geht es zum nächsten Titel. Aus: Nach der letzten Notenseite '
       +'geht es sofort weiter, die Notizen erreichst Du über die Stimmenwahl.'));
+
+    /* ---- Leadsheets (19. August) ----------------------------------------
+       Ein gesetztes Blatt wirkt maschinell, weil jede Linie exakt gerade
+       ist. Die Handschrift-Stufe legt eine leichte Welle darueber; sie ist
+       Voreinstellung und nicht Zierrat. Farbe, Linien- und Halsstaerke
+       stehen getrennt, weil duenne Linien mit kraeftigem Hals der
+       Handschrift naeher kommen als eine gleichmaessige Verdickung. */
+    const lsNeu=()=>{ if(window.blattNeuZeichnen) blattNeuZeichnen(true); };
+    const eLS=LS.E();
+
+    const z_lh=zeile('Handschrift','Wie stark die Linien aus der Geraden laufen');
+    z_lh._ctl.append(wahl([['0','Aus'],['1','Fein'],['2','Mittel'],['3','Stark']],
+      String(eLS.hand), v=>{ LS.setzen('hand',v); lsNeu(); }));
+    const z_lf=zeile('Farbe der Notenlinien','Grau nimmt dem Blatt die Härte, Schwarz die Unschärfe');
+    z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#555555','Mittel'],['#777777','Grau']],
+      eLS.farbe, v=>{ LS.setzen('farbe',v); lsNeu(); }));
+    const z_ll=zeile('Stärke der Notenlinien','Die fünf Linien des Systems');
+    z_ll._ctl.append(regler(0.10, 0.30, 0.02, eLS.linie,
+      v=>{ LS.setzen('linie',v); lsNeu(); }, v=>v.toFixed(2)));
+    const z_ls=zeile('Stärke der Notenhälse','Getrennt von den Linien — das macht den Unterschied');
+    z_ls._ctl.append(regler(0.10, 0.50, 0.02, eLS.hals,
+      v=>{ LS.setzen('hals',v); lsNeu(); }, v=>v.toFixed(2)));
+    const z_la=zeile('Akkordschrift','Wie geliefert oder in der Schreibweise des Real Book');
+    z_la._ctl.append(wahl([['lang','Cmin7'],['kurz','C-7']],
+      eLS.akkorde, v=>{ LS.setzen('akkorde',v); lsNeu(); }));
+    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_la],
+      'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
+      +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
   }
 
   /* ---- Thema: Werkzeugleiste ---- */
@@ -11620,7 +11989,7 @@ setTimeout(ablageAnmelden, 0);
     const kopf=zeile(ub.name, stuecke.length+' '+stueckWort(stuecke.length)
       + ' · '+blattZahl+' '+blattWort(blattZahl));
     kopf._ctl.append(
-      knopf('＋ PDF', ()=>dateiWaehlen(fs=>importPdfs(ub.bid,fs), 'application/pdf,.pdf', true)),
+      knopf('＋ PDF', ()=>dateiWaehlen(fs=>importPdfs(ub.bid,fs), 'application/pdf,.pdf,.musicxml,.mxl,.xml,.abc', true)),
       knopf('Buch löschen', ()=>deleteBook(ub.bid), 'warn'));
     const zeilen=[kopf];
 
@@ -12008,8 +12377,9 @@ setTimeout(ablageAnmelden, 0);
 
       if(AUDIO_ENDUNG.test(name)){ const x={file:e.file, pfad:e.pfad, titel, name};
         toene.push(x); st.toene.push(x); return; }
-      if(!PDF_ENDUNG.test(name) && !/pdf$/i.test(e.file.type||'')){
-        uebergangen.push({file:e.file, pfad:e.pfad, name, grund:'weder PDF noch Ton'}); return; }
+      if(!PDF_ENDUNG.test(name) && !/pdf$/i.test(e.file.type||'')
+         && !istLeadsheet(name, e.file.type)){
+        uebergangen.push({file:e.file, pfad:e.pfad, name, grund:'weder Noten noch Ton'}); return; }
 
       const kennung = e.pfad || name;
       const rest = ausOrdner ? restNachTitel(name, roh) : zerlegt.rest;
