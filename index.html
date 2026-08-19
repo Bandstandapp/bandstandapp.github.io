@@ -1272,6 +1272,17 @@
   .supscroll{flex:1;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
      padding:6px 22px calc(40px + env(safe-area-inset-bottom))}
   .supscroll .sgrp:first-child{margin-top:14px}
+  /* Die Werkzeugleiste von Content klebt am unteren Rand des Rollbereichs.
+     Sie erscheint erst mit der Auswahl — vorher nimmt sie keine Hoehe. Der
+     Verlauf darueber laesst die Liste darunter weglaufen, statt sie hart
+     abzuschneiden. */
+  .cwerkleiste{position:sticky;bottom:calc(-6px - env(safe-area-inset-bottom));
+     z-index:5;margin:12px 0 0;padding:10px 0 calc(12px + env(safe-area-inset-bottom));
+     background:var(--bg-app)}
+  .cwerkleiste::before{content:'';position:absolute;left:0;right:0;bottom:100%;height:22px;
+     background:linear-gradient(to top, var(--bg-app), transparent);pointer-events:none}
+  .cwerkleiste .scard{box-shadow:var(--shadow-dock);border-color:var(--accent-edge)}
+  .cwerkleiste[hidden]{display:none}
   /* Auch im Hochformat zweispaltig. Die Themen lagen dort als waagerechte
      Reihe, und was nicht in die Breite passte, lag ausserhalb — man sah nie
      alle sechs auf einmal. Die Spalte ist schmaler als im Querformat, aber
@@ -8847,7 +8858,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20e · Kamera und leeres Blatt';
+const APP_BUILD='2026-08-20f · Suchen und Werkzeuge in Content';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10639,7 +10650,10 @@ setTimeout(ablageAnmelden, 0);
   let cAktion=null;          /* {art:'verschieben'|'kopieren', ebene, ids} */
   const C_ARTEN_KEY='bs_teilen_arten';
 
-  function cZuruecksetzen(){ cWahl=new Set(); }
+  /* Beim Ebenenwechsel faellt die Auswahl weg — und die Suche mit ihr. Ein
+     Suchwort, das aus der vorigen Ebene stehen bleibt, laesst die neue leer
+     erscheinen, und niemand sucht die Ursache im Feld darueber. */
+  function cZuruecksetzen(){ cWahl=new Set(); cSuche=''; }
   function cEbene(){ return cFlach ? 'titel' : (cPfad.length===0 ? 'buch' : cPfad.length===1 ? 'titel' : 'element'); }
   const cBuch  = () => (BS_KATALOG.buecher||[]).find(b=>b.id===cPfad[0]) || null;
   const cTitel = () => (BS_KATALOG.titel||[]).find(t=>t.id===cPfad[1]) || null;
@@ -10995,6 +11009,17 @@ setTimeout(ablageAnmelden, 0);
 
   /* Was auf dieser Ebene in der Liste steht. Eine Zeile ist ein Ding mit
      Kennung, Namen, einer Kennzahl und dem Weg nach unten. */
+  /* Wie viele Zeilen HAETTE die Ebene ohne Suche und Buchstabe? Daran haengt
+     nur die Frage, ob die Finden-Karte ueberhaupt lohnt — deshalb wird
+     gezaehlt und nicht gebaut. */
+  function cReihenRoh(){
+    const K=BS_KATALOG;
+    if(cFlach) return (K.titel||[]);
+    if(cPfad.length===0) return (K.buecher||[]);
+    if(cPfad.length===1) return (K.titel||[]).filter(t=>t.buchId===cPfad[0]);
+    return (K.elemente||[]).filter(e=>e.titelId===cPfad[1]);
+  }
+
   function cReihen(){
     const K=BS_KATALOG;
     if(cFlach){
@@ -11009,8 +11034,14 @@ setTimeout(ablageAnmelden, 0);
                        + ' · ' + (K.elemente||[]).filter(e=>e.titelId===x.id).length + ' Elemente',
                 zahl:'' }));
     }
+    /* Die Suche gilt auf jeder Ebene, nicht nur in „Alle Titel". Jens hat am
+       20. August danach gefragt: Wer in einem Buch mit vierhundert Titeln ein
+       einzelnes Notizblatt loeschen will, soll nicht scrollen muessen. */
+    const q = cSuche ? norm(cSuche) : '';
     if(cPfad.length===0){
-      return (K.buecher||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
+      let bb=(K.buecher||[]).slice();
+      if(q) bb=bb.filter(b=>norm(b.name||'').includes(q));
+      return bb.sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
         .map(b=>{ const tz=(K.titel||[]).filter(t=>t.buchId===b.id);
           const ez=(K.elemente||[]).filter(e=>tz.some(t=>t.id===e.titelId));
           return { id:b.id, name:b.name,
@@ -11019,6 +11050,8 @@ setTimeout(ablageAnmelden, 0);
     }
     if(cPfad.length===1){
       return (K.titel||[]).filter(t=>t.buchId===cPfad[0])
+        .filter(t=>!q || norm(t.titel||'').includes(q) || norm(t.komponist||'').includes(q))
+        .filter(t=>!cBuchst || initialOf({t:t.titel})===cBuchst)
         .sort((a,b)=>(a.titel||'').localeCompare(b.titel||'','de'))
         .map(t=>{ const el=(K.elemente||[]).filter(e=>e.titelId===t.id)
                     .sort((a,b)=>(a.reihung||0)-(b.reihung||0));
@@ -11028,6 +11061,11 @@ setTimeout(ablageAnmelden, 0);
             hinein:()=>{ cPfad=[cPfad[0], t.id]; cZuruecksetzen(); zeichne(); } }; });
     }
     return (BS_KATALOG.elemente||[]).filter(e=>e.titelId===cPfad[1])
+      /* Auf der Element-Ebene wird ueber alles gesucht, was in der Zeile
+         steht: Etikett, Instrument, Art und Dateiname. „Notiz" findet damit
+         die Notizblaetter, „alt" die Alt-Stimmen. */
+      .filter(e=>!q || [e.etikett, e.instrument, (BS.ARTEN[e.art]||{}).name, e.dateiname]
+                        .some(x=>norm(x||'').includes(q)))
       .sort((a,b)=>(a.reihung||0)-(b.reihung||0))
       .map(e=>({ id:e.id, name:zeigStimme(e.etikett,e.instrument)||BS.ARTEN[e.art].name,
         unten: BS.ARTEN[e.art].name + ' · ' + esc(e.dateiname||'ohne Datei')
@@ -11199,20 +11237,11 @@ setTimeout(ablageAnmelden, 0);
         : 'Hake an, was Du bewegen, umbenennen oder weitergeben willst');
     z.classList.add('werkzeuge');
     if(folgen) z.classList.add('warnrow');
-    const reihen=cReihen();
-    if(reihen.length) z._ctl.append(knopf(n===reihen.length?'Auswahl aufheben':'Alle auswählen', ()=>{
-      if(n===reihen.length) cWahl=new Set(); else cWahl=new Set(reihen.map(r=>r.id));
-      zeichne(); }));
-    /* Der Hebel: Bei vierhundert Titeln von Hand die Doppelten zu suchen ist
-       die eigentliche Arbeit — nicht das Zusammenführen selbst. Der Knopf
-       steht nur da, wenn es wirklich etwas anzuhaken gibt. */
-    if(eb==='titel'){
-      const doppelt=cDoppelteNamen(reihen);
-      if(doppelt.ids.length) z._ctl.append(knopf(
-        'Gleiche Namen anhaken ('+doppelt.namen+')',
-        ()=>{ cWahl=new Set(doppelt.ids); zeichne(); }));
-    }
+    /* „Alle anhaken" und „Gleiche Namen anhaken" stehen seit dem 20. August
+       oben in der Finden-Karte. Sie sind der Weg IN eine Auswahl hinein, und
+       diese Leiste erscheint erst, wenn man schon drin ist. */
     if(!n) return z;
+    z._ctl.append(knopf('Auswahl aufheben', ()=>{ cWahl=new Set(); zeichne(); }));
     if(eb!=='buch'){
       z._ctl.append(
         knopf(cMenge(eb,n)+' verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
@@ -11656,24 +11685,66 @@ setTimeout(ablageAnmelden, 0);
       }
     }
 
-    /* Der Suchschlitz — nur auf der flachen Ebene, wo die Liste lang wird. */
-    if(cFlach){
-      const z_s=zeile('Suchen','Titel oder Komponist');
-      const s=document.createElement('input'); s.className='txt'; s.type='search';
-      s.value=cSuche; s.placeholder='Suche'; s.style.maxWidth='220px';
-      s.oninput=()=>{ cSuche=s.value; cZeichneNurListe(); };
-      z_s._ctl.append(s);
-      const z_abc=zeile('Anfangsbuchstabe', cBuchst?('gefiltert auf „'+cBuchst+'"'):'alle');
-      const abc=document.createElement('div'); abc.className='seg2';
-      abc.style.cssText='flex-wrap:wrap;max-width:420px';
-      ['Alle','#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
-        .forEach(b=>{ const k=document.createElement('button'); k.textContent=b;
-          const wert = b==='Alle' ? '' : b;
-          k.setAttribute('aria-pressed', wert===cBuchst);
-          k.onclick=()=>{ cBuchst=wert; zeichne(); };
-          abc.append(k); });
-      z_abc._ctl.append(abc);
-      w.append(karte('Finden',[z_s, z_abc]));
+    /* ---- Finden ----------------------------------------------------------
+       Bis zum 20. August stand der Suchschlitz nur in „Alle Titel". In einem
+       Buch mit vierhundert Titeln blieb nur das Scrollen, und wer ein
+       einzelnes Notizblatt loeschen wollte, suchte es mit dem Daumen.
+
+       Die Karte steht jetzt auf jeder Ebene, sobald die Liste lang genug ist,
+       dass Suchen schneller waere als Sehen — oder sobald schon gesucht wird,
+       denn sonst verschwaende sie unter der Hand, wenn die Trefferzahl faellt.
+       Der Anfangsbuchstabe bleibt den Titel-Ebenen vorbehalten; bei Buechern
+       und Elementen sortiert er nichts Sinnvolles. */
+    {
+      const alleReihen = cReihenRoh();
+      const lohnt = alleReihen.length>=10 || cSuche || cBuchst;
+      if(lohnt){
+        const was = eb==='buch' ? 'Name des Buchs'
+                  : eb==='titel' ? 'Titel oder Komponist'
+                  : 'Stimme, Art oder Dateiname';
+        const z_s=zeile('Suchen', was);
+        const s=document.createElement('input'); s.className='txt'; s.type='search';
+        s.value=cSuche; s.placeholder='Suche'; s.style.maxWidth='220px';
+        s.oninput=()=>{ cSuche=s.value; cZeichneNurListe(); };
+        z_s._ctl.append(s);
+        if(cSuche) z_s._ctl.append(knopf('Zurücksetzen', ()=>{ cSuche=''; zeichne(); }));
+        const kartenZeilen=[z_s];
+
+        if(eb==='titel' && alleReihen.length>=25){
+          const z_abc=zeile('Anfangsbuchstabe', cBuchst?('gefiltert auf „'+cBuchst+'"'):'alle');
+          const abc=document.createElement('div'); abc.className='seg2';
+          abc.style.cssText='flex-wrap:wrap;max-width:420px';
+          ['Alle','#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
+            .forEach(b=>{ const k=document.createElement('button'); k.textContent=b;
+              const wert = b==='Alle' ? '' : b;
+              k.setAttribute('aria-pressed', wert===cBuchst);
+              k.onclick=()=>{ cBuchst=wert; zeichne(); };
+              abc.append(k); });
+          z_abc._ctl.append(abc);
+          kartenZeilen.push(z_abc);
+        }
+
+        /* Die beiden Hebel zum Anhaken stehen OBEN, nicht in der Leiste
+           darunter: Sie sind ein Weg in die Auswahl hinein, und die Leiste
+           erscheint erst, wenn man drin ist. */
+        const reihenJetzt=cReihen();
+        const z_w=zeile('Auswahl',
+          cWahl.size ? (cMenge(eb,cWahl.size)+' angehakt')
+                     : 'Noch nichts angehakt');
+        if(reihenJetzt.length) z_w._ctl.append(knopf(
+          cWahl.size===reihenJetzt.length ? 'Auswahl aufheben' : 'Alle sichtbaren anhaken',
+          ()=>{ if(cWahl.size===reihenJetzt.length) cWahl=new Set();
+                else cWahl=new Set(reihenJetzt.map(r=>r.id));
+                zeichne(); }));
+        if(eb==='titel'){
+          const doppelt=cDoppelteNamen(reihenJetzt);
+          if(doppelt.ids.length) z_w._ctl.append(knopf(
+            'Gleiche Namen anhaken ('+doppelt.namen+')',
+            ()=>{ cWahl=new Set(doppelt.ids); zeichne(); }));
+        }
+        kartenZeilen.push(z_w);
+        w.append(karte('Finden', kartenZeilen));
+      }
     }
 
     /* Neu anlegen — OBEN in der Liste, nicht in einem zweiten Dialog. */
@@ -11778,8 +11849,29 @@ setTimeout(ablageAnmelden, 0);
                : eb==='titel' ? 'Titel ('+reihen.length+')'
                : 'Elemente ('+reihen.length+')';
     w.append(karte(kopf, zeilen));
-    w.append(karte(null,[cWerkzeuge()]));
 
+    /* ---- Die Werkzeuge schweben ------------------------------------------
+       Sie standen bis zum 20. August am ENDE der Liste. Bei vierhundert
+       Titeln liegt das vierhundert Zeilen tief: Man hakt oben an und sucht
+       unten den Knopf. Genau der Fall, den das Werkzeugleisten-Konzept vom
+       7. August als Schritt 1 beschreibt.
+
+       Gebaut ist es als klebende Leiste am unteren Rand von Content und
+       NICHT als dieselbe schwebende Leiste wie in der Hauptliste. Der Grund
+       steht im Konzept selbst unter „Was schiefgehen kann": Beide Leisten
+       teilen sich dann eine Auswahl, und die von Content wuerde die der
+       Hauptliste ueberschreiben. Das ist die heikelste Stelle des Umbaus,
+       und sie ist fuer diesen Schritt nicht noetig. Ob es dabei bleibt,
+       entscheidet Jens am Geraet — auch das steht im Konzept, unter „Offen".
+
+       Sichtbar wird sie erst, wenn etwas angehakt ist. So nimmt sie keine
+       Hoehe weg, solange man nur schaut, und das war der Einwand gegen eine
+       feste Leiste. */
+    const halter=document.createElement('div');
+    halter.className='cwerkleiste';
+    if(!cWahl.size) halter.hidden=true;
+    halter.append(karte(null,[cWerkzeuge()]));
+    w.append(halter);
   }
 
   /* ================================================================
