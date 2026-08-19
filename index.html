@@ -1283,6 +1283,13 @@
      background:linear-gradient(to top, var(--bg-app), transparent);pointer-events:none}
   .cwerkleiste .scard{box-shadow:var(--shadow-dock);border-color:var(--accent-edge)}
   .cwerkleiste[hidden]{display:none}
+  /* Der Name einer Content-Zeile als Text. Er sieht antippbar aus, ohne ein
+     Formular zu sein — ein Doppeltipp macht ein Feld daraus. */
+  .cname{font-weight:600;font-size:15px;line-height:1.3;overflow:hidden;
+     text-overflow:ellipsis;white-space:nowrap;cursor:text;
+     padding:2px 0;border-bottom:1px dashed transparent}
+  .cname:hover{border-bottom-color:var(--line-soft)}
+  .ckomp{opacity:.85}
   /* Auch im Hochformat zweispaltig. Die Themen lagen dort als waagerechte
      Reihe, und was nicht in die Breite passte, lag ausserhalb — man sah nie
      alle sechs auf einmal. Die Spalte ist schmaler als im Querformat, aber
@@ -8858,7 +8865,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-20f · Suchen und Werkzeuge in Content';
+const APP_BUILD='2026-08-20g · Handlungen wandern in die Leiste';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10759,6 +10766,13 @@ setTimeout(ablageAnmelden, 0);
         tu:()=>{ cPfad=[b.id]; cAktion=null; cZuruecksetzen(); zeichne(); }});
       const t=cTitel(); if(t) teile.push({text:t.titel});
     }
+    /* Läuft eine Handlung, steht sie am Ende des Pfades (Schritt 5). Wer nach
+       einer Unterbrechung zurückkommt, liest oben „Content › Blauton › Zwei
+       Titel verschieben" und weiß wieder, was er angefangen hat. Die Ebene
+       darüber bleibt stehen — sonst wüsste man nicht, worauf es wirkt. */
+    if(cAktion) teile.push({text:
+      cMenge(cAktion.ebene, (cAktion.ids||[]).length) + ' '
+      + (cAktion.art==='verschieben' ? 'verschieben' : 'kopieren')});
     return teile;
   }
   function kopfSetzen(){
@@ -11092,57 +11106,95 @@ setTimeout(ablageAnmelden, 0);
       if(cWahl.has(r.id)) cWahl.delete(r.id); else cWahl.add(r.id);
       zeichne(); };
     const text=document.createElement('div'); text.style.cssText='flex:1;min-width:0';
-    const feld=document.createElement('input'); feld.className='txt'; feld.value=r.name||'';
-    feld.style.cssText='width:100%;min-width:0';
-    feld.onclick=e=>e.stopPropagation();
-    feld.onchange=()=>umbenennen(r, feld.value.trim());
-    text.append(feld);
-    /* Der Komponist gehoert dem TITEL und gilt fuer alle seine Elemente. Das
-       Feld stand bis zum 30. Juli in der alten Verwaltung; ohne es liesse sich
-       der Komponist nirgends mehr eintragen. */
-    if('komponist' in r){
-      const kf=document.createElement('input'); kf.className='txt'; kf.value=r.komponist||'';
-      kf.placeholder='Komponist';
-      kf.style.cssText='width:100%;min-width:0;margin-top:6px';
-      kf.onclick=e=>e.stopPropagation();
-      kf.onchange=async()=>{
-        try{ await BS.aendern('titel', r.id, {komponist:kf.value.trim()}); }
-        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
-        await loadLibrary(); render(); zeichne();
-      };
-      text.append(kf);
+
+    /* ---- Der Name steht als TEXT (Schritt 4, 20. August) -----------------
+       Bis heute war jede Zeile ein Formular: ein Eingabefeld je Name, bei
+       Titeln ein zweites für den Komponisten. Bequem war das, und es hatte
+       einen Preis — vierhundert Felder für vierhundert Titel, auch wenn
+       niemand etwas ändern will. Der Name ist jetzt Text; ein Doppeltipp
+       macht ein Feld daraus, die Eingabetaste schreibt es fest, Escape
+       verwirft. Über die Leiste geht es ebenso, bei genau einer Auswahl. */
+    const nameEl=document.createElement('div'); nameEl.className='cname';
+    nameEl.textContent = r.name || '(ohne Namen)';
+    nameEl.title = 'Doppeltippen zum Umbenennen';
+    nameEl.ondblclick = e=>{ e.stopPropagation(); cFeldStattText(nameEl, r, umbenennen); };
+    text.append(nameEl);
+    if('komponist' in r && r.komponist){
+      const k=document.createElement('div'); k.className='sb ckomp';
+      k.textContent=r.komponist; text.append(k);
     }
     if(r.unten){ const s=document.createElement('div'); s.className='sb'; s.innerHTML=r.unten; text.append(s); }
     links.innerHTML=''; links.append(box, text);
+
+    /* ---- Nur noch die Navigation an der Zeile (Schritt 2) ----------------
+       „Öffnen" ändert nichts, es sieht nach — das bleibt hier. Stimme,
+       Vorschau und Aufschlagen sind in die Leiste gewandert und wirken dort
+       auf die AUSWAHL statt auf ihre eigene Zeile. Zwanzig Blätter mit einer
+       Stimme zu versehen war vorher zwanzig Griffe. */
     if(r.hinein) z._ctl.append(knopf('Öffnen ›', r.hinein));
-    if(r.el){
-      /* Die Stimme lässt sich auch lange nach dem Import richtigstellen. Auf
-         dem Schalter steht das Etikett, verglichen wird das Instrument —
-         geändert wird hier also das Instrument, und das Etikett folgt, solange
-         es keines von Hand gibt. */
-      z._ctl.append(AWAHL.knopf(()=>{
-        const jetzt=(BS_KATALOG.elemente||[]).find(x=>x.id===r.el.id) || r.el;
-        const wert=jetzt.instrument||'';
-        const eintraege=stimmenAuswahlBestand();
-        const e=eintraege.find(x=>x.wert===wert)||eintraege[0];
-        return { wert, eintraege, text:e.text, ton:e.ton };
-      }, async neu=>{
-        try{ await saveLibMeta(r.el.id, {voice:neu}); }
-        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
-        zeichne();
-      }, 'Stimme festlegen'));
-      if(BS.ARTEN[r.el.art].bytes) z._ctl.append(knopf('Vorschau', ()=>cVorschau(r.el)));
-      /* Der Weg zurueck auf die Buehne. Die Vorschau schwebt ueber Content und
-         dient dem Pruefen; „Aufschlagen" verlaesst Content und legt das Blatt
-         auf die Buehne — genau die Zeile, die hier steht, und nicht die, die
-         die Voice-Wahl von selbst waehlen wuerde. Deshalb der Stimmwunsch. */
-      if(BS.ARTEN[r.el.art].oeffnen==='buehne'){
-        const t=LIBTUNES.find(x=>x.libId===r.el.id);
-        if(t) z._ctl.append(knopf('Aufschlagen', ()=>{
-          zu(); window.stimmWunsch(t.stimme||''); window.openViewer(t); }));
-      }
-    }
     return z;
+  }
+
+  /* Aus dem Text ein Feld machen und wieder zurück. */
+  function cFeldStattText(nameEl, r, umbenennen){
+    if(nameEl.dataset.offen) return;
+    nameEl.dataset.offen='1';
+    const feld=document.createElement('input'); feld.className='txt';
+    feld.value = r.name || '';
+    feld.style.cssText='width:100%;min-width:0';
+    nameEl.replaceWith(feld);
+    feld.focus(); feld.select();
+    let fertig=false;
+    const schliessen = schreiben => {
+      if(fertig) return; fertig=true;
+      if(schreiben) umbenennen(r, feld.value.trim());
+      else zeichne();
+    };
+    feld.onblur=()=>schliessen(true);
+    feld.onkeydown=e=>{
+      if(e.key==='Enter'){ e.preventDefault(); schliessen(true); }
+      else if(e.key==='Escape'){ e.preventDefault(); schliessen(false); }
+    };
+    feld.onclick=e=>e.stopPropagation();
+  }
+
+  /* Umbenennen über die Leiste — mit dem Komponisten, wo es einen gibt.
+     Das Konzept ließ offen, ob er ins selbe Feld gehört oder in eine zweite
+     Zeile; mit dem fertigen Bild vor Augen ist die zweite Zeile richtig. Ein
+     Schrägstrich im Namen wäre eine Falle: „AC/DC" hieße dann Komponist DC. */
+  function cUmbenennenBlatt(r){
+    openSheet(card=>{
+      const eb=cEbene();
+      card.innerHTML='<h2>Umbenennen</h2><div class="muted" style="margin:-6px 0 14px">'
+        + (eb==='buch' ? 'Der Name des Buchs.'
+         : eb==='titel' ? 'Titel und Komponist dieses Stücks.'
+         : 'Das Etikett dieses Elements — was auf dem Schalter steht.') + '</div>';
+      const wrap=document.createElement('div');
+      wrap.innerHTML='<div class="lbl" style="margin:0 0 6px">Name</div>'
+        +'<input class="txt" id="cnName" value="'+esc(r.name||'')+'">'
+        +(('komponist' in r)
+          ? '<div class="lbl" style="margin:12px 0 6px">Komponist</div>'
+            +'<input class="txt" id="cnKomp" value="'+esc(r.komponist||'')+'" placeholder="(leer lassen)">'
+          : '');
+      card.append(wrap);
+      const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
+      row.innerHTML='<button class="btn" id="cnOk" style="flex:2">Speichern</button>'
+        +'<button class="btn ghost" id="cnAb" style="flex:1">Abbrechen</button>';
+      card.append(row);
+      const speichern=async()=>{
+        const nm=wrap.querySelector('#cnName').value.trim();
+        const kf=wrap.querySelector('#cnKomp');
+        closeSheet();
+        if(kf){
+          try{ await BS.aendern('titel', r.id, {komponist:kf.value.trim()}); }
+          catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+        }
+        await cUmbenennen(r, nm);
+      };
+      row.querySelector('#cnOk').onclick=speichern;
+      row.querySelector('#cnAb').onclick=closeSheet;
+      wrap.querySelector('#cnName').addEventListener('keydown',e=>{ if(e.key==='Enter') speichern(); });
+    });
   }
 
   async function cVorschau(el){
@@ -11242,6 +11294,49 @@ setTimeout(ablageAnmelden, 0);
        diese Leiste erscheint erst, wenn man schon drin ist. */
     if(!n) return z;
     z._ctl.append(knopf('Auswahl aufheben', ()=>{ cWahl=new Set(); zeichne(); }));
+
+    /* Umbenennen braucht genau eines — bei zwanzig gäbe es nichts einzutragen. */
+    if(n===1){
+      const r=cReihen().find(x=>x.id===ids[0]);
+      if(r) z._ctl.append(knopf('Umbenennen', ()=>cUmbenennenBlatt(r)));
+    }
+
+    /* Die Stimme für die GANZE Auswahl (Schritt 3). Das ist der häufigste
+       Griff beim Ordnen: Nach einem Import tragen zwanzig Blätter „Not
+       Assigned", und zwanzig Griffe dafür waren der Grund, es zu lassen.
+       Angezeigt wird die Stimme des ersten Angehakten; tragen sie
+       Verschiedenes, steht der Schalter leer und setzt trotzdem alle. */
+    if(eb==='element'){
+      const els=ids.map(id=>(BS_KATALOG.elemente||[]).find(x=>x.id===id)).filter(Boolean);
+      if(els.length) z._ctl.append(AWAHL.knopf(()=>{
+        const werte=new Set(els.map(e=>e.instrument||''));
+        const wert = werte.size===1 ? [...werte][0] : '';
+        const eintraege=stimmenAuswahlBestand();
+        const e=eintraege.find(x=>x.wert===wert)||eintraege[0];
+        return { wert, eintraege,
+                 text: werte.size>1 ? 'Verschiedene' : e.text, ton:e.ton };
+      }, async neu=>{
+        await beiArbeit('Stimme wird gesetzt…', cMenge(eb,els.length)+'.', async()=>{
+          try{ await saveLibMetaMehrere(els.map(e=>e.id), {voice:neu}); }
+          catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+        });
+        zeichne();
+      }, els.length===1 ? 'Stimme festlegen' : 'Stimme für '+els.length+' Elemente'));
+    }
+
+    /* Vorschau und Aufschlagen zeigen EIN Blatt — bei zwanzig gäbe es nichts
+       zu zeigen, deshalb stehen sie nur bei genau einem. */
+    if(eb==='element' && n===1){
+      const el=(BS_KATALOG.elemente||[]).find(x=>x.id===ids[0]);
+      if(el && BS.ARTEN[el.art] && BS.ARTEN[el.art].bytes)
+        z._ctl.append(knopf('Vorschau', ()=>cVorschau(el)));
+      if(el && BS.ARTEN[el.art] && BS.ARTEN[el.art].oeffnen!=='extern'){
+        const t=LIBTUNES.find(x=>x.libId===el.id);
+        if(t) z._ctl.append(knopf('Aufschlagen', ()=>{
+          zu(); window.stimmWunsch(t.stimme||''); window.openViewer(t); }));
+      }
+    }
+
     if(eb!=='buch'){
       z._ctl.append(
         knopf(cMenge(eb,n)+' verschieben', ()=>{ cAktion={art:'verschieben', ebene:eb, ids}; zeichne(); }),
@@ -11410,6 +11505,27 @@ setTimeout(ablageAnmelden, 0);
     zeilen.push(neu);
 
     const K=BS_KATALOG;
+    /* Die Namen des Bewegten — daran wird gemessen, ob im Ziel schon etwas
+       gleich heißt. Verglichen wird über `norm()`, dieselbe Normalisierung wie
+       beim Sortieren und beim Zusammenführen. */
+    const bewegteNamen = new Set(ids.map(id=>{
+      if(ebene==='titel'){ const t=(K.titel||[]).find(x=>x.id===id); return t?norm(t.titel||''):''; }
+      const e=(K.elemente||[]).find(x=>x.id===id);
+      return e ? norm(zeigStimme(e.etikett,e.instrument)||'') : '';
+    }).filter(Boolean));
+    /* Wie viele im Ziel tragen einen dieser Namen schon? */
+    const bewegt=new Set(ids);
+    function schonDa(zielId){
+      if(!bewegteNamen.size) return 0;
+      /* Was gerade bewegt wird, zählt nicht gegen sich selbst. Ohne diese
+         Zeile warnt das Herkunftsbuch immer — es enthält das Stück ja noch. */
+      const drin = zielEbene==='buch'
+        ? (K.titel||[]).filter(t=>t.buchId===zielId && !bewegt.has(t.id)).map(t=>norm(t.titel||''))
+        : (K.elemente||[]).filter(e=>e.titelId===zielId && !bewegt.has(e.id))
+            .map(e=>norm(zeigStimme(e.etikett,e.instrument)||''));
+      return drin.filter(x=>bewegteNamen.has(x)).length;
+    }
+
     const ziele = zielEbene==='buch'
       ? (K.buecher||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'))
           .map(b=>({id:b.id, name:b.name,
@@ -11418,7 +11534,14 @@ setTimeout(ablageAnmelden, 0);
           .map(t=>({id:t.id, name:t.titel,
             unten:((K.buecher||[]).find(b=>b.id===t.buchId)||{}).name||''}));
     ziele.forEach(z=>{
-      const r=zeile(z.name, z.unten);
+      /* Steht dort schon etwas gleichen Namens, sagt es die Zeile — VORHER.
+         Wer „Blue Bossa" in ein Buch schiebt, in dem schon eines steht, soll
+         das nicht erst hinterher sehen, wenn beide nebeneinanderstehen. */
+      const doppelt=schonDa(z.id);
+      const r=zeile(z.name, z.unten
+        + (doppelt ? ' · <b>'+doppelt+' gleichnamige'+(doppelt===1?'s':' Einträge')
+                     +' steht'+(doppelt===1?'':'en')+' schon hier</b>' : ''));
+      if(doppelt) r.classList.add('warnrow');
       r._ctl.append(knopf(art==='verschieben'?'Hierher':'Kopie hierher',
         ()=>cZielAusfuehren(art, ebene, ids, z.id)));
       zeilen.push(r);
