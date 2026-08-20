@@ -7313,28 +7313,16 @@ async function irealAdresse(t){
   const takte = lsAkkorde(b.svgs);
   if(!takte.length || !takte.some(x=>x.length)) return null;
   let quelle=''; try{ quelle=await leadQuelle(t); }catch(e){}
-  const taktart = lsTaktart(quelle);
-  /* Ein Takt ohne eigenen Akkord uebernimmt den vorigen — iReal Pro schreibt
-     dafuer einen Schraegstrich. */
-  const stuecke = takte.map(namen=>
-    namen.length ? namen.map(irealAkkord).filter(Boolean).join(' ') : ' ');
-  /* Die Akkordfolge steht zwischen Taktstrichen und nicht frei. Bis zum
-     21. August fing sie ohne oeffnenden Strich an und hoerte ohne
-     Schlussstrich auf; iReal Pro startete, meldete aber „Datei konnte nicht
-     geoeffnet werden". */
-  const folge = '['+'T'+taktart+'*A' + stuecke.join(' |') + ' ]';
-  /* Am 21. August wies iOS die Adresse als „Invalid URL" zurueck: Eckige
-     Klammern sind fuer IPv6-Adressen reserviert und in einer URL nicht
-     zulaessig; ein Taktstrich ebenso wenig. Kodiert wird deshalb wieder alles,
-     was nicht in eine URL gehoert — die Raute zuerst, sonst machte `F#-7` den
-     Rest zur Sprungmarke. `encodeURI` laesst `=` stehen, und das ist hier das
-     Trennzeichen zwischen den Feldern. */
-  const zeichen = x => encodeURI(String(x))
-    .replace(/#/g,'%23').replace(/&/g,'%26').replace(/=/g,'%3D')
-    .replace(/\?/g,'%3F').replace(/\+/g,'%2B');
-  const teile = [ (t.t||'Stück'), (t.c||''), 'Medium Swing',
-                  (t._lsGelesen||'C'), 'n', folge ];
-  return 'irealbook://' + teile.map(zeichen).join('=');
+  /* Bis zum 21. August entstand hier ein `irealbook://`-Verweis. Neuere
+     Fassungen von iReal Pro nehmen das alte Format nicht an — sie melden
+     „Datei konnte nicht geöffnet werden", gleich wie er gebaut ist. Jetzt
+     geht dasselbe hinüber wie bei einem Chord-Sheet. */
+  const rumpf = IR.rumpfBauen(
+    takte.map(namen => namen.map(irealAkkord).filter(Boolean)),
+    lsTaktart(quelle).replace(/(\d)(\d)/,'$1/$2'));
+  return IR.schreiben({ rumpf, stil:'Medium Swing' },
+    { titel: t.t || 'Stück', komponist: t.c || '',
+      tonart: (t._lsGelesen || 'C') + (t._lsOrg && t._lsOrg.moll ? '-' : '') });
 }
 
 /* Das Blatt als Bild — mit oder ohne die eigenen Notizen. */
@@ -9068,28 +9056,36 @@ const IR = (function(){
 
   function rumpfLesen(t){
     const takte = [];
-    let takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false };
+    let takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false, trenner:'|' };
     let taktart = '';
-    const neuerTakt = () => {
+    /* Der Trenner NACH einem Takt wird mitgeschrieben. iReal Pro kennt
+       mehrere — `|` fuer den gewoehnlichen Taktstrich, `LZ` fuer einen
+       Zeilenwechsel, `][` zwischen zwei Abschnitten —, und wer sie beim
+       Zurueckschreiben durch einen einzigen ersetzt, bekommt ein anderes
+       Blatt zurueck, als er hergegeben hat. Am 21. August auf dem iPad
+       gesehen: Takte verschmolzen, Marken sassen mitten drin. */
+    const neuerTakt = (trenner) => {
+      takt.trenner = trenner || '|';
       takte.push(takt);
-      takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false };
+      takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false, trenner:'|' };
     };
     let i = 0;
     while(i < t.length){
       const r = t.slice(i);
       let m;
-      if(r.startsWith('LZ') || r[0]==='|'){ neuerTakt(); i += r.startsWith('LZ') ? 2 : 1; continue; }
-      if(r[0]==='Z'){ takt.zu='ende'; neuerTakt(); i++; continue; }
+      if(r.startsWith('LZ')){ neuerTakt('LZ'); i += 2; continue; }
+      if(r[0]==='|'){ neuerTakt('|'); i++; continue; }
+      if(r[0]==='Z'){ takt.zu='ende'; neuerTakt(''); i++; continue; }
       if((m = /^T(\d)(\d)/.exec(r))){ taktart = m[1]+'/'+m[2]; i += 3; continue; }
       if((m = /^\*([A-Za-z])/.exec(r))){ takt.marke = m[1].toUpperCase(); i += 2; continue; }
       if((m = /^N(\d)/.exec(r))){ takt.endung = m[1]; i += 2; continue; }
       /* Klammern sind AUCH Taktstriche: Zwischen zwei Abschnitten steht
          `]*B[` und sonst nichts. Wer nur `LZ` und `|` trennt, laesst drei
          Takte zu einem verschmelzen. */
-      if(r[0]==='}'){ takt.zu='wdh'; neuerTakt(); i++; continue; }
-      if(r[0]===']'){ neuerTakt(); i++; continue; }
-      if(r[0]==='{'){ if(takt.akkorde.length) neuerTakt(); takt.auf='wdh'; i++; continue; }
-      if(r[0]==='['){ if(takt.akkorde.length) neuerTakt(); i++; continue; }
+      if(r[0]==='}'){ takt.zu='wdh'; neuerTakt(''); i++; continue; }
+      if(r[0]===']'){ neuerTakt(''); i++; continue; }
+      if(r[0]==='{'){ if(takt.akkorde.length) neuerTakt(''); takt.auf='wdh'; i++; continue; }
+      if(r[0]==='['){ if(takt.akkorde.length) neuerTakt(''); i++; continue; }
       /* Zwei Fuellzeichen, am 21. August an „Autumn Leaves" geklaert.
 
          `XyQ` fuellt den REST EINES TAKTES: Es steht hinter jedem Akkord, der
@@ -9107,14 +9103,19 @@ const IR = (function(){
         }
         i += 3; continue;
       }
-      if(r.startsWith('Kcl')){ neuerTakt(); takt.akkorde.push('%'); i += 3; continue; }
+      if(r.startsWith('Kcl')){ neuerTakt(''); takt.akkorde.push('%'); i += 3; continue; }
       if(r[0]==='x'){ takt.akkorde.push('%'); i++; continue; }
       if(r[0]==='s' || r[0]==='l' || r[0]==='U' || r[0]==='Y'){ i++; continue; }
-      if(r[0]===',' || r[0]===' '){ i++; continue; }
+      /* Zwischen zwei Akkorden steht mal ein Leerzeichen, mal ein Komma —
+         iReal Pro setzt sie verschieden, und das Blatt sieht danach anders
+         aus. Gemerkt wird, was dastand. */
+      if(r[0]===',' || r[0]===' '){ takt._t = takt._t || []; 
+        if(takt.akkorde.length) takt._t[takt.akkorde.length-1] = r[0];
+        i++; continue; }
       if((m = AKKORD.exec(r))){ takt.akkorde.push(m[0]); i += m[0].length; continue; }
       i++;   /* unbekanntes Zeichen: uebergehen */
     }
-    neuerTakt();
+    neuerTakt('');
     return { taktart: taktart || '4/4',
              takte: takte.filter((x,k)=> x.akkorde.length || x.marke || x.endung || k===0) };
   }
@@ -9414,6 +9415,7 @@ const IR = (function(){
   function transponieren(o, dq){
     if(!dq) return o;
     return Object.assign({}, o, {
+      rumpf: rumpfTransponieren(o.rumpf, dq),
       takte: (o.takte||[]).map(t => Object.assign({}, t,
         { akkorde: t.akkorde.map(a => akkordTransponieren(a, dq)) }))
     });
@@ -9434,31 +9436,48 @@ const IR = (function(){
      Geschrieben wird die Fassung, die gerade auf dem Blatt steht. Wer in
      BandStand nach F transponiert hat, bekommt sie in F, und die Begleitband
      spielt in F. Das ist der Rundlauf, den das Konzept als Pruefstein nennt. */
-  function rumpfSchreiben(o){
-    const teile = [];
-    let ersteMarke = true;
-    (o.takte||[]).forEach((t, i)=>{
-      if(t.auf==='wdh') teile.push('{');
-      if(t.marke){ teile.push((ersteMarke?'':'|')+'*'+t.marke); ersteMarke=false; }
-      if(t.endung) teile.push('N'+t.endung);
-      if(i===0 && o.taktart) teile.push('T'+String(o.taktart).replace('/',''));
-      if(!t.akkorde.length) teile.push(' ');
-      t.akkorde.forEach((a,k)=>{
-        if(a==='%'){ teile.push('Kcl'); return; }
-        teile.push(k ? ','+a : a);
-      });
-      /* Ein Takt mit nur einem Akkord wird aufgefuellt — so schreibt es iReal
-         Pro selbst, und ohne das ruecken die Takte zusammen. */
-      if(t.akkorde.length===1 && t.akkorde[0]!=='%') teile.push('XyQ');
-      if(t.zu==='wdh') teile.push('}');
-      /* Der erzwungene Umbruch: leere Takte fuellen den Rest der Zeile, damit
-         das Naechste — eine Endung, ein Abschnitt — neu beginnt. */
-      if(t.umbruch) teile.push('XyQ');
-      if(t.zu==='ende') teile.push('Z');
-      else if(!t.zu && i < (o.takte.length-1)) teile.push('|');
-      else if(t.zu==='wdh' && i < (o.takte.length-1)) teile.push('|');
+  /* Der Rumpf wird NICHT neu gebaut, sondern im Original geaendert: Es werden
+     nur die Akkordnamen ersetzt, alles andere bleibt Zeichen fuer Zeichen
+     stehen. Ein Nachbau muesste die ganze Syntax treffen — wo `|` steht und wo
+     `LZ`, wann `][` einen Abschnitt oeffnet, dass ein Wiederholungstakt keinen
+     eigenen Taktstrich braucht. Am 21. August einmal versucht: iReal Pro zeigte
+     verschmolzene Takte und Marken mitten im Takt.
+
+     So bleibt der Rundlauf verlustfrei, und was BandStand nicht versteht,
+     ueberlebt trotzdem. */
+  function rumpfTransponieren(rumpf, dq){
+    if(!dq) return String(rumpf||'');
+    let aus='', i=0;
+    const t = String(rumpf||'');
+    while(i < t.length){
+      const r = t.slice(i);
+      /* Alles, was ein Akkord sein KOENNTE, muss vorher ausgeschlossen sein —
+         `Kcl` faengt mit einem K an, aber `Bb` steckt in keinem Schluesselwort. */
+      if(r.startsWith('XyQ') || r.startsWith('Kcl')){ aus += r.slice(0,3); i+=3; continue; }
+      if(r.startsWith('LZ')){ aus += 'LZ'; i+=2; continue; }
+      if(/^[TN]\d/.test(r)){ aus += r.slice(0,2); i+=2; continue; }
+      if(/^\*[A-Za-z]/.test(r)){ aus += r.slice(0,2); i+=2; continue; }
+      const m = AKKORD.exec(r);
+      if(m && m[0]){ aus += akkordTransponieren(m[0], dq); i += m[0].length; continue; }
+      aus += t[i]; i++;
+    }
+    return aus;
+  }
+
+  /* Ein Rumpf aus dem Nichts — fuer ein LEADSHEET, das keinen mitbringt. Aus
+     den beiden am 21. August vermessenen Stuecken abgelesen: ein Takt mit
+     einem Akkord wird mit `XyQ` aufgefuellt, zwei Akkorde trennt ein
+     Leerzeichen, mehr trennt ein Komma, und am Schluss steht ein `Z`. */
+  function rumpfBauen(takte, taktart){
+    const t = ['*A', 'T'+String(taktart||'4/4').replace('/','')];
+    const n = takte.length;
+    takte.forEach((akk, i)=>{
+      if(!akk.length) t.push(' ');
+      else akk.forEach((a,k)=>{ if(k) t.push(akk.length===2 ? ' ' : ','); t.push(a); });
+      if(akk.length===1) t.push('XyQ');
+      t.push(i===n-1 ? 'Z' : '|');
     });
-    return teile.join('');
+    return t.join('');
   }
 
   /* Der Komponist geht als „Nachname Vorname" zurueck — so haelt iReal Pro es. */
@@ -9469,7 +9488,7 @@ const IR = (function(){
 
   function schreiben(o, opt){
     opt = opt || {};
-    const rumpf = MARKER + dreh(rumpfSchreiben(o));
+    const rumpf = MARKER + dreh(o.rumpf || '');
     const felder = [
       opt.titel || o.titel || 'Stück',
       nameDrehen(opt.komponist || o.komponist || ''),
@@ -9490,7 +9509,7 @@ const IR = (function(){
     return 'irealb://' + felder.map(z).join('=');
   }
 
-  return { dreh, lesen, rumpfLesen, rumpfSchreiben, schreiben, zeichnen, zeilenBauen,
+  return { dreh, lesen, rumpfLesen, rumpfTransponieren, rumpfBauen, schreiben, zeichnen, zeilenBauen,
            transponieren, akkordTransponieren, tonartVon, A4, MARKER };
 })();
 window.IR = IR;
@@ -10705,7 +10724,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Der Rundlauf schließt sich';
+const APP_BUILD='2026-08-21 · Der Rumpf bleibt, nur die Akkorde wandern';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
