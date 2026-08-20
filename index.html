@@ -7635,7 +7635,8 @@ async function renderChordFit(t){
     const svg = IR.zeichnen(o, {
       breite: 21000, hoehe: Math.round(21000/verh),
       titel:t.t||'', komponist:t.c||o.komponist||'', taktart:o.taktart, stil:o.stil||'',
-      fuss:irealFuss(o, t.tempo), akkgroesse:e.akkgroesse });
+      fuss:irealFuss(o, t.tempo), akkgroesse:e.akkgroesse,
+      schrift:e.csschrift, akkstrich:e.akkstrich });
 
     if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
       window.SHEET_RATIO=verh; if(window.layout) window.layout();
@@ -8185,7 +8186,7 @@ const LS = (function(){
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
   const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0,
-                    akkgroesse:1.0, akkstrich:0 };
+                    akkgroesse:1.0, akkstrich:0, csschrift:'druck' };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -8211,7 +8212,11 @@ const LS = (function(){
          Hoehe. Null ist die Schrift, wie sie kommt; 0,10 ist deutlich fett.
          Bis zum 21. August war das ein Schalter mit zwei Stufen — Jens wollte
          dazwischen regeln koennen. */
-      akkstrich:  Math.max(0, Math.min(0.12, z('bs_ls_akkstrich', VORGABE.akkstrich)))
+      akkstrich:  Math.max(0, Math.min(0.12, z('bs_ls_akkstrich', VORGABE.akkstrich))),
+      /* Die Schrift des CHORD-SHEETS — nicht die des gesetzten Blattes. Ein
+         Chord-Sheet hat keine Noten, und die Handschrift, die zu ihnen passt,
+         kennt weder Dreieck noch Grad-Zeichen. */
+      csschrift: localStorage.getItem('bs_ls_csschrift') || VORGABE.csschrift
     };
   }
   function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
@@ -9242,12 +9247,41 @@ const IR = (function(){
      laege man daneben: `%` ist schmal, `Bb7b13` breit. Gemessen wird auf einer
      Leinwand, weil das kein DOM braucht und auch dort geht, wo das Blatt nur
      als Text entsteht — beim Export und beim Weitergeben. */
+  /* ---- Zwei Schriften, und warum es zwei sein muessen ---------------------
+     Petaluma Script ist die Handschrift der Leadsheets, und auf einem
+     Chord-Sheet hat sie einen Mangel, der am 22. August am Zeichenvorrat
+     nachgewiesen wurde: Sie kennt weder das Dreieck fuer den grossen
+     Septakkord (U+25B3) noch das Grad-Zeichen (U+00B0). Beide stehen in
+     jedem zweiten Akkordnamen. Was der Browser dann tut, ist das Richtige und
+     sieht trotzdem falsch aus: Er holt das fehlende Zeichen aus einer anderen
+     Schrift, und `Ab△7` steht als Mischung aus zwei Handschriften auf dem
+     Blatt.
+
+     Die Druckschrift hat alles, was ein Akkordname braucht, und ausserdem
+     einen ECHTEN fetten Schnitt — die kleinen Zeichen muessen dann nicht mehr
+     mit einem Rand verdickt werden. iReal Pro setzt seine Blaetter ebenso.
+     Die Handschrift bleibt waehlbar, weil sie zum gesetzten Blatt passt.    */
+  const SCHRIFTEN = {
+    hand:  { css:"'PetalumaScript',ui-sans-serif,sans-serif", fett:'',    strich:0.055 },
+    druck: { css:"'Helvetica Neue',Helvetica,Arial,ui-sans-serif,sans-serif",
+             fett:'700', strich:0.022 }
+  };
+  let SCHRIFT = SCHRIFTEN.druck;
+  /* Was der Regler in Setup zusaetzlich auftraegt, in Bruchteilen der eigenen
+     Hoehe — derselbe Wert, der am gesetzten Blatt die Akkorde kraeftigt. */
+  let EXTRA = 0;
+  function schriftWaehlen(name, extra){
+    SCHRIFT = SCHRIFTEN[name] || SCHRIFTEN.druck;
+    EXTRA = Math.max(0, Math.min(0.12, +extra || 0));
+  }
+
   let _mess=null;
   function textBreite(txt, groesse){
     if(!txt) return 0;
     try{
       if(!_mess) _mess=document.createElement('canvas').getContext('2d');
-      _mess.font = Math.round(groesse)+'px PetalumaScript, sans-serif';
+      _mess.font = (SCHRIFT.fett ? SCHRIFT.fett+' ' : '')
+                 + Math.round(groesse)+'px '+SCHRIFT.css;
       return _mess.measureText(txt).width;
     }catch(e){ return String(txt).length * groesse * 0.55; }
   }
@@ -9260,7 +9294,8 @@ const IR = (function(){
     if(!txt) return 0;
     try{
       if(!_mess) _mess=document.createElement('canvas').getContext('2d');
-      _mess.font = Math.round(groesse)+'px PetalumaScript, sans-serif';
+      _mess.font = (SCHRIFT.fett ? SCHRIFT.fett+' ' : '')
+                 + Math.round(groesse)+'px '+SCHRIFT.css;
       const m = _mess.measureText(txt);
       return m.actualBoundingBoxRight !== undefined
            ? Math.max(m.actualBoundingBoxRight, m.width*0.55) : m.width;
@@ -9344,8 +9379,8 @@ const IR = (function(){
     const M = akkordMasse(gr, !!z.unten);
     let w = tinteBreite(z.grund, gr);
     if(z.vz)   w += M.luft + tinteBreite(z.vz, M.gVz);
-    if(z.oben) w += M.luft + Math.max(tinteBreite(z.oben,  M.gKlein),
-                                      tinteBreite(z.unten, M.gKlein));
+    if(z.oben) w += M.luft + Math.max(reiheBreite(z.oben,  M.gKlein),
+                                      reiheBreite(z.unten, M.gKlein));
     if(z.bass) w += M.luft + tinteBreite(z.bass, M.gBass);
     return w;
   }
@@ -9355,14 +9390,62 @@ const IR = (function(){
      blass daneben. Verdickt wird deshalb mit einem Rand in derselben Farbe,
      genau so viel, wie die Verkleinerung weggenommen hat. Derselbe Griff wie
      beim Regler fuer die Akkordstaerke am gesetzten Blatt. */
-  const STRICH = 0.055;
+  /* Zwei Anteile: Was die Verkleinerung weggenommen hat, und was der Nutzer
+     obendrauf will. Der erste gleicht aus, der zweite gestaltet. */
   function kraeftig(g, gr){
-    const d = (gr - g) * STRICH;
+    const d = (gr - g) * SCHRIFT.strich + g * EXTRA;
     return d > gr*0.002
       ? ' paint-order="stroke" stroke="#000" stroke-linejoin="round" stroke-width="'
         + (Math.round(d*100)/100) + '"'
       : '';
   }
+
+  /* ---- Dreieck und Grad werden GEZEICHNET, nicht gesetzt ------------------
+     Am 22. August am Zeichenvorrat nachgemessen: Weder Petaluma Script noch
+     Helvetica kennt das Dreieck des grossen Septakkords (U+25B3) oder das
+     Grad-Zeichen (U+00B0). Der Browser holt sie dann aus einer Ersatzschrift,
+     und die liefert ein Dreieck, das bei 200 Pixeln 200 Pixel breit ist —
+     fast doppelt so breit wie eine Ziffer und viel zu duenn dafuer.
+
+     Zwei Striche und ein Kreis sind schneller gezeichnet als gesucht, und sie
+     passen dann in Breite und Staerke zu der Schrift, neben der sie stehen. */
+  const SONDER = { '△':0.60, '°':0.40 };
+  const rnd = x => Math.round(x);
+  function sonderPfad(ch, x, y, g){
+    const d = g * (SCHRIFT.fett ? 0.095 : 0.075);
+    if(ch === '△'){
+      const h = g*0.60, b = g*0.54;
+      return '<path d="M'+rnd(x+b/2)+' '+rnd(y-h)+' L'+rnd(x+b)+' '+rnd(y)
+           + ' L'+rnd(x)+' '+rnd(y)+' Z" fill="none" stroke="#000" stroke-width="'
+           + rnd(d)+'" stroke-linejoin="round"/>';
+    }
+    const r = g*0.15;
+    return '<circle cx="'+rnd(x+r+d/2)+'" cy="'+rnd(y-g*0.46)+'" r="'+rnd(r)
+         + '" fill="none" stroke="#000" stroke-width="'+rnd(d)+'"/>';
+  }
+
+  /* Eine Reihe Zeichen, in der Dreieck und Grad ausgetauscht sind. Breite und
+     Satz kommen aus derselben Schleife — sonst laufen sie auseinander. */
+  function reihe(txt, x, y, g, gr, nurBreite){
+    const T = [];
+    let dx = 0, puffer = '';
+    const leeren = () => {
+      if(!puffer) return;
+      if(!nurBreite) T.push('<text x="'+rnd(x+dx)+'" y="'+rnd(y)+'" font-size="'+rnd(g)
+        + '" fill="#000"'+kraeftig(g, gr)+'>'+esc(puffer)+'</text>');
+      dx += textBreite(puffer, g); puffer = '';
+    };
+    for(const ch of String(txt||'')){
+      if(SONDER[ch]){
+        leeren();
+        if(!nurBreite) T.push(sonderPfad(ch, x+dx, y, g));
+        dx += SONDER[ch]*g;
+      } else puffer += ch;
+    }
+    leeren();
+    return { svg:T.join(''), breite:dx };
+  }
+  function reiheBreite(txt, g){ return reihe(txt, 0, 0, g, g, true).breite; }
 
   /* Der fertige Akkord, an seiner Grundlinie aufgehaengt. Passt er nicht in
      den Takt, wird die ganze Gruppe SCHMAL gezogen — gleiche Hoehe, engere
@@ -9388,15 +9471,16 @@ const IR = (function(){
         + Math.round(g)+'" fill="#000"'+kraeftig(g, gr)+'>'+esc(txt)+'</text>'); };
 
     let dx = 0;
-    setz(dx, 0, gr, z.grund);
+    setz(dx, 0, gr, z.grund);   /* traegt ueber `kraeftig` den Reglerwert mit */
     dx += tinteBreite(z.grund, gr);
     if(z.vz){ dx += M.luft; setz(dx, -M.hVz, M.gVz, z.vz);
               dx += tinteBreite(z.vz, M.gVz); }
     if(z.oben){
       dx += M.luft;
-      setz(dx, -M.hOben,  M.gKlein, z.oben);
-      setz(dx, -M.hUnten, M.gKlein, z.unten);
-      dx += Math.max(tinteBreite(z.oben, M.gKlein), tinteBreite(z.unten, M.gKlein));
+      const o = reihe(z.oben,  dx, -M.hOben,  M.gKlein, gr);
+      const u = z.unten ? reihe(z.unten, dx, -M.hUnten, M.gKlein, gr) : {svg:'',breite:0};
+      T.push(o.svg, u.svg);
+      dx += Math.max(o.breite, u.breite);
     }
     if(z.bass){ dx += M.luft; setz(dx, 0, M.gBass, z.bass); }
 
@@ -9409,6 +9493,7 @@ const IR = (function(){
      Wiederholungszeichen grau neben schwarzen Akkorden. */
   function zeichnen(o, opt){
     opt = opt || {};
+    schriftWaehlen(opt.schrift, opt.akkstrich);
     const B = Math.round(opt.breite || A4.b);
     const H = Math.round(opt.hoehe  || A4.h);
     const rand = Math.round(Math.min(B,H) * 0.055);
@@ -9607,8 +9692,13 @@ const IR = (function(){
       T.push('<text x="'+Math.round(rand)+'" y="'+Math.round(H-rand*0.45)+'" font-size="'
         +Math.round(rand*0.42)+'" fill="#000">'+esc(opt.fuss)+'</text>');
 
+    /* Die Schrift steht als STYLE im SVG und nicht als Attribut: Die Seite
+       setzt fuer `.pg.ls svg` die Handschrift, und eine Regel schlaegt jedes
+       Praesentationsattribut. So bringt das Blatt seine Schrift selbst mit —
+       auch dort, wo es die Seite verlaesst. */
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+B+' '+H+'" '
-         + 'width="'+B+'" height="'+H+'">'
+         + 'width="'+B+'" height="'+H+'" style="font-family:'+SCHRIFT.css+'"'
+         + (SCHRIFT.fett ? ' font-weight="'+SCHRIFT.fett+'"' : '') + '>'
          + '<rect width="'+B+'" height="'+H+'" fill="#fff"/>'
          + T.join('') + '</svg>';
   }
@@ -11013,7 +11103,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-22 · Feld fünf ist die Zieltonart';
+const APP_BUILD='2026-08-22 · Eine Schrift, die alle Zeichen hat';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -14703,6 +14793,20 @@ setTimeout(ablageAnmelden, 0);
     w.append(karte(null,[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la,z_lg,z_lw],
       'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
       +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
+
+    /* Ein Chord-Sheet hat keine Noten, und die Handschrift der Leadsheets
+       kennt weder das Dreieck noch das Grad-Zeichen — beide holt der Browser
+       dann aus einer fremden Schrift. Deshalb steht die Wahl hier und nicht
+       oben bei den Leadsheets. */
+    const z_cf=zeile('Schrift der Chord-Sheets',
+      'Die Druckschrift hat alle Zeichen und einen echten fetten Schnitt — die Handschrift passt zum gesetzten Blatt, borgt sich Dreieck und Grad aber woanders');
+    z_cf._ctl.append(wahl([['druck','Druckschrift'],['hand','Handschrift']],
+      eLS.csschrift, v=>{ LS.setzen('csschrift',v); lsNeu(); }));
+    const kopfc=document.createElement('div'); kopfc.className='sgrp';
+    kopfc.textContent='Chord-Sheets'; w.append(kopfc);
+    w.append(karte(null,[z_cf],
+      'Gilt für Changes aus iReal Pro. Größe und Strichstärke der Akkorde kommen '
+      +'von den Reglern darüber.'));
   }
 
   /* ---- Thema: Werkzeugleiste ---- */
