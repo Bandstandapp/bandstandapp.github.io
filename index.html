@@ -4775,6 +4775,7 @@ function openViewer(t, keepNav){
     /* Wie ein Leadsheet aus dem eigenen Bestand — aber ohne Setzer. */
     frame.style.display='none'; frame.src='about:blank';
     fit.style.display='flex'; document.getElementById('vTab').style.display='none';
+    lsKnopfBeschriften(t);
     fitOn=true; renderChordFit(t);
   } else if(t.isEdit){
     frame.style.display='none'; frame.src='about:blank';
@@ -7581,8 +7582,19 @@ async function renderChordFit(t){
   if(!fit.querySelector('.pg')) fit.innerHTML='<div class="lslade">Lädt…</div>';
   try{
     const roh = await chordQuelle(t);
-    const o = IR.lesen(String(roh).trim());
+    let o = IR.lesen(String(roh).trim());
     const e = LS.E();
+
+    /* Tonart und Notation — dieselben zwei Achsen wie beim Leadsheet und an
+       derselben Stelle gemerkt. Gerechnet wird der Abstand in Quinten zwischen
+       dem, was geliefert wurde, und dem, was gelesen werden soll. */
+    const org = IR.tonartVon(o.tonart);
+    const a = LS.ausgabe(t.bsId);
+    const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
+    const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
+    o = IR.transponieren(o, um.gelesenQ - org.q);
+    t._lsOrg = org; t._lsZiel = ziel; t._lsGelesen = um.gelesen;
+    lsKnopfBeschriften(t);
 
     /* Das Blatt bleibt A4, und zwar aus einem Grund, den ich am 21. August
        selbst gebaut habe: Die Buehnenbreite folgt dem Seitenverhaeltnis des
@@ -7793,7 +7805,10 @@ async function lsEditorSeiten(t){
 /* Auf dem Knopf steht, was man gerade liest — nicht das Wort „Tonart".
    Wer eine Stimme in B♭ vor sich hat, will das sehen, ohne zu tippen. */
 function lsKnopfBeschriften(t){
-  const leadsheet = !!(t && t.art==='leadsheet');
+  /* Seit dem 21. August traegt der Knopf auch ein Chord-Sheet: Tonart und
+     Notation sind dieselben zwei Achsen, nur wird nicht gesetzt, sondern
+     gerechnet. */
+  const leadsheet = !!(t && (t.art==='leadsheet' || t.art==='chordsheet'));
   const a = leadsheet ? LS.ausgabe(t.bsId) : {};
   const n = LS.NOTATION.find(y=>y.wert===(a.notation||'C'))||LS.NOTATION[0];
   const ton = (leadsheet && t._lsGelesen) ? t._lsGelesen.replace('b','♭').replace('#','♯') : '';
@@ -7828,17 +7843,26 @@ function lsKnopfBeschriften(t){
 
 /* Tonart, Notation, Stimme — die drei Achsen einer Ausgabe. */
 async function openTonartSheet(t){
-  if(!t || t.art!=='leadsheet') return;
+  if(!t || (t.art!=='leadsheet' && t.art!=='chordsheet')) return;
+  const changes = t.art==='chordsheet';
   /* Erst die Quelle lesen, dann das Blatt oeffnen. Sonst waechst es dem
      Nutzer unter den Fingern, und die Tastaturbedienung geht an den spaeter
      angehaengten Knoepfen vorbei. */
-  let quelle=null, stimmen=[];
-  try{ quelle=await leadQuelle(t); stimmen=LS.stimmen(quelle); }
-  catch(e){ alert('Die Datei zu diesem Leadsheet lässt sich nicht lesen.'); return; }
-  const orgGelesen=LS.tonartLesen(quelle);
+  let quelle=null, stimmen=[], orgGelesen=null;
+  try{
+    if(changes){
+      const o = IR.lesen(String(await chordQuelle(t)).trim());
+      orgGelesen = IR.tonartVon(o.tonart);
+    }else{
+      quelle=await leadQuelle(t); stimmen=LS.stimmen(quelle);
+      orgGelesen=LS.tonartLesen(quelle);
+    }
+  }
+  catch(e){ alert('Die Daten zu diesem Blatt lassen sich nicht lesen.'); return; }
   openSheet(card=>{
     card.innerHTML='<h2>Tonart &amp; Notation</h2>'
-      +'<div class="muted" style="margin:-6px 0 14px">Das Blatt wird neu gesetzt. '
+      +'<div class="muted" style="margin:-6px 0 14px">'
+      +(changes ? 'Die Akkorde werden umgerechnet. ' : 'Das Blatt wird neu gesetzt. ')
       +'Die Datei bleibt unberührt, und die Wahl gilt nur für dieses Stück.</div>';
     const org=orgGelesen;
     const jetzt=LS.ausgabe(t.bsId);
@@ -7857,7 +7881,10 @@ async function openTonartSheet(t){
       const um=LS.rechne(org.q, zielJetzt2, notJetzt2, org.moll);
       erg.innerHTML='Gelesen wird <b>'+esc(um.gelesen.replace('b','♭').replace('#','♯'))
         +(org.moll?'-Moll':'-Dur')+'</b>'
-        +(um.transpose?' · gesetzt um '+esc(um.transpose):' · wie geliefert');
+        /* `-M2` ist die Sprache des Setzers und steht nur, wo gesetzt wird.
+           Bei Changes wird gerechnet, nicht gesetzt. */
+        +(changes ? (um.gelesenQ===org.q ? ' · wie geliefert' : '')
+                  : (um.transpose ? ' · gesetzt um '+esc(um.transpose) : ' · wie geliefert'));
     };
     let zielJetzt2=zielJetzt, notJetzt2=notJetzt;
 
@@ -9186,7 +9213,49 @@ const IR = (function(){
          + T.join('') + '</svg>';
   }
 
-  return { dreh, lesen, rumpfLesen, zeichnen, zeilenBauen, A4, MARKER };
+  /* ---- Transponieren ------------------------------------------------------
+     Bei einem Leadsheet ist das eine Rechnung ueber Tonhoehen und Vorzeichen,
+     und die richtige Schreibweise herauszubekommen hat einen ganzen Tag
+     gekostet. Bei einem Chord-Sheet ist es eine Rechnung ueber NAMEN: Aus
+     `D-7` wird `F-7`, aus `Bb7#11` wird `Db7#11`. Gerechnet wird in Quinten
+     und nicht in Halbtoenen — nur so kommt `Db` heraus und nicht `C#`.
+
+     Die Quintenlogik steht schon in LS und gilt hier unveraendert. */
+  const OHNE_TON = /^(%|N\.?C\.?|\/)$/i;
+
+  function tonTransponieren(n, dq){
+    const q = LS.quintenVon(n);
+    if(q < -7 || isNaN(q)) return n;      /* kein bekannter Grundton */
+    return LS.nameVonQuinten(q + dq);
+  }
+  function akkordTransponieren(a, dq){
+    const s = String(a);
+    if(!dq || OHNE_TON.test(s)) return s;
+    const m = /^([A-G][b#]?)(.*)$/.exec(s);
+    if(!m) return s;
+    let rest = m[2];
+    /* Ein Bass-Ton wandert mit, sonst stuende `F-7/C` ploetzlich falsch. */
+    const bm = /\/([A-G][b#]?)\s*$/.exec(rest);
+    if(bm) rest = rest.slice(0, bm.index) + '/' + tonTransponieren(bm[1], dq);
+    return tonTransponieren(m[1], dq) + rest;
+  }
+  function transponieren(o, dq){
+    if(!dq) return o;
+    return Object.assign({}, o, {
+      takte: (o.takte||[]).map(t => Object.assign({}, t,
+        { akkorde: t.akkorde.map(a => akkordTransponieren(a, dq)) }))
+    });
+  }
+
+  /* Die Tonart, wie iReal Pro sie schreibt: `Db` fuer Dur, `G-` fuer Moll. */
+  function tonartVon(s){
+    const m = /^([A-G][b#]?)\s*(-?)/.exec(String(s||'').trim());
+    if(!m) return { q:0, moll:false, name:'C' };
+    return { q: LS.quintenVon(m[1]), moll: m[2]==='-', name: m[1] };
+  }
+
+  return { dreh, lesen, rumpfLesen, zeichnen, zeilenBauen, transponieren,
+           akkordTransponieren, tonartVon, A4, MARKER };
 })();
 window.IR = IR;
 
@@ -10400,7 +10469,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Das Blatt bleibt A4, die Striche bleiben schwarz';
+const APP_BUILD='2026-08-21 · Changes in jeder Tonart';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
