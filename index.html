@@ -7598,7 +7598,7 @@ async function renderChordFit(t){
 
     const svg = IR.zeichnen(o, {
       breite: 21000, hoehe: Math.round(21000/verh),
-      titel:t.t||'', komponist:t.c||'', taktart:o.taktart,
+      titel:t.t||'', komponist:t.c||'', taktart:o.taktart, stil:o.stil||'',
       akkgroesse:e.akkgroesse, farbe:e.farbe });
 
     if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
@@ -8940,16 +8940,24 @@ const IR = (function(){
       if(r[0]===']'){ neuerTakt(); i++; continue; }
       if(r[0]==='{'){ if(takt.akkorde.length) neuerTakt(); takt.auf='wdh'; i++; continue; }
       if(r[0]==='['){ if(takt.akkorde.length) neuerTakt(); i++; continue; }
-      /* `XyQ` fuellt den Rest einer Zeile auf, damit das Naechste — eine
-         Endung, ein Abschnitt — in einer neuen Zeile beginnt. Im MusicXML zum
-         selben Stueck steht an diesen Stellen kein Takt. Es ist also kein
-         Inhalt, sondern ein Umbruch. */
+      /* Zwei Fuellzeichen, am 21. August an „Autumn Leaves" geklaert.
+
+         `XyQ` fuellt den REST EINES TAKTES: Es steht hinter jedem Akkord, der
+         allein in seinem Takt steht — `C-7XyQ|F7XyQ|`. Steht es dagegen ohne
+         Akkord davor, fuellt es leere Takte am Zeilenende, damit das Naechste
+         neu beginnt; bei „Body And Soul" sind das vier Stueck vor der zweiten
+         Endung. Deshalb dieselbe Marke, zwei Bedeutungen — und die haengt
+         daran, ob im Takt schon etwas steht.
+
+         `Kcl` ist der Wiederholungstakt: noch einmal dasselbe. */
       if(r.startsWith('XyQ')){
-        if(takte.length) takte[takte.length-1].umbruch = true;
-        else takt.umbruch = true;
+        if(!takt.akkorde.length){
+          if(takte.length) takte[takte.length-1].umbruch = true;
+          else takt.umbruch = true;
+        }
         i += 3; continue;
       }
-      /* `x` ist der Wiederholungstakt: „noch einmal dasselbe". */
+      if(r.startsWith('Kcl')){ neuerTakt(); takt.akkorde.push('%'); i += 3; continue; }
       if(r[0]==='x'){ takt.akkorde.push('%'); i++; continue; }
       if(r[0]==='s' || r[0]==='l' || r[0]==='U' || r[0]==='Y'){ i++; continue; }
       if(r[0]===',' || r[0]===' '){ i++; continue; }
@@ -9072,6 +9080,10 @@ const IR = (function(){
 
     if(opt.titel) text(B/2, rand + kopf*0.55, kopf*0.52, esc(String(opt.titel).toUpperCase()), 'middle');
     if(opt.komponist) text(B-rand, rand + kopf*0.92, kopf*0.30, esc(opt.komponist), 'end');
+    /* Der Stil steht links unter dem Titel, wie bei iReal Pro. Er sagt, wie
+       das Stueck gemeint ist — „Ballad" oder „Medium Swing" —, und das
+       gehoert auf ein Blatt, aus dem gespielt wird. */
+    if(opt.stil) text(rand, rand + kopf*0.92, kopf*0.30, '('+esc(opt.stil)+')', 'start');
 
     zeilen.forEach((zeile, zi)=>{
       const oben = y0 + zi*ZH;
@@ -9083,7 +9095,7 @@ const IR = (function(){
       const gew = zeile.map((t,k)=> 1
         + ((zi===0 && k===0 && opt.taktart) ? 0.45 : 0)
         + (t.auf==='wdh' ? 0.12 : 0) + (t.zu ? 0.10 : 0)
-        + Math.max(0, (t.akkorde.length-2) * 0.12));
+        + Math.max(0, (t.akkorde.length-1) * 0.16));
       const summe = gew.reduce((a,b)=>a+b, 0);
       const kanten = [rand];
       gew.forEach(g=>kanten.push(kanten[kanten.length-1] + breite*g/summe));
@@ -9135,6 +9147,10 @@ const IR = (function(){
         const feld = Math.max(w*0.3, rechts-links);
         const n = t.akkorde.length;
         const yb = oben + hoch*0.72;
+        /* Mehrere Akkorde in einem Takt werden kleiner gesetzt — dasselbe tut
+           iReal Pro, und dafuer steht das `s` in seinem Format. Ohne das
+           standen `G-7` und `Gb7` uebereinander. */
+        const gr2 = gr * (n<=1 ? 1 : n===2 ? 0.76 : 0.60);
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
             /* Der Wiederholungstakt: Schraegstrich mit zwei Punkten. */
@@ -9149,8 +9165,8 @@ const IR = (function(){
           const anker = n===1 ? 'start' : (ai===n-1 ? 'end' : 'start');
           T.push('<text x="'+Math.round(ax)+'" y="'+Math.round(yb)+'" fill="#000"'
             +(anker!=='start'?' text-anchor="'+anker+'"':'')+'>'
-            +'<tspan font-size="'+Math.round(gr)+'">'+esc(k.grund)+'</tspan>'
-            +(k.rest ? '<tspan font-size="'+Math.round(gr*0.62)+'" dy="'+Math.round(-gr*0.06)+'">'
+            +'<tspan font-size="'+Math.round(gr2)+'">'+esc(k.grund)+'</tspan>'
+            +(k.rest ? '<tspan font-size="'+Math.round(gr2*0.62)+'" dy="'+Math.round(-gr2*0.06)+'">'
                        +esc(k.rest)+'</tspan>' : '')
             +'</text>');
         });
@@ -10377,7 +10393,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Das Chord-Sheet füllt die Bühne';
+const APP_BUILD='2026-08-21 · Vierundzwanzig Takte, drei Abschnitte';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
