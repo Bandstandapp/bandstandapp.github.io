@@ -430,6 +430,12 @@
   .fitwrap .pg.ls svg{font-family:'PetalumaScript',ui-sans-serif,sans-serif}
   .fitwrap .pg.ls g.staff>path{stroke:var(--ls-linie,#333)}
   .lslade{color:var(--sub);font-size:14px;text-align:center;padding:24px;line-height:1.5}
+  /* Die Vorschau in Setup. Weisser Grund, weil ein Notenblatt weiss ist —
+     auch in der dunklen Oberflaeche. */
+  .lsvor{background:#fff;border-radius:var(--r-card);overflow:hidden;
+         margin:0 0 12px;min-height:80px;display:flex;align-items:center;justify-content:center}
+  .lsvor svg{width:100%;height:auto;display:block}
+  .lsvor g.staff>path{stroke:var(--ls-linie,#333)}
   .sreg{flex:1;min-width:120px;max-width:210px;accent-color:var(--accent-bright)}
   /* Die Wahlknöpfe im Tonart-Blatt. Ohne diese Regel sagt `aria-pressed` nur
      der Vorlesesoftware, was gewählt ist, und dem Auge nichts. */
@@ -7266,17 +7272,15 @@ async function irealAdresse(t){
      Schlussstrich auf; iReal Pro startete, meldete aber „Datei konnte nicht
      geoeffnet werden". */
   const folge = '['+'T'+taktart+'*A' + stuecke.join(' |') + ' ]';
-  /* Kodiert wird nur, was eine URL zerreisst — nicht die Zeichen, aus denen
-     die Akkordfolge besteht. `encodeURIComponent` machte aus jedem Taktstrich
-     ein `%7C` und aus jeder Klammer ein `%5B`; was davon iReal Pro wieder
-     aufloest, ist nicht dokumentiert. Zwingend ist die Raute: In `F#-7` wuerde
-     sie den Rest der Adresse zum Sprungziel machen. */
-  const zeichen = x => String(x)
-    .replace(/%/g,'%25').replace(/#/g,'%23').replace(/&/g,'%26')
-    .replace(/=/g,'%3D').replace(/\+/g,'%2B').replace(/\?/g,'%3F')
-    .replace(/ /g,'%20')
-    /* Umlaute zuletzt, sonst wuerde das `%` ihrer Kodierung selbst kodiert. */
-    .replace(/[^\x20-\x7E]/g, c=>encodeURIComponent(c));
+  /* Am 21. August wies iOS die Adresse als „Invalid URL" zurueck: Eckige
+     Klammern sind fuer IPv6-Adressen reserviert und in einer URL nicht
+     zulaessig; ein Taktstrich ebenso wenig. Kodiert wird deshalb wieder alles,
+     was nicht in eine URL gehoert — die Raute zuerst, sonst machte `F#-7` den
+     Rest zur Sprungmarke. `encodeURI` laesst `=` stehen, und das ist hier das
+     Trennzeichen zwischen den Feldern. */
+  const zeichen = x => encodeURI(String(x))
+    .replace(/#/g,'%23').replace(/&/g,'%26').replace(/=/g,'%3D')
+    .replace(/\?/g,'%3F').replace(/\+/g,'%2B');
   const teile = [ (t.t||'Stück'), (t.c||''), 'Medium Swing',
                   (t._lsGelesen||'C'), 'n', folge ];
   return 'irealbook://' + teile.map(zeichen).join('=');
@@ -7831,18 +7835,19 @@ const LS = (function(){
     return {
       hand:    Math.max(0, Math.min(3, z('bs_ls_hand', VORGABE.hand))),
       farbe:   localStorage.getItem('bs_ls_farbe') || VORGABE.farbe,
-      /* Die Grenzen sind die des Setzers, nicht frei gewaehlt: Verovio nimmt
-         fuer die Notenlinie 0,10 bis 0,30 und fuer den Hals 0,10 bis 0,50.
-         Was darueber liegt, weist es zurueck und faellt auf seinen eigenen
-         Vorgabewert zurueck — die Linie wuerde am oberen Ende des Reglers
-         also duenner statt dicker. Am 19. August beim Pruefen aufgefallen. */
-      linie:   Math.max(0.10, Math.min(0.30, z('bs_ls_linie', VORGABE.linie))),
+      /* Verovio nimmt fuer die Notenlinie 0,10 bis 0,30 und fuer den Hals
+         0,10 bis 0,50. Was darueber liegt, weist es zurueck und faellt auf
+         seinen Vorgabewert zurueck — die Linie wuerde am oberen Ende des
+         Reglers duenner statt dicker. Am 19. August beim Pruefen aufgefallen.
+         Seit dem 21. August geht die Linie trotzdem bis 0,60: bis 0,30 macht
+         es der Setzer, darueber `blattFeinschliff` am fertigen Blatt. */
+      linie:   Math.max(0.10, Math.min(0.60, z('bs_ls_linie', VORGABE.linie))),
       hals:    Math.max(0.10, Math.min(0.50, z('bs_ls_hals',  VORGABE.hals))),
       akkorde: localStorage.getItem('bs_ls_akkorde') || VORGABE.akkorde,
       raster:  localStorage.getItem('bs_ls_raster') !== '0',
       /* Wie rund ein Bogen faellt. Verovio nimmt 0,2 bis 5,0; darunter wird
          der Bogen flach, darueber ein Halbkreis. */
-      bogen:   Math.max(0.2, Math.min(5.0, z('bs_ls_bogen', VORGABE.bogen))),
+      bogen:   Math.max(0.3, Math.min(2.0, z('bs_ls_bogen', VORGABE.bogen))),
       /* Die Akkordschrift ist kein Verovio-Regler — der Setzer kennt keine
          Groesse fuer Akkordsymbole. Beides wird am fertigen Blatt gemacht. */
       akkgroesse: Math.max(0.7, Math.min(1.6, z('bs_ls_akkgroesse', VORGABE.akkgroesse))),
@@ -8079,7 +8084,11 @@ const LS = (function(){
       /* Petaluma Script hat keinen fetten Schnitt. Verdickt wird deshalb mit
          einem Rand in derselben Farbe — das traegt gleichmaessig auf, wo eine
          nachgeahmte Fettschrift die Buchstaben verschmiert. */
-      + (e.akkfett ? "g.harm text{paint-order:stroke;stroke:#000;stroke-width:6px;"
+      /* `stroke-width` in em, nicht in px: Die Akkordschrift ist ueber 400 px
+         hoch, sechs Pixel Rand waren daran nicht zu sehen. Und die Regel muss
+         den TSPAN treffen: Verovio setzt am `<text>` `font-size="0px"` und die
+         wirkliche Groesse erst am tspan darin — ein `em` am text waere null. */
+      + (e.akkfett ? "g.harm tspan{paint-order:stroke;stroke:#000;stroke-width:0.06em;"
                      + "stroke-linejoin:round}" : "")
       + '</style>';
     const filter = w ? '<filter id="'+filterId+'">'
@@ -8227,6 +8236,33 @@ const LS = (function(){
     }
     return aus.join(' ');
   }
+  /* Dieselbe Lesart, aber mit BEIDEN Werten eines Punktes — fuer alles, was
+     ein Pfad in der Hoehe aendern soll. */
+  function pfadPunkteAbbilden(d, f, nurLesen){
+    const tok = String(d).match(/[a-zA-Z]|-?[\d.]+(?:[eE][-+]?\d+)?/g);
+    if(!tok) return d;
+    let aus=[], cmd=null, i=0;
+    while(i<tok.length){
+      if(/[a-zA-Z]/.test(tok[i])){ cmd=tok[i]; aus.push(cmd); i++;
+        if(cmd==='Z'||cmd==='z') continue; }
+      if(cmd===null) return d;
+      const gross=cmd.toUpperCase(), n=PFAD_ARG[gross];
+      if(n===undefined) return d;
+      const g=tok.slice(i, i+n); if(g.length<n) break;
+      i += n;
+      /* H und V tragen nur einen Wert, A nur an Stelle 5/6 einen Punkt —
+         beide bleiben unberuehrt; Verovio zeichnet Boegen mit M und C. */
+      if(cmd===gross && (gross==='M'||gross==='L'||gross==='T'||gross==='C'||gross==='S'||gross==='Q'))
+        for(let k=0;k+1<n;k+=2){
+          const r=f(+g[k], +g[k+1]);
+          if(!nurLesen && r){ g[k]=String(r[0]); g[k+1]=String(r[1]); }
+        }
+      aus.push(g.join(' '));
+    }
+    return nurLesen ? d : aus.join(' ');
+  }
+  const pfadPunkte = (d, sehen) => pfadPunkteAbbilden(d, (x,y)=>{ sehen(x,y); }, true);
+
   /* Einzelne x-Werte eines Pfades oder Vielecks abbilden. */
   function xWerteAbbilden(el, f){
     const d=el.getAttribute && el.getAttribute('d');
@@ -8414,20 +8450,101 @@ const LS = (function(){
     try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
   }
 
-  /* Die Akkordsymbole groesser oder kleiner. Verovio hat dafuer keine Option;
-     die Groesse steht als `font-size` an den tspans unter `g.harm`. Der Platz
-     ist mit der Originalgroesse gerechnet — wer stark vergroessert, rueckt die
-     Namen naeher zusammen. Deshalb reicht der Regler nur von 0,7 bis 1,6. */
-  function akkordGroesse(svgText, f){
-    if(!(f>0) || Math.abs(f-1)<0.01) return svgText;
+  /* ---- Der Feinschliff am fertigen Blatt ---------------------------------
+     Drei Dinge kann der Setzer nicht, und alle drei lassen sich am fertigen
+     SVG machen: Akkordsymbole groesser stellen (er kennt dafuer keine Groesse),
+     Notenlinien ueber seine Grenze hinaus verstaerken (bei 0,30 ist Schluss,
+     darueber faellt er auf seinen Vorgabewert zurueck) und Boegen runder oder
+     flacher setzen. `slurCurveFactor` wirkt nur auf BINDEboegen; Haltebogen
+     haben im Setzer eine feste Form — gemessen am 21. August ueber alle Werte.
+
+     Ein Bogen wird an seiner Sehne gestreckt: Die beiden Enden bleiben, wo sie
+     sind, alles dazwischen rueckt von der Verbindungslinie weg oder auf sie
+     zu. So bleibt der Bogen an seinen Noten haengen. */
+  function blattFeinschliff(svgText, e){
+    e = e || E();
+    const akkF   = e.akkgroesse;
+    const linieF = e.linie > 0.30 ? e.linie/0.30 : 1;
+    const bogenF = e.bogen;
+    if(Math.abs(akkF-1)<0.01 && Math.abs(linieF-1)<0.01 && Math.abs(bogenF-1)<0.01)
+      return svgText;
     let doc;
-    try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(e){ return svgText; }
+    try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(err){ return svgText; }
     if(!doc || doc.querySelector('parsererror')) return svgText;
-    doc.querySelectorAll('g.harm [font-size]').forEach(el=>{
-      const v=parseFloat(el.getAttribute('font-size'));
-      if(v>0) el.setAttribute('font-size', Math.round(v*f)+'px');
-    });
-    try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
+
+    if(Math.abs(akkF-1)>=0.01)
+      doc.querySelectorAll('g.harm [font-size]').forEach(el=>{
+        const v=parseFloat(el.getAttribute('font-size'));
+        if(v>0) el.setAttribute('font-size', Math.round(v*akkF)+'px');
+      });
+
+    if(Math.abs(linieF-1)>=0.01)
+      doc.querySelectorAll('g.staff > path').forEach(p=>{
+        const v=parseFloat(p.getAttribute('stroke-width'));
+        if(v>0) p.setAttribute('stroke-width', Math.round(v*linieF));
+      });
+
+    if(Math.abs(bogenF-1)>=0.01)
+      doc.querySelectorAll('g.tie path, g.slur path, g.phrase path').forEach(p=>{
+        const d=p.getAttribute('d')||''; if(!d) return;
+        const pkt=[]; pfadPunkte(d, (x,y)=>{ pkt.push([x,y]); });
+        if(pkt.length<3) return;
+        /* Die Sehne: von der linkesten zur rechtesten Stelle des Bogens. */
+        let a=pkt[0], b=pkt[0];
+        for(const q of pkt){ if(q[0]<a[0]) a=q; if(q[0]>b[0]) b=q; }
+        const sp=b[0]-a[0]; if(!(sp>0)) return;
+        const sehne = x => a[1] + (x-a[0])/sp*(b[1]-a[1]);
+        p.setAttribute('d', pfadPunkteAbbilden(d, (x,y)=>{
+          const s0=sehne(x);
+          return [x, Math.round((s0 + (y-s0)*bogenF)*100)/100];
+        }));
+      });
+
+    try{ return new XMLSerializer().serializeToString(doc); }catch(err){ return svgText; }
+  }
+
+  /* ---- Das Probestueck fuer die Vorschau ---------------------------------
+     Vier Takte mit allem, was ein Regler anfasst: Notenlinien, Haelse, einen
+     Balken, Akkordsymbole, einen Halte- und einen Bindebogen. Es steht hier
+     als Text und nicht als Datei — die App laedt nichts nach. */
+  const PROBE = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>P</part-name></score-part></part-list>
+<part id="P1">
+<measure number="1"><attributes><divisions>2</divisions><key><fifths>-1</fifths></key>
+<time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+<harmony><root><root-step>F</root-step></root><kind>major-seventh</kind></harmony>
+<note><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><type>half</type>
+<notations><tied type="start"/></notations><tie type="start"/></note>
+<note><pitch><step>A</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type>
+<notations><tied type="stop"/></notations><tie type="stop"/></note>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration><type>quarter</type></note></measure>
+<measure number="2">
+<harmony><root><root-step>D</root-step></root><kind>minor-seventh</kind></harmony>
+<note><pitch><step>D</step><octave>5</octave></pitch><duration>1</duration><type>eighth</type><beam number="1">begin</beam>
+<notations><slur type="start" number="1"/></notations></note>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>eighth</type><beam number="1">continue</beam></note>
+<note><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>eighth</type><beam number="1">continue</beam></note>
+<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><type>eighth</type><beam number="1">end</beam>
+<notations><slur type="stop" number="1"/></notations></note>
+<note><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>half</type></note></measure>
+<measure number="3">
+<harmony><root><root-step>B</root-step><root-alter>-1</root-alter></root><kind>dominant</kind>
+<degree><degree-value>11</degree-value><degree-alter>1</degree-alter><degree-type>add</degree-type></degree></harmony>
+<note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>3</duration><type>quarter</type><dot/></note>
+<note><pitch><step>D</step><octave>5</octave></pitch><duration>1</duration><type>eighth</type></note>
+<note><pitch><step>F</step><octave>5</octave></pitch><duration>4</duration><type>half</type></note></measure>
+<measure number="4">
+<harmony><root><root-step>F</root-step></root><kind>major-seventh</kind></harmony>
+<note><pitch><step>F</step><octave>5</octave></pitch><duration>8</duration><type>whole</type></note>
+<barline location="right"><bar-style>light-heavy</bar-style></barline></measure>
+</part></score-partwise>`;
+
+  /* Ein Blatt aus dem Probestueck, in der eingestellten Gestalt. Es geht
+     denselben Weg wie ein echtes Leadsheet — sonst zeigte die Vorschau etwas
+     anderes als die Buehne. */
+  async function probeblatt(){
+    const r = await setze(PROBE, {});
+    return await eigenstaendig(r.seiten[0], E());
   }
 
   /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
@@ -8480,7 +8597,7 @@ const LS = (function(){
     const o = Object.assign({}, A4, {
       scale:100, unit:9, font:'Petaluma', breaks:'line',
       header:'none', footer:'none', harmDist:2.2, spacingStaff:12,
-      staffLineWidth:e.linie, stemWidth:e.hals, slurCurveFactor:e.bogen,
+      staffLineWidth:Math.min(e.linie, 0.30), stemWidth:e.hals,
       barLineWidth:0.5, thickBarlineThickness:1.5, ledgerLineThickness:0.34,
       transpose: opt.tonart || '',
       /* Der Titel braucht Platz, und zwar NUR auf der ersten Seite. Verovio
@@ -8497,7 +8614,7 @@ const LS = (function(){
     for(let i=1;i<=n;i++){
       let svg = tk.renderToSVG(i);
       if(e.raster) svg = taktraster(svg, bogenBezug(tk, svg));
-      svg = akkordGroesse(svg, e.akkgroesse);
+      svg = blattFeinschliff(svg, e);
       if(kopf && i===1) svg = kopfEinsetzen(svg, opt.titel, opt.komponist);
       seiten.push(svg);
     }
@@ -8508,7 +8625,8 @@ const LS = (function(){
            bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
            QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
            ausgabe, ausgabeSetzen, eigenstaendig, ausgabeKuerzel, notizSchluessel,
-           schriftBase64, taktraster, bogenBezug, akkordGroesse, kopfEinsetzen, KOPF_HOEHE };
+           schriftBase64, taktraster, bogenBezug, blattFeinschliff, probeblatt,
+           kopfEinsetzen, KOPF_HOEHE };
 })();
 window.LS = LS;
 
@@ -9715,7 +9833,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Die Regler greifen, der Kopf wandert allein';
+const APP_BUILD='2026-08-21 · Eine Vorschau, die zeigt, was die Regler tun';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -13292,8 +13410,46 @@ setTimeout(ablageAnmelden, 0);
     /* Ohne `true`: der Aufruf wird um 180 ms verzoegert und von einem
        nachfolgenden ueberschrieben. Wer an einem Regler zieht, loest sonst je
        Zwischenschritt einen vollen Satz aus. */
-    const lsNeu=()=>{ if(window.blattNeuZeichnen) blattNeuZeichnen(); lsGeaendert=true; };
+    const lsNeu=()=>{ if(window.blattNeuZeichnen) blattNeuZeichnen(); lsGeaendert=true;
+                      vorschauNeu(); };
     const eLS=LS.E();
+
+    /* ---- Die Vorschau (21. August) --------------------------------------
+       Bis heute musste man Setup verlassen, um zu sehen, was ein Regler tut —
+       und auf dem iPad liegt Setup ueber der Buehne, dort war ueberhaupt
+       nichts zu sehen. Vier Takte mit allem, was die Regler anfassen, stehen
+       jetzt ueber der Karte und gehen denselben Weg wie ein echtes Blatt. */
+    const vor=document.createElement('div'); vor.className='lsvor';
+    vor.innerHTML='<div class="muted" style="padding:14px">Vorschau wird gesetzt…</div>';
+    let vorUhr=null, vorLauf=0;
+    async function vorschauZeichnen(){
+      const lauf = ++vorLauf;
+      try{
+        const svg = await LS.probeblatt();
+        if(lauf!==vorLauf || !vor.isConnected) return;
+        /* Nur zwei Takte zeigen — der Rest der A4-Seite ist leer.
+           Verovio legt in das aeussere svg ein zweites mit eigener viewBox.
+           Bleiben beide stehen, rechnet das innere ein zweites Mal auf die
+           ganze Seite. Die innere viewBox faellt deshalb weg; dann gelten die
+           Koordinaten des aeusseren, und das zeigt den Ausschnitt. Die Lage
+           stammt aus dem Blatt selbst: `page-margin` verschiebt um (1100, 900),
+           die Akkorde stehen bei 278, die unterste Notenlinie bei 1536. Bei
+           `y` eines Textes steht die GRUNDLINIE — der Akkordname reicht von
+           dort gut vierhundert Einheiten nach oben, bei grosser Schrift mehr. */
+        let aus = svg.replace(/<svg(\s[^>]*class="definition-scale"[^>]*)>/,
+          (m,a)=>'<svg'+a.replace(/\sviewBox="[^"]*"/,'')+'>');
+        aus = aus.replace(/^<svg([^>]*)>/, (m,a)=>
+          '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'').replace(/\sviewBox="[^"]*"/g,'')
+          +' viewBox="180 480 8620 2100" preserveAspectRatio="xMidYMid meet">');
+        vor.innerHTML = aus;
+      }catch(e){
+        if(lauf!==vorLauf || !vor.isConnected) return;
+        vor.innerHTML='<div class="muted" style="padding:14px">'
+          +'Die Vorschau braucht den Notensetzer. Schlage einmal ein Leadsheet auf.</div>';
+      }
+    }
+    function vorschauNeu(){ clearTimeout(vorUhr); vorUhr=setTimeout(vorschauZeichnen, 200); }
+    vorschauNeu();
 
     const z_lh=zeile('Handschrift','Wie stark die Linien aus der Geraden laufen');
     z_lh._ctl.append(wahl([['0','Aus'],['1','Fein'],['2','Mittel'],['3','Stark']],
@@ -13302,7 +13458,7 @@ setTimeout(ablageAnmelden, 0);
     z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#555555','Mittel'],['#777777','Grau']],
       eLS.farbe, v=>{ LS.setzen('farbe',v); lsNeu(); }));
     const z_ll=zeile('Stärke der Notenlinien','Die fünf Linien des Systems');
-    z_ll._ctl.append(regler(0.10, 0.30, 0.02, eLS.linie,
+    z_ll._ctl.append(regler(0.10, 0.60, 0.02, eLS.linie,
       v=>{ LS.setzen('linie',v); lsNeu(); }, v=>v.toFixed(2)));
     const z_ls=zeile('Stärke der Notenhälse','Getrennt von den Linien — das macht den Unterschied');
     z_ls._ctl.append(regler(0.10, 0.50, 0.02, eLS.hals,
@@ -13310,10 +13466,10 @@ setTimeout(ablageAnmelden, 0);
     const z_lr=zeile('Gleich breite Takte',
       'Ein Takt ist ein Zeitmaß — gleiche Breite zeigt, wie dicht die Noten stehen');
     z_lr._ctl.append(schalter(eLS.raster, an=>{ LS.setzen('raster', an?'1':'0'); lsNeu(); }));
-    /* Gilt nur fuer Bindeboegen. Haltebogen zwischen zwei gleichen Noten haben
-       im Setzer eine feste Form; gemessen am 21. August, alle Werte gleich. */
-    const z_lb=zeile('Rundung der Bindebögen','Flach wie mit dem Lineal oder rund wie von Hand. Haltebögen bleiben, wie sie sind');
-    z_lb._ctl.append(regler(0.2, 3.0, 0.1, eLS.bogen,
+    /* Gerechnet wird am fertigen Blatt, nicht im Setzer: Dessen
+       `slurCurveFactor` laesst Haltebogen unberuehrt. */
+    const z_lb=zeile('Rundung der Bögen','Flach wie mit dem Lineal oder rund wie von Hand — Halte- und Bindebögen gleichermaßen');
+    z_lb._ctl.append(regler(0.3, 2.0, 0.05, eLS.bogen,
       v=>{ LS.setzen('bogen',v); lsNeu(); }, v=>v.toFixed(1)));
     const z_la=zeile('Akkordschrift','Wie geliefert oder in der Schreibweise des Real Book');
     z_la._ctl.append(wahl([['lang','Cmin7'],['kurz','C-7']],
@@ -13323,7 +13479,9 @@ setTimeout(ablageAnmelden, 0);
       v=>{ LS.setzen('akkgroesse',v); lsNeu(); }, v=>v.toFixed(2)));
     const z_lw=zeile('Akkorde fett','Kräftiger auf dem Pult, auch aus zwei Metern');
     z_lw._ctl.append(schalter(eLS.akkfett, an=>{ LS.setzen('akkfett', an?'1':'0'); lsNeu(); }));
-    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la,z_lg,z_lw],
+    const kopfz=document.createElement('div'); kopfz.className='sgrp';
+    kopfz.textContent='Leadsheets'; w.append(kopfz, vor);
+    w.append(karte(null,[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la,z_lg,z_lw],
       'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
       +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
   }
