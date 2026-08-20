@@ -9155,7 +9155,8 @@ const IR = (function(){
          Verweise, die am 21. August vermessen wurden — es geht nicht mit. */
       stil: (f[3]||'').trim(),
       genre: (f[7]||'').trim(),
-      durchgaenge: (f[5]||'').trim(),
+      /* Feld 5: der Transponier-Versatz des Players in Halbtoenen. */
+      versatz: (f[5]||'').trim(),
       tonart: (f[4]||'').trim(),
       rumpf
     }, rumpfLesen(rumpf));
@@ -9520,7 +9521,14 @@ const IR = (function(){
       '',
       o.stil || 'Medium Swing',
       opt.tonart || o.tonart || 'C',
-      o.durchgaenge || '1',
+      /* Feld 5 ist der Transponier-Versatz des Players in Halbtoenen, nicht
+         die Zahl der Durchgaenge. Am 21. August aus drei Messungen erschlossen:
+         „Autumn Leaves" traegt dort eine 5, steht in g-Moll, und iReal Pro
+         zeigt es als d-Moll — genau fuenf Halbtoene tiefer. Wer den Wert beim
+         Weitergeben mitschleppt, bekommt die Akkorde ein zweites Mal
+         verschoben. Was BandStand hinausgibt, steht schon in der richtigen
+         Tonart und braucht keinen Versatz. */
+      opt.versatz !== undefined ? String(opt.versatz) : '0',
       rumpf,
       o.genre || o.stil || 'Medium Swing',
       '0', '0'
@@ -10749,7 +10757,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Das Tonart-Feld ist eine Anweisung';
+const APP_BUILD='2026-08-21 · Feld fünf ist ein Versatz, kein Durchgang';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
