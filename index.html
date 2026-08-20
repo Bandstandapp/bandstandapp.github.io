@@ -2673,6 +2673,10 @@ function newId(pfx){ return (pfx||'id')+'_'+Date.now().toString(36)+Math.random(
 function bsZuTune(el, ti, bu){
   const t = { key:'bs|'+el.id, libId:el.id, isLib:true, bsId:el.id, titelId:el.titelId,
     art:el.art, t:ti.titel||'(ohne Titel)', c:ti.komponist||'',
+    /* Das bevorzugte Tempo gehoert zum STUECK und nicht zum Blatt: Es wird in
+       der Band verabredet, steht in keinem Real Book und wird zwischen zwei
+       Proben vergessen. Seit dem 21. August ein Feld am Titel. */
+    tempo: ti.tempo || 0,
     pg:'1', b:(bu&&bu.name)||'Eigene Noten', bid:ti.buchId, np:el.np||1,
     addedAt:el.angelegt||0, groesse:el.groesse||0, dateiname:el.dateiname||'',
     ziel:el.ziel||'', f:'' };
@@ -3954,8 +3958,23 @@ function titelBearbeiten(titelId){
       ti.komponist=v; await atemzug(); await loadLibrary(); render();
     };
 
+    /* Das Tempo, in Schlaegen je Minute. Es steht in keinem Real Book und in
+       keinem iReal-Verweis — die beiden am 21. August vermessenen tragen
+       keines, obwohl iReal Pro unten eines anzeigt. Also wird es hier
+       gepflegt und erscheint auf dem Chord-Sheet. */
+    const tpf=feld('Tempo', ti.tempo ? String(ti.tempo) : '', 'z. B. 140');
+    tpf.type='number'; tpf.min='20'; tpf.max='400'; tpf.style.marginTop='0';
+    tpf.onchange=async()=>{
+      const v=Math.max(0, Math.min(400, parseInt(tpf.value,10)||0));
+      if(v===(ti.tempo||0)) return;
+      try{ await BS.aendern('titel', titelId, {tempo:v||null}); }
+      catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); return; }
+      ti.tempo=v||null; await atemzug(); await loadLibrary(); render();
+    };
+
     const bz=document.createElement('div'); bz.className='muted'; bz.style.margin='10px 2px 0';
-    bz.textContent='Buch: '+((buch&&buch.name)||'ohne Buch');
+    bz.textContent='Buch: '+((buch&&buch.name)||'ohne Buch')
+      + (ti.geaendert ? ' · zuletzt bearbeitet '+new Date(ti.geaendert).toLocaleDateString('de-DE') : '');
     card.append(bz);
 
     /* Die Blaetter des Titels. Auf dem Schalter steht das Etikett,
@@ -7623,7 +7642,7 @@ async function renderChordFit(t){
     const svg = IR.zeichnen(o, {
       breite: 21000, hoehe: Math.round(21000/verh),
       titel:t.t||'', komponist:t.c||o.komponist||'', taktart:o.taktart, stil:o.stil||'',
-      fuss:irealFuss(o), akkgroesse:e.akkgroesse });
+      fuss:irealFuss(o, t.tempo), akkgroesse:e.akkgroesse });
 
     if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
       window.SHEET_RATIO=verh; if(window.layout) window.layout();
@@ -7645,11 +7664,10 @@ async function renderChordFit(t){
 /* Was im Player eingestellt war, als das Stueck geteilt wurde. Ein Tempo
    steht nicht im Verweis — die beiden am 21. August vermessenen Stuecke
    tragen keines, obwohl iReal Pro unten eines anzeigt. */
-function irealFuss(o){
+function irealFuss(o, tempo){
   const teile=[];
   if(o.genre) teile.push(o.genre);
-  if(o.durchgaenge && +o.durchgaenge > 1) teile.push(o.durchgaenge+'×');
-  if(o.tempo) teile.push(o.tempo+' bpm');
+  if(tempo) teile.push(tempo+' BPM');
   return teile.length ? 'My settings: '+teile.join(', ') : '';
 }
 
@@ -9098,6 +9116,25 @@ const IR = (function(){
       .replace(/\^/g, '△').replace(/b/g, '♭').replace(/#/g, '♯')
       .replace(/h/g, 'ø').replace(/o/g, '°');
   }
+  /* Wie breit ein Akkordname wirklich wird. Geschaetzt aus der Zeichenzahl
+     laege man daneben: `%` ist schmal, `Bb7b13` breit. Gemessen wird auf einer
+     Leinwand, weil das kein DOM braucht und auch dort geht, wo das Blatt nur
+     als Text entsteht — beim Export und beim Weitergeben. */
+  let _mess=null;
+  function textBreite(txt, groesse){
+    if(!txt) return 0;
+    try{
+      if(!_mess) _mess=document.createElement('canvas').getContext('2d');
+      _mess.font = Math.round(groesse)+'px PetalumaScript, sans-serif';
+      return _mess.measureText(txt).width;
+    }catch(e){ return String(txt).length * groesse * 0.55; }
+  }
+  function akkordBreite(a, gr){
+    if(a==='%') return gr*0.8;
+    const k = akkordTeile(a);
+    return textBreite(k.grund, gr) + textBreite(k.rest, gr*0.62);
+  }
+
   /* Der Grundton steht gross, was dahinter kommt kleiner und etwas hoeher —
      so setzt es das Real Book, und so bleibt eine lange Alteration lesbar,
      ohne den Takt zu sprengen. */
@@ -9123,8 +9160,21 @@ const IR = (function(){
     const platz = H - y0 - rand;
     const ZH = Math.max(1, Math.floor(platz / Math.max(1, zeilen.length)));
     const hoch = ZH * 0.60;                     /* Hoehe eines Taktkastens */
-    const gr = Math.round(hoch * 0.62 * (opt.akkgroesse || 1));
     const st = Math.max(3, Math.round(hoch*0.028));
+
+    /* EINE Schriftgroesse fuer das ganze Blatt. Ein erster Versuch stellte sie
+       je Takt ein — volle Takte kleiner —, und das Blatt sah unruhig aus.
+       Gewaehlt wird sie so, dass ein Takt mit ZWEI Akkorden Platz hat; das ist
+       der haeufige Fall. Wo mehr stehen, wird die Schrift SCHMAL gezogen und
+       nicht klein: gleiche Hoehe, engere Laufweite. So hat Jens es am
+       21. August verlangt. */
+    const taktInnen = (breite / (zeilen[0] ? zeilen[0].length : 4)) - st*20;
+    let gr = Math.round(hoch * 0.62 * (opt.akkgroesse || 1));
+    (o.takte||[]).forEach(t=>{
+      if(t.akkorde.length !== 2) return;
+      const noetig = t.akkorde.reduce((n,a)=>n+akkordBreite(a, gr), 0) + gr*0.5;
+      if(noetig > taktInnen) gr = Math.max(gr*0.5, Math.floor(gr * taktInnen/noetig));
+    });
     const farbe = '#000';
 
     const T = [];
@@ -9209,12 +9259,17 @@ const IR = (function(){
            standen `G-7` und `Gb7` uebereinander. Der Platz, den Taktart und
            Wiederholungszeichen wegnehmen, geht in dieselbe Rechnung ein:
            Enge kostet Schriftgroesse, nicht Taktbreite. */
-        const zeichen = t.akkorde.reduce((z,a)=>z + (a==='%' ? 2 : String(a).length + 1.6), 0);
-        const passt = feld / Math.max(1, zeichen * gr * 0.42);
-        const gr2 = gr * Math.max(0.48, Math.min(1, passt));
+        /* Passt der Takt nicht, wird die Schrift schmal gezogen — die Hoehe
+           bleibt, die Laufweite geht zurueck. `lengthAdjust` staucht dabei
+           Abstaende UND Glyphen, sonst kleben die Buchstaben aneinander.
+
+           Gestaucht wird JE AKKORD und nicht fuer den ganzen Takt: Nur so
+           bleibt zwischen zweien immer eine Luecke. Bei gemeinsamer Stauchung
+           stand im ersten Takt `Eb-7Bb7b13` ohne Zwischenraum. */
+        const luecke = gr*0.32;
+        const proAkk = Math.max(gr*0.6, (feld - luecke*(n-1)) / Math.max(1,n));
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
-            /* Der Wiederholungstakt: Schraegstrich mit zwei Punkten. */
             const cx = links + feld/2, cy = oben + hoch*0.5;
             linie(cx - hoch*0.16, cy + hoch*0.20, cx + hoch*0.16, cy - hoch*0.20, st*2.2);
             punkt(cx - hoch*0.17, cy - hoch*0.13, st*1.6);
@@ -9222,12 +9277,13 @@ const IR = (function(){
             return;
           }
           const k = akkordTeile(a);
-          const ax = n===1 ? links : links + feld*(ai/(n-1))*0.92;
-          const anker = n===1 ? 'start' : (ai===n-1 ? 'end' : 'start');
+          const roh = akkordBreite(a, gr);
+          const lang = roh > proAkk ? Math.round(Math.max(proAkk, roh*0.45)) : 0;
+          const ax = links + ai*(proAkk + luecke);
           T.push('<text x="'+Math.round(ax)+'" y="'+Math.round(yb)+'" fill="#000"'
-            +(anker!=='start'?' text-anchor="'+anker+'"':'')+'>'
-            +'<tspan font-size="'+Math.round(gr2)+'">'+esc(k.grund)+'</tspan>'
-            +(k.rest ? '<tspan font-size="'+Math.round(gr2*0.62)+'" dy="'+Math.round(-gr2*0.06)+'">'
+            +(lang?' textLength="'+lang+'" lengthAdjust="spacingAndGlyphs"':'')+'>'
+            +'<tspan font-size="'+Math.round(gr)+'">'+esc(k.grund)+'</tspan>'
+            +(k.rest ? '<tspan font-size="'+Math.round(gr*0.62)+'" dy="'+Math.round(-gr*0.06)+'">'
                        +esc(k.rest)+'</tspan>' : '')
             +'</text>');
         });
@@ -9239,7 +9295,7 @@ const IR = (function(){
        Von Jens am 21. August gewuenscht. */
     if(opt.fuss)
       T.push('<text x="'+Math.round(rand)+'" y="'+Math.round(H-rand*0.45)+'" font-size="'
-        +Math.round(rand*0.42)+'" fill="#777">'+esc(opt.fuss)+'</text>');
+        +Math.round(rand*0.42)+'" fill="#000">'+esc(opt.fuss)+'</text>');
 
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+B+' '+H+'" '
          + 'width="'+B+'" height="'+H+'">'
@@ -10503,7 +10559,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Saubere Spalten, eine Fußzeile';
+const APP_BUILD='2026-08-21 · Eine Schriftgröße, ein Tempo';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
