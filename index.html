@@ -7581,23 +7581,36 @@ async function renderChordFit(t){
   if(!fit.querySelector('.pg')) fit.innerHTML='<div class="lslade">Lädt…</div>';
   try{
     const roh = await chordQuelle(t);
-    const o = typeof roh==='string' && roh.trim().startsWith('irealb://')
-      ? IR.lesen(roh.trim()) : IR.lesen('irealb://'+roh);
+    const o = IR.lesen(String(roh).trim());
     const e = LS.E();
-    const svg = IR.zeichnen(o, { titel:t.t||'', komponist:t.c||'',
-      akkgroesse:e.akkgroesse, farbe:e.farbe,
-      strich: Math.round(26 * (e.linie/0.24)) });
 
-    if(window.SHEET_RATIO!==undefined && Math.abs(LS.A4_VERH-window.SHEET_RATIO)>0.002){
-      window.SHEET_RATIO=LS.A4_VERH; if(window.layout) window.layout();
+    /* Ein Chord-Sheet hat kein Papierformat. Es wird fuer die Flaeche gesetzt,
+       die da ist — hochkant wie quer. Ein A4-Blatt in einem breiten Fenster
+       laesst die halbe Buehne leer, und auf dem Pult zaehlt jede Millimeter
+       Schrifthoehe. Beim Drucken und Weitergeben gilt A4, hier die Buehne. */
+    const cs=getComputedStyle(fit);
+    const p=n=>parseFloat(cs[n])||0;
+    const cw=Math.max(320, fit.clientWidth  - p('paddingLeft') - p('paddingRight'));
+    const ch=Math.max(320, fit.clientHeight - p('paddingTop')  - p('paddingBottom'));
+    /* Nicht beliebig flach und nicht beliebig schmal: Sonst stehen vier Takte
+       als Streifen da oder die Schrift wird zum Punkt. */
+    const verh = Math.max(0.55, Math.min(1.55, cw/ch));
+
+    const svg = IR.zeichnen(o, {
+      breite: 21000, hoehe: Math.round(21000/verh),
+      titel:t.t||'', komponist:t.c||'', taktart:o.taktart,
+      akkgroesse:e.akkgroesse, farbe:e.farbe });
+
+    if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
+      window.SHEET_RATIO=verh; if(window.layout) window.layout();
     }
-    const halter=document.createDocumentFragment();
     const d=document.createElement('div'); d.className='pg ls';
+    const bw = Math.min(cw, ch*verh);
+    d.style.width=bw+'px'; d.style.height=(bw/verh)+'px'; d.style.position='relative';
     d.innerHTML=svg.replace(/^<svg([^>]*)>/, (m,a)=>
       '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'')
-      +' preserveAspectRatio="xMidYMid meet">');
-    halter.append(d);
-    fit.replaceChildren(halter);
+      +' preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block">');
+    fit.replaceChildren(d);
     passeBlattEin();
     if(window.navKann) navKann();
   }catch(err){
@@ -8905,11 +8918,11 @@ const IR = (function(){
 
   function rumpfLesen(t){
     const takte = [];
-    let takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'' };
+    let takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false };
     let taktart = '';
     const neuerTakt = () => {
       takte.push(takt);
-      takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'' };
+      takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'', umbruch:false };
     };
     let i = 0;
     while(i < t.length){
@@ -8927,9 +8940,17 @@ const IR = (function(){
       if(r[0]===']'){ neuerTakt(); i++; continue; }
       if(r[0]==='{'){ if(takt.akkorde.length) neuerTakt(); takt.auf='wdh'; i++; continue; }
       if(r[0]==='['){ if(takt.akkorde.length) neuerTakt(); i++; continue; }
-      /* `XyQ` fuellt den Rest einer Zeile optisch auf. Im MusicXML zum selben
-         Stueck steht an diesen Stellen nichts — also ist es kein Takt. */
-      if(r.startsWith('XyQ')){ i += 3; continue; }
+      /* `XyQ` fuellt den Rest einer Zeile auf, damit das Naechste — eine
+         Endung, ein Abschnitt — in einer neuen Zeile beginnt. Im MusicXML zum
+         selben Stueck steht an diesen Stellen kein Takt. Es ist also kein
+         Inhalt, sondern ein Umbruch. */
+      if(r.startsWith('XyQ')){
+        if(takte.length) takte[takte.length-1].umbruch = true;
+        else takt.umbruch = true;
+        i += 3; continue;
+      }
+      /* `x` ist der Wiederholungstakt: „noch einmal dasselbe". */
+      if(r[0]==='x'){ takt.akkorde.push('%'); i++; continue; }
       if(r[0]==='s' || r[0]==='l' || r[0]==='U' || r[0]==='Y'){ i++; continue; }
       if(r[0]===',' || r[0]===' '){ i++; continue; }
       if((m = AKKORD.exec(r))){ takt.akkorde.push(m[0]); i += m[0].length; continue; }
@@ -8961,35 +8982,40 @@ const IR = (function(){
   }
 
   /* ---- Das Blatt ---------------------------------------------------------
-     Vier Takte je Zeile ist die Konvention des Real Book. Wo viele Wechsel
-     mit langen Namen stehen, werden es zwei — das entscheidet sich je Zeile
-     und nicht fuer das ganze Stueck, so hat Jens es am 21. August verlangt.
+     Vier Takte je Zeile ist die Konvention des Real Book. Wo viele Wechsel mit
+     langen Namen stehen, werden es zwei — das entscheidet sich je Zeile und
+     nicht fuer das ganze Stueck, so hat Jens es am 21. August verlangt.
 
-     Gezeichnet wird A4 als SVG, in denselben Maßen wie ein gesetztes
-     Leadsheet. Damit gilt alles Weitere unveraendert: Einpassen, Drehen,
-     Vollbild, spaeter die Notiz und das Bild.                              */
+     Das Blatt hat KEIN festes Papierformat. Ein Chord-Sheet ist kein
+     gescanntes Blatt: Es entsteht beim Zeigen und richtet sich nach der
+     Flaeche, die da ist. Auf dem Pult zaehlt die Schrifthoehe, nicht die
+     Treue zu DIN A4 — beim Drucken und Weitergeben wird A4 uebergeben, sonst
+     die Buehne.                                                            */
   const A4 = { b:21000, h:29700, rand:1100 };
-  const KOPF  = 1400;          /* Platz fuer Titel und Komponist */
 
-  /* Wie breit ein Takt werden will — grob aus der Zeichenzahl. Genauer ginge
-     nur mit einer Schriftmessung, und die braucht es hier nicht: Es geht um
-     die Frage, ob vier Takte in eine Zeile passen. */
   const taktBreite = t => Math.max(6, (t.akkorde.join(' ').length || 2));
 
   function zeilenBauen(takte){
     const zeilen = [];
+    let zeile = [];
+    const schliessen = () => { if(zeile.length){ zeilen.push(zeile); zeile=[]; } };
     let i = 0;
     while(i < takte.length){
-      const vier = takte.slice(i, i+4);
-      /* Zu voll fuer vier: mehr als zwei Akkorde in einem Takt, ein sehr
-         langer Name, oder zusammen zu breit. */
-      const eng = vier.some(t => t.akkorde.length > 2
-                              || t.akkorde.some(a => a.length > 7))
+      const rest = takte.slice(i);
+      const vier = rest.slice(0,4);
+      const eng = vier.some(t => t.akkorde.length > 2 || t.akkorde.some(a=>a.length>7))
                || vier.reduce((n,t)=>n+taktBreite(t),0) > 38;
-      const n = eng ? 2 : 4;
-      zeilen.push(takte.slice(i, i+n));
-      i += n;
+      const n = Math.min(eng ? 2 : 4, rest.length);
+      for(let k=0;k<n;k++){
+        zeile.push(rest[k]);
+        /* Ein erzwungener Umbruch: iReal Pro setzt ihn, damit eine Endung
+           oder ein Abschnitt in einer neuen Zeile beginnt. */
+        if(rest[k].umbruch){ schliessen(); i += k+1; break; }
+        if(k===n-1) i += n;
+      }
+      if(zeile.length >= (eng?2:4)) schliessen();
     }
+    schliessen();
     return zeilen;
   }
 
@@ -8997,86 +9023,144 @@ const IR = (function(){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
   /* Die Schreibweise des Real Book. Gemessen am 21. August, welche Zeichen
-     Petaluma Script wirklich hat: das Dreieck der grossen Septime, das ø, das
-     ° und das Kreuz — aber KEIN b-Vorzeichen, weder als Zeichen der
-     Notenschrift (U+EA64) noch als U+266D.
-
-     Der erste Versuch nahm U+EA64, und das steht im Privatbereich: Dort hat
-     auch keine Ersatzschrift etwas, und aus `Eb-7` wurde `E -7`. U+266D ist
-     dagegen ein gewoehnliches Zeichen — die Ersatzschrift springt dafuer ein,
-     und ein ♭ sieht ueberall aehnlich aus. */
+     Petaluma Script wirklich hat: Dreieck, ø, ° und Kreuz — aber KEIN
+     b-Vorzeichen, weder als U+EA64 noch als U+266D. U+EA64 liegt im
+     Privatbereich, wo auch keine Ersatzschrift etwas hat; daraus wurde eine
+     Luecke und aus `Eb-7` ein `E -7`. U+266D ist ein gewoehnliches Zeichen:
+     Die Ersatzschrift springt dafuer ein. */
   function akkordSetzen(a){
-    return esc(String(a)
-      .replace(/\^/g, '\u25b3')      /* grosse Septime: das Dreieck */
-      .replace(/b/g, '\u266d')        /* das b-Vorzeichen */
-      .replace(/#/g, '\u266f')        /* das Kreuz */
-      .replace(/h/g, '\u00f8')        /* halbvermindert */
-      .replace(/o/g, '\u00b0'));      /* vermindert */
+    return String(a)
+      .replace(/\^/g, '△').replace(/b/g, '♭').replace(/#/g, '♯')
+      .replace(/h/g, 'ø').replace(/o/g, '°');
+  }
+  /* Der Grundton steht gross, was dahinter kommt kleiner und etwas hoeher —
+     so setzt es das Real Book, und so bleibt eine lange Alteration lesbar,
+     ohne den Takt zu sprengen. */
+  function akkordTeile(a){
+    const m = /^([A-G][b#]?)(.*)$/.exec(String(a));
+    if(!m) return { grund: akkordSetzen(a), rest:'' };
+    return { grund: akkordSetzen(m[1]), rest: akkordSetzen(m[2]) };
   }
 
   function zeichnen(o, opt){
     opt = opt || {};
+    const B = Math.round(opt.breite || A4.b);
+    const H = Math.round(opt.hoehe  || A4.h);
+    const rand = Math.round(Math.min(B,H) * 0.055);
     const zeilen = zeilenBauen(o.takte || []);
-    const breite = A4.b - 2*A4.rand;
-    const kopfHoch = (opt.titel || opt.komponist) ? KOPF : 0;
-    const y0 = A4.rand + kopfHoch + 300;
-    /* Die Zeilen fuellen die Seite. Ein Real Book laesst unten kein Drittel
-       leer, und auf dem Pult zaehlt jede Millimeter Schrifthoehe. Nach oben
-       begrenzt, damit vier Takte nicht auseinanderfallen. */
-    const platz = A4.h - y0 - A4.rand;
-    const ZH = Math.max(1800, Math.min(3600, Math.floor(platz / Math.max(1, zeilen.length))));
-    const gr = Math.round(ZH * 0.19 * (opt.akkgroesse || 1));
-    const st = opt.strich || 26;
+    const breite = B - 2*rand;
+    const kopf = (opt.titel || opt.komponist) ? Math.round(H*0.075) : 0;
+    const y0 = rand + kopf + Math.round(H*0.03);
+    const platz = H - y0 - rand;
+    const ZH = Math.max(1, Math.floor(platz / Math.max(1, zeilen.length)));
+    const hoch = ZH * 0.60;                     /* Hoehe eines Taktkastens */
+    const gr = Math.round(hoch * 0.62 * (opt.akkgroesse || 1));
+    const st = Math.max(3, Math.round(hoch*0.028));
     const farbe = opt.farbe || '#000';
 
-    const teile = [];
-    const linie = (x1,y1,x2,y2,dick) => teile.push(
-      '<path d="M'+Math.round(x1)+' '+Math.round(y1)+' L'+Math.round(x2)+' '+Math.round(y2)
-      +'" stroke="'+farbe+'" stroke-width="'+(dick||st)+'" fill="none"/>');
-    const punkt = (x,y) => teile.push(
-      '<circle cx="'+Math.round(x)+'" cy="'+Math.round(y)+'" r="55" fill="'+farbe+'"/>');
-    const text = (x,y,gross,inhalt,anker,fett) => teile.push(
-      '<text x="'+Math.round(x)+'" y="'+Math.round(y)+'" font-size="'+gross+'" fill="#000"'
-      + (anker ? ' text-anchor="'+anker+'"' : '')
-      + (fett ? ' font-weight="bold"' : '') + '>' + inhalt + '</text>');
+    const T = [];
+    const linie = (x1,y1,x2,y2,dick) => T.push('<path d="M'+Math.round(x1)+' '+Math.round(y1)
+      +' L'+Math.round(x2)+' '+Math.round(y2)+'" stroke="'+farbe+'" stroke-width="'
+      +(dick||st)+'" fill="none" stroke-linecap="butt"/>');
+    const punkt = (x,y,r) => T.push('<circle cx="'+Math.round(x)+'" cy="'+Math.round(y)
+      +'" r="'+Math.round(r)+'" fill="'+farbe+'"/>');
+    const kasten = (x,y,w,h) => T.push('<rect x="'+Math.round(x)+'" y="'+Math.round(y)
+      +'" width="'+Math.round(w)+'" height="'+Math.round(h)+'" fill="'+farbe+'"/>');
+    const text = (x,y,g,inhalt,anker,fuellung) => T.push('<text x="'+Math.round(x)+'" y="'
+      +Math.round(y)+'" font-size="'+Math.round(g)+'" fill="'+(fuellung||'#000')+'"'
+      +(anker?' text-anchor="'+anker+'"':'')+'>'+inhalt+'</text>');
 
-    /* Die Maße sind die des Blattes, nicht die einer Bildschirmseite: A4 ist
-       hier 21000 Einheiten breit. Ein Titel mit 72 waere ein Staubkorn. */
-    if(opt.titel) text(A4.b/2, A4.rand+620, 700, esc(String(opt.titel).toUpperCase()), 'middle', true);
-    if(opt.komponist) text(A4.b-A4.rand, A4.rand+1150, 400, esc(opt.komponist), 'end');
+    if(opt.titel) text(B/2, rand + kopf*0.55, kopf*0.52, esc(String(opt.titel).toUpperCase()), 'middle');
+    if(opt.komponist) text(B-rand, rand + kopf*0.92, kopf*0.30, esc(opt.komponist), 'end');
 
     zeilen.forEach((zeile, zi)=>{
       const oben = y0 + zi*ZH;
-      const unten = oben + ZH*0.72;
-      const w = breite / zeile.length;
+      const unten = oben + hoch;
+      /* Die Takte einer Zeile sind NICHT gleich breit. Wer Schluessel, Taktart
+         oder ein Wiederholungszeichen traegt, braucht mehr Platz, und wer
+         vier Akkorde hat, auch. Bei gleicher Breite stand im ersten Takt die
+         Taktart auf dem ersten Akkord — am 21. August von Jens gesehen. */
+      const gew = zeile.map((t,k)=> 1
+        + ((zi===0 && k===0 && opt.taktart) ? 0.45 : 0)
+        + (t.auf==='wdh' ? 0.12 : 0) + (t.zu ? 0.10 : 0)
+        + Math.max(0, (t.akkorde.length-2) * 0.12));
+      const summe = gew.reduce((a,b)=>a+b, 0);
+      const kanten = [rand];
+      gew.forEach(g=>kanten.push(kanten[kanten.length-1] + breite*g/summe));
       zeile.forEach((t, ti)=>{
-        const x = A4.rand + ti*w;
-        linie(x, oben, x, unten);
-        if(ti===zeile.length-1) linie(x+w, oben, x+w, unten);
-        if(t.auf==='wdh'){ punkt(x+160, oben+(unten-oben)*0.35); punkt(x+160, oben+(unten-oben)*0.65); }
-        if(t.zu==='wdh'){ punkt(x+w-160, oben+(unten-oben)*0.35); punkt(x+w-160, oben+(unten-oben)*0.65); }
-        if(t.zu==='ende') linie(x+w-130, oben, x+w-130, unten, st*3);
-        if(t.marke) text(x+60, oben-140, Math.round(ZH*0.16), esc(t.marke), null, true);
-        if(t.endung){
-          linie(x, oben-160, x+w*0.9, oben-160);
-          linie(x, oben-160, x, oben-40);
-          text(x+90, oben-250, Math.round(ZH*0.12), esc(t.endung)+'.');
+        const x = kanten[ti], xr = kanten[ti+1], w = xr - x;
+
+        /* Taktstriche: der linke immer, der rechte nur ganz aussen. */
+        if(t.auf==='wdh'){
+          linie(x+st*3, oben, x+st*3, unten, st*3.2);
+          linie(x+st*7.5, oben, x+st*7.5, unten);
+          punkt(x+st*12, oben+hoch*0.36, st*1.5);
+          punkt(x+st*12, oben+hoch*0.64, st*1.5);
+        } else linie(x, oben, x, unten);
+        if(t.zu==='wdh'){
+          punkt(xr-st*12, oben+hoch*0.36, st*1.5);
+          punkt(xr-st*12, oben+hoch*0.64, st*1.5);
+          linie(xr-st*7.5, oben, xr-st*7.5, unten);
+          linie(xr-st*3, oben, xr-st*3, unten, st*3.2);
+        } else if(t.zu==='ende'){
+          linie(xr-st*7, oben, xr-st*7, unten);
+          linie(xr-st*1.6, oben, xr-st*1.6, unten, st*3.2);
+        } else if(ti===zeile.length-1) linie(xr, oben, xr, unten);
+
+        /* Die Abschnittsmarke als schwarzes Kaestchen mit weissem Buchstaben —
+           so setzt es das Real Book, und so findet man sie im Augenwinkel. */
+        if(t.marke){
+          const k = hoch*0.30;
+          kasten(x + st*2, oben - k - st*3, k, k);
+          text(x + st*2 + k/2, oben - k*0.22 - st*3, k*0.86, esc(t.marke), 'middle', '#fff');
         }
-        /* Ein Akkord steht mittig, mehrere verteilen sich ueber den Takt. */
+        /* Die Endung: waagerechte Klammer mit Abknick nach unten. */
+        if(t.endung){
+          const yk = oben - hoch*0.17;
+          linie(x, yk, xr - w*0.06, yk);
+          linie(x, yk, x, yk + hoch*0.16);
+          text(x + st*6, yk - hoch*0.06, hoch*0.26, esc(t.endung)+'.');
+        }
+        /* Die Taktart steht einmal, vor dem ersten Takt. */
+        if(zi===0 && ti===0 && opt.taktart){
+          const p = String(opt.taktart).split('/');
+          const tx = x + st*(t.auf==='wdh' ? 17 : 6);
+          text(tx, oben + hoch*0.40, hoch*0.42, esc(p[0]), 'start');
+          text(tx, oben + hoch*0.86, hoch*0.42, esc(p[1]||'4'), 'start');
+        }
+
+        const links = x + (zi===0 && ti===0 && opt.taktart ? st*20 : st*8)
+                        + (t.auf==='wdh' ? st*9 : 0);
+        const rechts = xr - st*8 - (t.zu ? st*9 : 0);
+        const feld = Math.max(w*0.3, rechts-links);
         const n = t.akkorde.length;
+        const yb = oben + hoch*0.72;
         t.akkorde.forEach((a, ai)=>{
-          if(n===1) text(x+w/2, oben+(unten-oben)*0.62, gr, akkordSetzen(a), 'middle');
-          else text(x + w*(0.10 + 0.80*ai/(n-1)), oben+(unten-oben)*0.62, gr, akkordSetzen(a),
-                    ai===0 ? 'start' : (ai===n-1 ? 'end' : 'middle'));
+          if(a==='%'){
+            /* Der Wiederholungstakt: Schraegstrich mit zwei Punkten. */
+            const cx = links + feld/2, cy = oben + hoch*0.5;
+            linie(cx - hoch*0.16, cy + hoch*0.20, cx + hoch*0.16, cy - hoch*0.20, st*2.2);
+            punkt(cx - hoch*0.17, cy - hoch*0.13, st*1.6);
+            punkt(cx + hoch*0.17, cy + hoch*0.13, st*1.6);
+            return;
+          }
+          const k = akkordTeile(a);
+          const ax = n===1 ? links : links + feld*(ai/(n-1))*0.92;
+          const anker = n===1 ? 'start' : (ai===n-1 ? 'end' : 'start');
+          T.push('<text x="'+Math.round(ax)+'" y="'+Math.round(yb)+'" fill="#000"'
+            +(anker!=='start'?' text-anchor="'+anker+'"':'')+'>'
+            +'<tspan font-size="'+Math.round(gr)+'">'+esc(k.grund)+'</tspan>'
+            +(k.rest ? '<tspan font-size="'+Math.round(gr*0.62)+'" dy="'+Math.round(-gr*0.06)+'">'
+                       +esc(k.rest)+'</tspan>' : '')
+            +'</text>');
         });
       });
     });
 
-    const hoch = Math.max(A4.h, y0 + zeilen.length*ZH + A4.rand);
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+A4.b+' '+hoch+'" '
-         + 'width="'+A4.b+'" height="'+hoch+'">'
-         + '<rect width="'+A4.b+'" height="'+hoch+'" fill="#fff"/>'
-         + teile.join('') + '</svg>';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+B+' '+H+'" '
+         + 'width="'+B+'" height="'+H+'">'
+         + '<rect width="'+B+'" height="'+H+'" fill="#fff"/>'
+         + T.join('') + '</svg>';
   }
 
   return { dreh, lesen, rumpfLesen, zeichnen, zeilenBauen, A4, MARKER };
@@ -10293,7 +10377,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Ein Stapel Changes kommt herein';
+const APP_BUILD='2026-08-21 · Das Chord-Sheet füllt die Bühne';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
