@@ -7679,26 +7679,20 @@ function csTeilenBlatt(t){
 
     /* Den Verweis erst bauen, wenn er gebraucht wird — er kostet einen
        Datenbankzugriff und das Entwuerfeln. */
-    /* Weitergegeben wird die Fassung, die in der DATEI steht — nicht die
-       transponierte.
+    /* Weitergegeben wird die Fassung, die auf dem Blatt steht. Der Weg dorthin
+       geht ueber Feld 5 — siehe `IR.schreiben`. */
+    const bauen = async () => {
+      const o = IR.lesen(String(await chordQuelle(t)).trim());
+      const org = IR.tonartVon(o.tonart);
+      const a = LS.ausgabe(t.bsId);
+      const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
+      return IR.schreiben(o, { titel:t.t||o.titel, komponist:t.c||o.komponist, zielQ:ziel });
+    };
 
-       Am 21. August dreimal gemessen, immer mit demselben Verweis, in dem die
-       Akkorde in b-Moll standen. iReal Pro zeigte sie als g-Moll, dann als
-       f-Moll, dann als c-Moll — je nachdem, was in den Feldern 4 und 5 stand.
-       Feld 5 ist erkennbar ein Versatz in Halbtoenen; eine Aenderung um fuenf
-       verschob die Anzeige um genau fuenf. Aber auch bei Versatz null bleibt
-       eine Verschiebung von zwei Halbtoenen uebrig, fuer die es keine
-       Erklaerung gibt.
-
-       Solange die Regel nicht bekannt ist, waere jede transponierte Ausgabe
-       ein Gluecksspiel — und ein Blatt, das in einer anderen Tonart ankommt
-       als angekuendigt, ist auf der Buehne schlimmer als gar keins. Also geht
-       das Stueck so hinueber, wie es geliefert wurde; die Tonart stellt man
-       in iReal Pro ein, das kann es ohnehin besser. */
     zeile('Öffnen in iReal Pro',
-      'Springt hinüber und legt das Stück dort an — in der Tonart der Quelle. '
-      +'<b>Nicht in der, die hier eingestellt ist:</b> Wie iReal Pro eine Transposition '
-      +'im Verweis ausdrückt, ist noch nicht herausgefunden. Dort umstellen.',
+      'Springt hinüber und legt das Stück dort an, in der Tonart, die hier eingestellt ist. '
+      +'Die Notation geht nicht mit: Wer für ein Es-Instrument liest, stellt das in iReal Pro '
+      +'unter <b>Aa › Transponierendes Instrument</b> ein — die Begleitband braucht die klingende Tonart.',
       [['Öffnen', async()=>{
         try{ const adr=await bauen(); closeSheet(); location.href=adr; }
         catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
@@ -9134,6 +9128,39 @@ const IR = (function(){
     const k = rumpf.indexOf(MARKER);
     if(k < 0) throw new Error('In diesem Verweis steht kein Stück.');
     rumpf = dreh(rumpf.slice(k + MARKER.length));
+
+    /* ---- Feld 5 ist die ZIELTONART, kein Versatz -------------------------
+       Am 22. August an zwei Dateien vermessen, die iReal Pro fuer DASSELBE
+       Stueck geschrieben hat: „Barbara" und „Barbara 2", Rumpf Zeichen fuer
+       Zeichen gleich, Feld 4 in beiden `Eb`. Der einzige Unterschied stand in
+       Feld 5 — leer gegen `8` —, und das Programm zeigte das Stueck einmal in
+       Eb und einmal in Ab.
+
+       C plus acht Halbtoene ist Ab. Das Feld zaehlt also die Zieltonart in
+       Halbtoenen ueber C: 0=C, 1=Db, 2=D, 3=Eb … 8=Ab. Bei Moll zaehlen die
+       VORZEICHEN, nicht der Grundton — „Autumn Leaves" traegt dort eine 5 und
+       wird als d-Moll gezeigt, und Index 5 ist F-Dur, dessen Paralleltonart
+       d-Moll ist.
+
+       Daraus folgt die Falle, die drei Messungen gekostet hat: Eine `0` in
+       diesem Feld heisst NICHT „nichts", sondern „nach C". Bis zum 22. August
+       stand sie in jedem Verweis, den BandStand hinausgab.
+
+       Was hier herauskommt, ist das Stueck so, wie iReal Pro es ZEIGT. Die
+       Quelle bleibt daneben unberuehrt stehen — der Rueckweg braucht sie. */
+    const quellRumpf  = rumpf;
+    const quellTonart = (f[4]||'').trim();
+    const idx = (f[5]||'').trim();
+    let tonart = quellTonart;
+    if(/^\d+$/.test(idx)){
+      const org = tonartVon(quellTonart);
+      const zq  = quintenVonIndex(+idx, org.moll);
+      let dq = zq - org.q;
+      while(dq>7) dq-=12; while(dq<-7) dq+=12;
+      if(dq) rumpf = rumpfTransponieren(rumpf, dq);
+      tonart = LS.nameVonQuinten(zq) + (org.moll ? '-' : '');
+    }
+
     const komp = (f[1]||'').trim();
     const teile = komp.split(/\s+/);
     return Object.assign({
@@ -9147,9 +9174,14 @@ const IR = (function(){
          Verweise, die am 21. August vermessen wurden — es geht nicht mit. */
       stil: (f[3]||'').trim(),
       genre: (f[7]||'').trim(),
-      /* Feld 5: der Transponier-Versatz des Players in Halbtoenen. */
-      versatz: (f[5]||'').trim(),
-      tonart: (f[4]||'').trim(),
+      /* Feld 5, roh — fuer den Fall, dass jemand nachsehen will. */
+      versatz: idx,
+      /* Die Tonart, in der das Stueck GEZEIGT wird. */
+      tonart,
+      /* Die Quelle, Feld fuer Feld wie geliefert. Der Rueckweg schreibt aus
+         ihr und nicht aus dem, was auf dem Blatt steht — so bleibt der
+         Rundlauf verlustfrei. */
+      quelle: { rumpf: quellRumpf, tonart: quellTonart, index: idx },
       rumpf
     }, rumpfLesen(rumpf));
   }
@@ -9219,19 +9251,156 @@ const IR = (function(){
       return _mess.measureText(txt).width;
     }catch(e){ return String(txt).length * groesse * 0.55; }
   }
-  function akkordBreite(a, gr){
-    if(a==='%') return gr*0.8;
-    const k = akkordTeile(a);
-    return textBreite(k.grund, gr) + textBreite(k.rest, gr*0.62);
+  /* Wo die TINTE endet, nicht wo der Vorschub endet. Eine Handschrift traegt
+     rechts einen ordentlichen Anlauf mit sich, und wer daran anschliesst,
+     bekommt eine Luecke: `Db` und sein `-7` standen wie zwei Woerter
+     nebeneinander statt wie ein Akkordname. Gemessen wird deshalb die rechte
+     Kante des Gezeichneten und der Abstand danach selbst gesetzt. */
+  function tinteBreite(txt, groesse){
+    if(!txt) return 0;
+    try{
+      if(!_mess) _mess=document.createElement('canvas').getContext('2d');
+      _mess.font = Math.round(groesse)+'px PetalumaScript, sans-serif';
+      const m = _mess.measureText(txt);
+      return m.actualBoundingBoxRight !== undefined
+           ? Math.max(m.actualBoundingBoxRight, m.width*0.55) : m.width;
+    }catch(e){ return textBreite(txt, groesse); }
+  }
+  /* ---- Wie ein Akkordname gesetzt wird ------------------------------------
+     Ein Akkordname ist kein Wort, sondern ein kleines Schaubild: Der Grundton
+     traegt, sein Vorzeichen haengt oben dran, und was an Alterationen folgt,
+     steht klein daneben. Bis zum 22. August stand alles in einer Reihe
+     nebeneinander — bei `Eb7b9b5` sind das acht Zeichen, und der Takt war
+     voll, bevor der zweite Akkord anfing.
+
+     iReal Pro STAPELT stattdessen: Ab der zweiten alterierten Erweiterung
+     bricht es in eine zweite Zeile um. Am 22. August an Jens' Blatt
+     abgelesen — `Eb7b9b5` steht dort als `Eb` mit `7b9` darueber und `b5`
+     darunter, `F7b9` dagegen einzeilig. Der Name wird damit halb so breit
+     und bleibt gleich hoch lesbar; auf dem Pult zaehlt beides.               */
+  function akkordZerlegen(a){
+    const m = /^([A-G])([b#]?)(.*)$/.exec(String(a));
+    if(!m) return null;
+    let rest = m[3], bass = '';
+    /* Der Basston haengt hinten und bleibt bei allem, was folgt, aussen vor. */
+    const bm = /\/([A-G][b#]?)\s*$/.exec(rest);
+    if(bm){ bass = bm[0]; rest = rest.slice(0, bm.index); }
+
+    /* Der Rest zerfaellt in Stuecke. Was nicht erkannt wird, wird Zeichen fuer
+       Zeichen durchgereicht statt geraten — ein falsch gesetzter Akkord ist
+       schlimmer als ein breiter. */
+    const st = [];
+    let i = 0;
+    while(i < rest.length){
+      const r = rest.slice(i);
+      let x;
+      if((x = /^([b#]?)(\d+)/.exec(r))){
+        st.push({ erw:true, alt:!!x[1], s:x[0] }); i += x[0].length;
+      } else if((x = /^(sus|alt|add)/.exec(r))){
+        st.push({ erw:false, s:x[0] }); i += x[0].length;
+      } else { st.push({ erw:false, s:r[0] }); i++; }
+    }
+
+    /* Der Umbruch sitzt VOR der zweiten alterierten Erweiterung. */
+    let gezaehlt = 0, schnitt = -1;
+    st.forEach((x,k)=>{
+      if(x.erw && x.alt && ++gezaehlt === 2 && schnitt < 0) schnitt = k;
+    });
+    const zus = x => akkordSetzen(x.map(y=>y.s).join(''));
+    return {
+      grund: m[1],
+      vz:    akkordSetzen(m[2]),
+      oben:  zus(schnitt < 0 ? st : st.slice(0, schnitt)),
+      unten: schnitt < 0 ? '' : zus(st.slice(schnitt)),
+      bass:  akkordSetzen(bass)
+    };
   }
 
-  /* Der Grundton steht gross, was dahinter kommt kleiner und etwas hoeher —
-     so setzt es das Real Book, und so bleibt eine lange Alteration lesbar,
-     ohne den Takt zu sprengen. */
-  function akkordTeile(a){
-    const m = /^([A-G][b#]?)(.*)$/.exec(String(a));
-    if(!m) return { grund: akkordSetzen(a), rest:'' };
-    return { grund: akkordSetzen(m[1]), rest: akkordSetzen(m[2]) };
+  /* Die Groessen und Hoehen an einer Stelle — Breite und Satz muessen
+     dieselben benutzen, sonst steht der zweite Akkord im ersten.
+
+     Die Zahlen sind am 22. August an Jens' iReal-Blatt abgemessen und nicht
+     geschaetzt. Der Ausschlag gab `Ab△7`: Bei 0,66 war das `△7` BREITER als
+     der Grundton, zwei solche Akkorde sprengten jeden Takt, und die
+     Breitenrechnung drueckte die Schrift auf die Haelfte herunter — daher die
+     verlorenen kleinen Akkorde im grossen weissen Takt. Bei iReal Pro misst
+     das `△7` gut ein Drittel der Grundtonhoehe. Was es an Hoehe verliert,
+     bekommt es ueber `kraeftig` an Strichstaerke zurueck. */
+  function akkordMasse(gr, zweizeilig){
+    return {
+      gVz:    gr*0.48,  hVz:    gr*0.34,
+      gKlein: gr*(zweizeilig ? 0.33 : 0.36),
+      hOben:  zweizeilig ? gr*0.46 : gr*0.30,
+      hUnten: gr*0.02,
+      gBass:  gr*0.58,
+      luft:   gr*0.05
+    };
+  }
+
+  function akkordBreite(a, gr){
+    if(a==='%') return gr*0.8;
+    const z = akkordZerlegen(a);
+    if(!z) return textBreite(akkordSetzen(a), gr*0.70);
+    const M = akkordMasse(gr, !!z.unten);
+    let w = tinteBreite(z.grund, gr);
+    if(z.vz)   w += M.luft + tinteBreite(z.vz, M.gVz);
+    if(z.oben) w += M.luft + Math.max(tinteBreite(z.oben,  M.gKlein),
+                                      tinteBreite(z.unten, M.gKlein));
+    if(z.bass) w += M.luft + tinteBreite(z.bass, M.gBass);
+    return w;
+  }
+
+  /* Petaluma Script hat keinen fetten Schnitt, und ein kleiner gesetzter Text
+     hat duennere Striche — bei `F-7` stand das F kraeftig und das `-7`
+     blass daneben. Verdickt wird deshalb mit einem Rand in derselben Farbe,
+     genau so viel, wie die Verkleinerung weggenommen hat. Derselbe Griff wie
+     beim Regler fuer die Akkordstaerke am gesetzten Blatt. */
+  const STRICH = 0.055;
+  function kraeftig(g, gr){
+    const d = (gr - g) * STRICH;
+    return d > gr*0.002
+      ? ' paint-order="stroke" stroke="#000" stroke-linejoin="round" stroke-width="'
+        + (Math.round(d*100)/100) + '"'
+      : '';
+  }
+
+  /* Der fertige Akkord, an seiner Grundlinie aufgehaengt. Passt er nicht in
+     den Takt, wird die ganze Gruppe SCHMAL gezogen — gleiche Hoehe, engere
+     Laufweite. Bis zum 22. August tat das `lengthAdjust` am Text; mit zwei
+     Zeilen geht das nicht mehr, und eine Gruppe mit `scale` tut dasselbe. */
+  function akkordSVG(a, x, y, gr, hoechstens){
+    const z = akkordZerlegen(a);
+    const roh = akkordBreite(a, gr);
+    const sx = (hoechstens && roh > hoechstens) ? Math.max(0.45, hoechstens/roh) : 1;
+    const huelle = inhalt => '<g transform="translate('+Math.round(x)+','+Math.round(y)+')'
+         + (sx<1 ? ' scale('+(Math.round(sx*1000)/1000)+',1)' : '')+'">' + inhalt + '</g>';
+    /* Was kein Akkordname ist — `N.C.`, ein Wort, ein Schraegstrich — steht
+       einfach da, aber im selben Rahmen: Sonst laeuft es aus dem Takt. */
+    /* Kleiner als ein Akkordname: `N.C.` besteht nur aus grossen Zeichen und
+       stuende sonst breiter da als jeder Akkord im Takt. */
+    if(!z) return huelle('<text x="0" y="0" font-size="'+Math.round(gr*0.70)
+                       + '" fill="#000">'+esc(akkordSetzen(a))+'</text>');
+    const M = akkordMasse(gr, !!z.unten);
+
+    const T = [];
+    const setz = (dx, dy, g, txt) => { if(!txt) return;
+      T.push('<text x="'+Math.round(dx)+'" y="'+Math.round(dy)+'" font-size="'
+        + Math.round(g)+'" fill="#000"'+kraeftig(g, gr)+'>'+esc(txt)+'</text>'); };
+
+    let dx = 0;
+    setz(dx, 0, gr, z.grund);
+    dx += tinteBreite(z.grund, gr);
+    if(z.vz){ dx += M.luft; setz(dx, -M.hVz, M.gVz, z.vz);
+              dx += tinteBreite(z.vz, M.gVz); }
+    if(z.oben){
+      dx += M.luft;
+      setz(dx, -M.hOben,  M.gKlein, z.oben);
+      setz(dx, -M.hUnten, M.gKlein, z.unten);
+      dx += Math.max(tinteBreite(z.oben, M.gKlein), tinteBreite(z.unten, M.gKlein));
+    }
+    if(z.bass){ dx += M.luft; setz(dx, 0, M.gBass, z.bass); }
+
+    return huelle(T.join(''));
   }
 
   /* Alles auf diesem Blatt ist schwarz. Der Regler in Setup faerbt die
@@ -9257,14 +9426,58 @@ const IR = (function(){
        Gewaehlt wird sie so, dass ein Takt mit ZWEI Akkorden Platz hat; das ist
        der haeufige Fall. Wo mehr stehen, wird die Schrift SCHMAL gezogen und
        nicht klein: gleiche Hoehe, engere Laufweite. So hat Jens es am
-       21. August verlangt. */
-    const taktInnen = (breite / (zeilen[0] ? zeilen[0].length : 4)) - st*20;
-    let gr = Math.round(hoch * 0.62 * (opt.akkgroesse || 1));
-    (o.takte||[]).forEach(t=>{
-      if(t.akkorde.length !== 2) return;
-      const noetig = t.akkorde.reduce((n,a)=>n+akkordBreite(a, gr), 0) + gr*0.5;
-      if(noetig > taktInnen) gr = Math.max(gr*0.5, Math.floor(gr * taktInnen/noetig));
+       21. August verlangt.
+
+       Nach oben begrenzt die HOEHE des Taktkastens: Die Grundlinie sitzt bei
+       0,72, und ueber dem Grundton haengt noch sein Vorzeichen — zusammen gut
+       vier Fuenftel der Schriftgroesse. Mehr als 0,88 stoesst oben an. Bis zum
+       22. August stand hier 0,62, und weil damals noch jedes Zeichen
+       nebeneinander stand, blieb davon nach der Breitenrechnung wenig uebrig:
+       Die Akkorde standen verloren in einem weissen Takt. */
+    /* Gerechnet wird EINMAL und nicht Takt fuer Takt nachgebessert. Die alte
+       Schleife verkleinerte fortlaufend, und weil jeder weitere enge Takt auf
+       dem schon verkleinerten Wert aufsetzte, landete sie regelmaessig an
+       ihrer eigenen Untergrenze — die halbe Schriftgroesse, gleich wie eng es
+       wirklich war. Jetzt bestimmt der breiteste Takt den Wert, und zwar
+       direkt. */
+    /* Nach oben ist bei einer ganzen Kastenhoehe Schluss, auch wenn der
+       Regler mehr verlangt: Darueber wandert der Akkord in die Zeile ueber
+       ihm. Was der Regler darueber hinaus will, holt er sich aus der
+       Stauchung. */
+    const grHoehe = Math.min(hoch, hoch * 0.80 * (opt.akkgroesse || 1));
+    /* Gerechnet wird ueber ALLE Zeilen und nicht stellvertretend an der
+       ersten: Eine Zeile mit vier Takten hat halb so viel Platz je Takt wie
+       eine mit zweien, und welche Sorte oben steht, ist Zufall. Vorher gab die
+       erste Zeile das Mass, und in den engeren Zeilen musste danach jeder Takt
+       einzeln schrumpfen — das Blatt sah aus, als waere die Schriftgroesse
+       gewuerfelt.
+
+       Gemessen wird der Bedarf je Einheit Schriftgroesse, bei 1000, weil eine
+       Leinwand bei kleinen Groessen rundet. */
+    let engster = 0;
+    zeilen.forEach(zeile=>{
+      const platzImTakt = breite/zeile.length - st*8;
+      zeile.forEach(t=>{
+        const n = t.akkorde.length;
+        /* Takte mit drei und mehr Akkorden bestimmen die Groesse NICHT — sie
+           bekommen weiter unten ihre eigene. Sonst zieht ein einziger voller
+           Takt das ganze Blatt klein. */
+        if(!n || n > 2) return;
+        const je = t.akkorde.reduce((x,a)=>x + akkordBreite(a, 1000), 0)/1000
+                 + 0.24*(n-1);
+        if(je/platzImTakt > engster) engster = je/platzImTakt;
+      });
     });
+    /* Bis zu einem Fuenftel Ueberbreite wird NICHT kleiner gesetzt, sondern
+       schmal gezogen — so hat Jens es am 21. August verlangt, und es ist der
+       Unterschied zwischen einem Blatt, auf dem die Akkorde stehen, und einem,
+       auf dem sie sich verlieren. */
+    /* Der Regler aus Setup wirkt auf BEIDE Schranken. Sonst deckelt die
+       Breite ihn nach oben weg, und wer groesser stellt, sieht nichts
+       geschehen. Was er ueber die Breite hinaus verlangt, faengt die
+       Stauchung auf: hoeher und schmaler, aber wirklich groesser. */
+    const grBreite = (engster > 0 ? 1.20/engster : grHoehe) * (opt.akkgroesse || 1);
+    let gr = Math.round(Math.min(grHoehe, Math.max(grHoehe*0.55, grBreite)));
     const farbe = '#000';
 
     const T = [];
@@ -9338,9 +9551,13 @@ const IR = (function(){
           text(tx, oben + hoch*0.86, hoch*0.42, esc(p[1]||'4'), 'start');
         }
 
-        const links = x + (zi===0 && ti===0 && opt.taktart ? st*20 : st*8)
+        /* Der Rand im Takt war bis zum 22. August acht Strichstaerken breit,
+           links wie rechts — zusammen ein Fuenftel der Taktbreite, das leer
+           blieb und der Schrift fehlte. iReal Pro setzt den Akkord dicht an
+           den Taktstrich. */
+        const links = x + (zi===0 && ti===0 && opt.taktart ? st*22 : st*4)
                         + (t.auf==='wdh' ? st*9 : 0);
-        const rechts = xr - st*8 - (t.zu ? st*9 : 0);
+        const rechts = xr - st*4 - (t.zu ? st*9 : 0);
         const feld = Math.max(w*0.3, rechts-links);
         const n = t.akkorde.length;
         const yb = oben + hoch*0.72;
@@ -9349,15 +9566,26 @@ const IR = (function(){
            standen `G-7` und `Gb7` uebereinander. Der Platz, den Taktart und
            Wiederholungszeichen wegnehmen, geht in dieselbe Rechnung ein:
            Enge kostet Schriftgroesse, nicht Taktbreite. */
-        /* Passt der Takt nicht, wird die Schrift schmal gezogen — die Hoehe
-           bleibt, die Laufweite geht zurueck. `lengthAdjust` staucht dabei
-           Abstaende UND Glyphen, sonst kleben die Buchstaben aneinander.
+        /* Passt der Takt nicht, wird der Akkord schmal gezogen — die Hoehe
+           bleibt, die Laufweite geht zurueck.
 
            Gestaucht wird JE AKKORD und nicht fuer den ganzen Takt: Nur so
            bleibt zwischen zweien immer eine Luecke. Bei gemeinsamer Stauchung
            stand im ersten Takt `Eb-7Bb7b13` ohne Zwischenraum. */
-        const luecke = gr*0.32;
-        const proAkk = Math.max(gr*0.6, (feld - luecke*(n-1)) / Math.max(1,n));
+        /* Ein Takt mit vier Akkorden bekommt eine KLEINERE Schrift, und zwar
+           nur er. Die Blattgroesse richtet sich nach den Takten mit einem oder
+           zwei Namen — das ist der haeufige Fall und das ruhige Bild, das Jens
+           am 21. August verlangt hat. Wo mehr stehen, ist Verkleinern
+           unvermeidlich: Vier Namen in einem Viertel der Zeile lassen sich
+           nicht schmal ziehen, ohne unleserlich zu werden. Dasselbe tut iReal
+           Pro, und dafuer steht das `s` in seinem Format.
+
+           Bis zu einem Fuenftel wird trotzdem gezogen statt verkleinert. */
+        const bedarf = t.akkorde.reduce((x,a)=>x + akkordBreite(a, gr), 0) + gr*0.24*(n-1);
+        const grT = (n && bedarf > feld)
+                  ? Math.max(gr*0.45, gr * feld/bedarf * 1.20) : gr;
+        const luecke = grT*0.24;
+        const proAkk = Math.max(grT*0.6, (feld - luecke*(n-1)) / Math.max(1,n));
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
             const cx = links + feld/2, cy = oben + hoch*0.5;
@@ -9366,16 +9594,8 @@ const IR = (function(){
             punkt(cx + hoch*0.17, cy + hoch*0.13, st*1.6);
             return;
           }
-          const k = akkordTeile(a);
-          const roh = akkordBreite(a, gr);
-          const lang = roh > proAkk ? Math.round(Math.max(proAkk, roh*0.45)) : 0;
           const ax = links + ai*(proAkk + luecke);
-          T.push('<text x="'+Math.round(ax)+'" y="'+Math.round(yb)+'" fill="#000"'
-            +(lang?' textLength="'+lang+'" lengthAdjust="spacingAndGlyphs"':'')+'>'
-            +'<tspan font-size="'+Math.round(gr)+'">'+esc(k.grund)+'</tspan>'
-            +(k.rest ? '<tspan font-size="'+Math.round(gr*0.62)+'" dy="'+Math.round(-gr*0.06)+'">'
-                       +esc(k.rest)+'</tspan>' : '')
-            +'</text>');
+          T.push(akkordSVG(a, ax, yb, grT, proAkk));
         });
       });
     });
@@ -9406,7 +9626,14 @@ const IR = (function(){
   function tonTransponieren(n, dq){
     const q = LS.quintenVon(n);
     if(q < -7 || isNaN(q)) return n;      /* kein bekannter Grundton */
-    return LS.nameVonQuinten(q + dq);
+    let z = q + dq;
+    while(z > 7) z -= 12; while(z < -7) z += 12;
+    /* Ein AKKORD heisst nicht Cb, auch wenn eine Tonart so heissen kann: Als
+       Grundton steht dort B, und iReal Pro schreibt es auch so — am 22. August
+       an „Barbara" nach Ab gesehen, wo aus Gb^7 ein B^7 wird und kein Cb^7.
+       C# dagegen ist gebraeuchlich und bleibt. */
+    if(z === -7) z = 5;
+    return LS.nameVonQuinten(z);
   }
   function akkordTransponieren(a, dq){
     const s = String(a);
@@ -9426,6 +9653,23 @@ const IR = (function(){
       takte: (o.takte||[]).map(t => Object.assign({}, t,
         { akkorde: t.akkorde.map(a => akkordTransponieren(a, dq)) }))
     });
+  }
+
+  /* ---- Feld 5 hin und zurueck --------------------------------------------
+     Der Index zaehlt Halbtoene ueber C und meint die VORZEICHEN: Bei Moll
+     steht deshalb die Paralleldur-Tonart darin, drei Quinten tiefer. Gezaehlt
+     wird aus Quinten, weil das ganze Haus in Quinten rechnet — sieben
+     Halbtoene je Quinte, und der Rest bleibt in der Oktave. */
+  const halbton = q => ((q*7)%12+12)%12;
+  function zielIndex(q, moll){ return halbton(q - (moll ? 3 : 0)); }
+  function quintenVonIndex(i, moll){
+    /* Sieben mal sieben ist neunundvierzig, und das ist eins mehr als vier
+       Oktaven — deshalb ist die Umkehrung wieder eine Multiplikation mit 7. */
+    let q = ((i*7)%12+12)%12;
+    if(q > 5) q -= 12;              /* -6 bis +5: die Schreibweise mit b */
+    q += (moll ? 3 : 0);
+    while(q > 7) q -= 12;
+    return q;
   }
 
   /* Die Tonart, wie iReal Pro sie schreibt: `Db` fuer Dur, `G-` fuer Moll. */
@@ -9504,25 +9748,45 @@ const IR = (function(){
     return p.length===2 ? p[1]+' '+p[0] : String(n||'').trim();
   }
 
+  /* Geschrieben wird die Form, die iReal Pro fuer ein transponiertes Stueck
+     SELBST schreibt: Der Rumpf geht im Original hinueber, Feld 4 traegt die
+     Tonart der Quelle, und die gewuenschte Tonart steht als Index in Feld 5.
+     Nachgemessen an „Barbara 2" — ein Verweis, den das Programm selbst
+     erzeugt hat, und der einzige Fall, der nachweislich aufgeht.
+
+     Die NOTATION geht nicht mit. Ein Blatt fuer Alt-Sax ist eine Sache des
+     Pultes; iReal Pro hat dafuer seine eigene Einstellung (Aa ›
+     Transponierendes Instrument) und braucht die klingende Tonart, damit die
+     Begleitband richtig spielt.
+
+     Ein Leadsheet bringt keine Quelle mit — dort steht der gebaute Rumpf
+     schon in der gesetzten Tonart, Feld 4 traegt sie, und Feld 5 bleibt leer. */
   function schreiben(o, opt){
     opt = opt || {};
-    const rumpf = MARKER + dreh(o.rumpf || '');
+    const q = o.quelle;
+    const rumpf = MARKER + dreh((q ? q.rumpf : o.rumpf) || '');
+    const tonart4 = opt.tonart || (q ? q.tonart : o.tonart) || 'C';
+    const org = tonartVon(tonart4);
+    let feld5 = '';
+    if(opt.zielQ !== undefined && opt.zielQ !== null && opt.zielQ !== ''){
+      const zi = zielIndex(+opt.zielQ, org.moll);
+      if(zi !== zielIndex(org.q, org.moll)) feld5 = String(zi);
+    }
     const felder = [
       opt.titel || o.titel || 'Stück',
       nameDrehen(opt.komponist || o.komponist || ''),
       '',
       o.stil || 'Medium Swing',
-      opt.tonart || o.tonart || 'C',
-      /* Feld 5 ist der Transponier-Versatz des Players in Halbtoenen, nicht
-         die Zahl der Durchgaenge. Am 21. August aus drei Messungen erschlossen:
-         „Autumn Leaves" traegt dort eine 5, steht in g-Moll, und iReal Pro
-         zeigt es als d-Moll — genau fuenf Halbtoene tiefer. Wer den Wert beim
-         Weitergeben mitschleppt, bekommt die Akkorde ein zweites Mal
-         verschoben. Was BandStand hinausgibt, steht schon in der richtigen
-         Tonart und braucht keinen Versatz. */
-      opt.versatz !== undefined ? String(opt.versatz) : '0',
+      tonart4,
+      /* Feld 5. Leer heisst „so lassen"; eine Null hiesse „nach C" — bis zum
+         22. August stand hier genau diese Null, und sie hat drei Messungen
+         lang wie ein Fehler der Tonart-Rechnung ausgesehen. */
+      feld5,
       rumpf,
-      o.genre || o.stil || 'Medium Swing',
+      /* Feld 7 traegt den Stil, den der Nutzer im Player eingestellt hat. War
+         es in der Quelle leer, bleibt es leer — sonst kommt aus einem
+         Rundlauf ohne jede Aenderung ein anderer Verweis zurueck. */
+      o.genre !== undefined ? o.genre : (o.stil || 'Medium Swing'),
       '0', '0'
     ];
     /* Kodiert wird alles, was nicht in eine URL gehoert. Die Raute zuerst:
@@ -9535,7 +9799,7 @@ const IR = (function(){
   }
 
   return { dreh, lesen, rumpfLesen, rumpfTransponieren, rumpfBauen, schreiben, zeichnen, zeilenBauen,
-           transponieren, akkordTransponieren, tonartVon, A4, MARKER };
+           transponieren, akkordTransponieren, tonartVon, zielIndex, quintenVonIndex, A4, MARKER };
 })();
 window.IR = IR;
 
@@ -10749,7 +11013,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Unverändert hinüber, statt zu raten';
+const APP_BUILD='2026-08-22 · Feld fünf ist die Zieltonart';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
