@@ -7565,6 +7565,15 @@ async function irealSchreiben(zeilen, buchname){
       const t = await BS.titelAnlegen({ buchId, titel:z.o.titel, komponist:z.o.komponist||'' });
       titelId = t && (t.id||t);
     }
+    /* Steht am vorhandenen Titel kein Komponist, kommt er aus iReal Pro. Ein
+       vorhandener wird nicht ueberschrieben — was im Bestand steht, hat Jens
+       gesetzt. */
+    if(z.ziel && z.o.komponist){
+      const vorh=(BS_KATALOG.titel||[]).find(x=>x.id===z.ziel);
+      if(vorh && !(vorh.komponist||'').trim()){
+        try{ await BS.aendern('titel', z.ziel, {komponist:z.o.komponist}); }catch(e){}
+      }
+    }
     await BS.elementAnlegen({ titelId, art:'chordsheet', etikett:'Changes',
       dateiname: safeName(z.o.titel)+'.ireal',
       blob: new Blob([z.url], {type:'text/plain'}), np:1 });
@@ -7613,8 +7622,8 @@ async function renderChordFit(t){
 
     const svg = IR.zeichnen(o, {
       breite: 21000, hoehe: Math.round(21000/verh),
-      titel:t.t||'', komponist:t.c||'', taktart:o.taktart, stil:o.stil||'',
-      akkgroesse:e.akkgroesse });
+      titel:t.t||'', komponist:t.c||o.komponist||'', taktart:o.taktart, stil:o.stil||'',
+      fuss:irealFuss(o), akkgroesse:e.akkgroesse });
 
     if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
       window.SHEET_RATIO=verh; if(window.layout) window.layout();
@@ -7633,6 +7642,17 @@ async function renderChordFit(t){
       +esc(err&&err.message||String(err))+'</div>';
   }
 }
+/* Was im Player eingestellt war, als das Stueck geteilt wurde. Ein Tempo
+   steht nicht im Verweis — die beiden am 21. August vermessenen Stuecke
+   tragen keines, obwohl iReal Pro unten eines anzeigt. */
+function irealFuss(o){
+  const teile=[];
+  if(o.genre) teile.push(o.genre);
+  if(o.durchgaenge && +o.durchgaenge > 1) teile.push(o.durchgaenge+'×');
+  if(o.tempo) teile.push(o.tempo+' bpm');
+  return teile.length ? 'My settings: '+teile.join(', ') : '';
+}
+
 /* Die Bytes eines Chord-Sheets sind Text, kein Blob-Verweis. */
 async function chordQuelle(t){
   const b = await BS.bytes(t.bsId);
@@ -9013,7 +9033,14 @@ const IR = (function(){
       titel: (f[0]||'').trim(),
       /* iReal Pro schreibt „Nachname Vorname". */
       komponist: teile.length===2 ? teile[1]+' '+teile[0] : komp,
+      /* Zwei verschiedene Angaben, und beide gehoeren aufs Blatt: Feld 3 sagt,
+         WIE das Stueck gemeint ist („Medium Swing"), Feld 7 traegt den Stil,
+         den der Nutzer im Player eingestellt hat („Jazz-Bossa Nova"), Feld 5
+         die Zahl der Durchgaenge. Ein Tempo steht in keinem der beiden
+         Verweise, die am 21. August vermessen wurden — es geht nicht mit. */
       stil: (f[3]||'').trim(),
+      genre: (f[7]||'').trim(),
+      durchgaenge: (f[5]||'').trim(),
       tonart: (f[4]||'').trim(),
       rumpf
     }, rumpfLesen(rumpf));
@@ -9122,17 +9149,13 @@ const IR = (function(){
     zeilen.forEach((zeile, zi)=>{
       const oben = y0 + zi*ZH;
       const unten = oben + hoch;
-      /* Die Takte einer Zeile sind NICHT gleich breit. Wer Schluessel, Taktart
-         oder ein Wiederholungszeichen traegt, braucht mehr Platz, und wer
-         vier Akkorde hat, auch. Bei gleicher Breite stand im ersten Takt die
-         Taktart auf dem ersten Akkord — am 21. August von Jens gesehen. */
-      const gew = zeile.map((t,k)=> 1
-        + ((zi===0 && k===0 && opt.taktart) ? 0.45 : 0)
-        + (t.auf==='wdh' ? 0.12 : 0) + (t.zu ? 0.10 : 0)
-        + Math.max(0, (t.akkorde.length-1) * 0.16));
-      const summe = gew.reduce((a,b)=>a+b, 0);
-      const kanten = [rand];
-      gew.forEach(g=>kanten.push(kanten[kanten.length-1] + breite*g/summe));
+      /* Gleich breite Takte. Ein erster Versuch verteilte den Platz nach
+         Bedarf — mehr fuer die Taktart, mehr fuer volle Takte —, und die
+         Taktstriche standen danach nicht mehr untereinander. Auf einem Blatt,
+         das ohnehin Platz hat, ist das ein Schoenheitsfehler ohne Gegenwert.
+         Wo es eng wird, wird stattdessen die Schrift kleiner. */
+      const kanten = [];
+      for(let k=0;k<=zeile.length;k++) kanten.push(rand + k*breite/zeile.length);
       zeile.forEach((t, ti)=>{
         const x = kanten[ti], xr = kanten[ti+1], w = xr - x;
 
@@ -9183,8 +9206,12 @@ const IR = (function(){
         const yb = oben + hoch*0.72;
         /* Mehrere Akkorde in einem Takt werden kleiner gesetzt — dasselbe tut
            iReal Pro, und dafuer steht das `s` in seinem Format. Ohne das
-           standen `G-7` und `Gb7` uebereinander. */
-        const gr2 = gr * (n<=1 ? 1 : n===2 ? 0.76 : 0.60);
+           standen `G-7` und `Gb7` uebereinander. Der Platz, den Taktart und
+           Wiederholungszeichen wegnehmen, geht in dieselbe Rechnung ein:
+           Enge kostet Schriftgroesse, nicht Taktbreite. */
+        const zeichen = t.akkorde.reduce((z,a)=>z + (a==='%' ? 2 : String(a).length + 1.6), 0);
+        const passt = feld / Math.max(1, zeichen * gr * 0.42);
+        const gr2 = gr * Math.max(0.48, Math.min(1, passt));
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
             /* Der Wiederholungstakt: Schraegstrich mit zwei Punkten. */
@@ -9206,6 +9233,13 @@ const IR = (function(){
         });
       });
     });
+
+    /* Die Fusszeile: was im Player eingestellt war. Sie steht unten links,
+       klein und grau — eine Notiz an sich selbst, kein Teil der Noten.
+       Von Jens am 21. August gewuenscht. */
+    if(opt.fuss)
+      T.push('<text x="'+Math.round(rand)+'" y="'+Math.round(H-rand*0.45)+'" font-size="'
+        +Math.round(rand*0.42)+'" fill="#777">'+esc(opt.fuss)+'</text>');
 
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+B+' '+H+'" '
          + 'width="'+B+'" height="'+H+'">'
@@ -10469,7 +10503,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Changes in jeder Tonart';
+const APP_BUILD='2026-08-21 · Saubere Spalten, eine Fußzeile';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -14129,7 +14163,7 @@ setTimeout(ablageAnmelden, 0);
     z_lh._ctl.append(wahl([['0','Aus'],['1','Fein'],['2','Mittel'],['3','Stark']],
       String(eLS.hand), v=>{ LS.setzen('hand',v); lsNeu(); }));
     const z_lf=zeile('Farbe der Notenlinien','Grau nimmt dem Blatt die Härte, Schwarz die Unschärfe');
-    z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#666666','Mittel'],['#999999','Grau']],
+    z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#777777','Mittel'],['#bbbbbb','Grau']],
       eLS.farbe, v=>{ LS.setzen('farbe',v); lsNeu(); }));
     const z_ll=zeile('Stärke der Notenlinien','Die fünf Linien des Systems');
     z_ll._ctl.append(regler(0.10, 0.60, 0.02, eLS.linie,
