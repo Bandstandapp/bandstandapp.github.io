@@ -8268,8 +8268,31 @@ const LS = (function(){
   function umbrechen(xml, proZeile){
     proZeile = proZeile || 4;
     xml = xml.replace(/<print\b[^>]*\/>/g,'').replace(/<print\b[^>]*>[\s\S]*?<\/print>/g,'');
-    const erster = /<part\b[^>]*>([\s\S]*?)<\/part>/.exec(xml);
-    const takte = [...(erster?erster[1]:xml).matchAll(/<measure\b[^>]*>([\s\S]*?)<\/measure>/g)];
+    /* `<part\b` trifft auch `<part-list>` — die Instrumentenliste am
+       Dateianfang, in der keine Note steht. Am 22. August an
+       „8CountsForRita" gefunden: Der Ausschnitt begann dort bei der Liste,
+       die Takte wurden falsch gezaehlt, und die Umbrueche landeten an
+       willkuerlichen Stellen. Aus neun gleichen Zeilen wurden Systeme mit 3,
+       4, 2, 2, 4, 2, 2, 2, 6, 4, 2, 2 und 1 Takten — und weil jede Zeile die
+       Seitenbreite fuellt, war ein Takt danach doppelt so breit wie der
+       naechste. Ein Takt ist aber ein Zeitmass.
+
+       Ein echter Part traegt eine Kennung: `<part id="P1">`.
+
+       Dasselbe gilt fuer den Takt selbst, und dort war der Schaden groesser:
+       `<measure\b` trifft auch `<measure-style>`, das Element fuer
+       Taktwiederholungen. In „8CountsForRita" stehen 36 echte Takte und
+       achtzehn solcher Elemente — der Zaehler lief bis 54, rechnete modulo 36
+       und setzte Umbrueche ein zweites Mal an falscher Stelle. Ein Blick auf
+       die Zahlen sagt es sofort: 54 oeffnende Tags, aber nur 36 schliessende
+       und 36 mit einer Taktnummer.
+
+       `(?=[\s>])` verlangt, dass nach dem Wort ein Leerzeichen oder die
+       spitze Klammer kommt — ein Bindestrich zaehlt nicht mehr. */
+    const TAKT_AUF = /<measure(?=[\s>])[^>]*>/g;
+    const erster = /<part\s+id=[^>]*>([\s\S]*?)<\/part>/.exec(xml);
+    const takte = [...(erster?erster[1]:xml)
+      .matchAll(/<measure(?=[\s>])[^>]*>([\s\S]*?)<\/measure>/g)];
     const dicht = takte.map(m=>(m[1].match(/<note\b/g)||[]).length);
     if(!dicht.length) return xml;
     const voll=new Set(); dicht.forEach((n,i)=>{ if(n>11) voll.add(i); });
@@ -8279,7 +8302,7 @@ const LS = (function(){
       i+=g; if(i<dicht.length) grenzen.add(i);
     }
     let nr=-1;
-    return xml.replace(/<measure\b[^>]*>/g, m=>{
+    return xml.replace(TAKT_AUF, m=>{
       nr=(nr+1)%dicht.length;
       return grenzen.has(nr) ? m+'<print new-system="yes"/>' : m;
     });
@@ -11188,7 +11211,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-22 · Ein Takt ist ein Zeitmaß';
+const APP_BUILD='2026-08-22 · measure-style ist kein Takt';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
