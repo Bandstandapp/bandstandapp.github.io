@@ -8186,7 +8186,7 @@ const LS = (function(){
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
   const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0,
-                    akkgroesse:1.0, akkstrich:0, csschrift:'druck' };
+                    akkgroesse:1.0, akkstrich:0, csschrift:'hand' };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -9262,16 +9262,21 @@ const IR = (function(){
      mit einem Rand verdickt werden. iReal Pro setzt seine Blaetter ebenso.
      Die Handschrift bleibt waehlbar, weil sie zum gesetzten Blatt passt.    */
   const SCHRIFTEN = {
-    hand:  { css:"'PetalumaScript',ui-sans-serif,sans-serif", fett:'',    strich:0.055 },
+    /* `strich` gleicht aus, was die Verkleinerung an Strichstaerke wegnimmt.
+       Bei der Handschrift muss er klein bleiben: Ein `♭` hat einen schmalen
+       Bauch, und ein zu kraeftiger Rand laeuft ihn zu — auf dem iPad war er
+       am 22. August schwarz statt offen. Was an Lesbarkeit fehlt, kommt
+       besser aus GROESSE als aus Staerke. */
+    hand:  { css:"'PetalumaScript',ui-sans-serif,sans-serif", fett:'',    strich:0.018 },
     druck: { css:"'Helvetica Neue',Helvetica,Arial,ui-sans-serif,sans-serif",
-             fett:'700', strich:0.022 }
+             fett:'700', strich:0.012 }
   };
-  let SCHRIFT = SCHRIFTEN.druck;
+  let SCHRIFT = SCHRIFTEN.hand;
   /* Was der Regler in Setup zusaetzlich auftraegt, in Bruchteilen der eigenen
      Hoehe — derselbe Wert, der am gesetzten Blatt die Akkorde kraeftigt. */
   let EXTRA = 0;
   function schriftWaehlen(name, extra){
-    SCHRIFT = SCHRIFTEN[name] || SCHRIFTEN.druck;
+    SCHRIFT = SCHRIFTEN[name] || SCHRIFTEN.hand;
     EXTRA = Math.max(0, Math.min(0.12, +extra || 0));
   }
 
@@ -9363,9 +9368,9 @@ const IR = (function(){
      bekommt es ueber `kraeftig` an Strichstaerke zurueck. */
   function akkordMasse(gr, zweizeilig){
     return {
-      gVz:    gr*0.48,  hVz:    gr*0.34,
-      gKlein: gr*(zweizeilig ? 0.33 : 0.36),
-      hOben:  zweizeilig ? gr*0.46 : gr*0.30,
+      gVz:    gr*0.54,  hVz:    gr*0.34,
+      gKlein: gr*(zweizeilig ? 0.40 : 0.44),
+      hOben:  zweizeilig ? gr*0.50 : gr*0.30,
       hUnten: gr*0.02,
       gBass:  gr*0.58,
       luft:   gr*0.05
@@ -9412,14 +9417,27 @@ const IR = (function(){
   const SONDER = { '△':0.60, '°':0.40 };
   const rnd = x => Math.round(x);
   function sonderPfad(ch, x, y, g){
-    const d = g * (SCHRIFT.fett ? 0.095 : 0.075);
+    /* Kraeftiger als ein Buchstabenstrich, denn ein Dreieck aus duennen
+       Linien verschwindet neben einem fetten `B`. Bei der Handschrift kommt
+       eine Neigung dazu: Petaluma Script laeuft schraeg, und ein aufrecht
+       gestelltes Dreieck daneben sieht aus wie hineingeklebt — es war Jens'
+       erster Einwand am 22. August. */
+    const hand = !SCHRIFT.fett;
+    const d = g * (hand ? 0.115 : 0.105);
     if(ch === '△'){
-      const h = g*0.60, b = g*0.54;
-      return '<path d="M'+rnd(x+b/2)+' '+rnd(y-h)+' L'+rnd(x+b)+' '+rnd(y)
-           + ' L'+rnd(x)+' '+rnd(y)+' Z" fill="none" stroke="#000" stroke-width="'
-           + rnd(d)+'" stroke-linejoin="round"/>';
+      const h = g*0.62, b = g*0.58;
+      /* Von Hand geschrieben ist ein Dreieck nirgends gleichseitig: Die
+         Spitze sitzt etwas rechts der Mitte, und die Grundlinie laeuft ueber
+         die linke Ecke hinaus. */
+      const p = 'M'+rnd(x+b*0.60)+' '+rnd(y-h)
+              + ' L'+rnd(x+b*1.04)+' '+rnd(y+g*0.02)
+              + ' L'+rnd(x-b*0.04)+' '+rnd(y)+' Z';
+      return '<path d="'+p+'" fill="none" stroke="#000" stroke-width="'+rnd(d)
+           + '" stroke-linejoin="round" stroke-linecap="round"'
+           + (hand ? ' transform="skewX(-9)" transform-origin="'+rnd(x)+' '+rnd(y)+'"' : '')
+           + '/>';
     }
-    const r = g*0.15;
+    const r = g*0.16;
     return '<circle cx="'+rnd(x+r+d/2)+'" cy="'+rnd(y-g*0.46)+'" r="'+rnd(r)
          + '" fill="none" stroke="#000" stroke-width="'+rnd(d)+'"/>';
   }
@@ -9454,7 +9472,7 @@ const IR = (function(){
   function akkordSVG(a, x, y, gr, hoechstens){
     const z = akkordZerlegen(a);
     const roh = akkordBreite(a, gr);
-    const sx = (hoechstens && roh > hoechstens) ? Math.max(0.45, hoechstens/roh) : 1;
+    const sx = (hoechstens && roh > hoechstens) ? Math.max(0.38, hoechstens/roh) : 1;
     const huelle = inhalt => '<g transform="translate('+Math.round(x)+','+Math.round(y)+')'
          + (sx<1 ? ' scale('+(Math.round(sx*1000)/1000)+',1)' : '')+'">' + inhalt + '</g>';
     /* Was kein Akkordname ist — `N.C.`, ein Wort, ein Schraegstrich — steht
@@ -9539,18 +9557,31 @@ const IR = (function(){
 
        Gemessen wird der Bedarf je Einheit Schriftgroesse, bei 1000, weil eine
        Leinwand bei kleinen Groessen rundet. */
+    /* Wie viel Platz ein Takt wirklich hat. Diese Rechnung muss die GLEICHE
+       sein wie beim Satz weiter unten — am 22. August war sie es nicht: Sie
+       zog pauschal acht Strichstaerken ab, waehrend ein Takt mit
+       Wiederholungsklammer zweiundzwanzig verliert. Die Folge waren einzelne
+       Akkorde, die auf 0,57 zusammengezogen wurden und neben ihren Nachbarn
+       aussahen, als waeren sie kleiner gesetzt. */
+    const taktPlatz = (zeile, zi, t, ti) => {
+      const tb = breite/zeile.length;
+      const li = (zi===0 && ti===0 && opt.taktart ? st*22 : st*4)
+               + (t.auf==='wdh' ? st*9 : 0);
+      const re = st*4 + (t.zu==='wdh' ? st*18 : (t.zu ? st*9 : 0));
+      return Math.max(tb*0.3, tb - li - re);
+    };
     let engster = 0;
-    zeilen.forEach(zeile=>{
-      const platzImTakt = breite/zeile.length - st*8;
-      zeile.forEach(t=>{
+    zeilen.forEach((zeile, zi)=>{
+      zeile.forEach((t, ti)=>{
         const n = t.akkorde.length;
         /* Takte mit drei und mehr Akkorden bestimmen die Groesse NICHT — sie
-           bekommen weiter unten ihre eigene. Sonst zieht ein einziger voller
-           Takt das ganze Blatt klein. */
+           werden schmal gezogen. Sonst zieht ein einziger voller Takt das
+           ganze Blatt klein. */
         if(!n || n > 2) return;
         const je = t.akkorde.reduce((x,a)=>x + akkordBreite(a, 1000), 0)/1000
-                 + 0.24*(n-1);
-        if(je/platzImTakt > engster) engster = je/platzImTakt;
+                 + 0.18*(n-1);
+        const q = je / taktPlatz(zeile, zi, t, ti);
+        if(q > engster) engster = q;
       });
     });
     /* Bis zu einem Fuenftel Ueberbreite wird NICHT kleiner gesetzt, sondern
@@ -9561,7 +9592,7 @@ const IR = (function(){
        Breite ihn nach oben weg, und wer groesser stellt, sieht nichts
        geschehen. Was er ueber die Breite hinaus verlangt, faengt die
        Stauchung auf: hoeher und schmaler, aber wirklich groesser. */
-    const grBreite = (engster > 0 ? 1.20/engster : grHoehe) * (opt.akkgroesse || 1);
+    const grBreite = (engster > 0 ? 1.30/engster : grHoehe) * (opt.akkgroesse || 1);
     let gr = Math.round(Math.min(grHoehe, Math.max(grHoehe*0.55, grBreite)));
     const farbe = '#000';
 
@@ -9577,7 +9608,11 @@ const IR = (function(){
       +Math.round(y)+'" font-size="'+Math.round(g)+'" fill="'+(fuellung||'#000')+'"'
       +(anker?' text-anchor="'+anker+'"':'')+'>'+inhalt+'</text>');
 
-    if(opt.titel) text(B/2, rand + kopf*0.55, kopf*0.52, esc(String(opt.titel).toUpperCase()), 'middle');
+    /* Der Titel richtet sich nach den Akkorden und nicht nur nach der
+       Blatthoehe: Auf einem kurzen Stueck stehen die Akkorde gross, und ein
+       Titel, der kleiner ist als sie, sieht aus wie eine Fussnote. */
+    if(opt.titel) text(B/2, rand + kopf*0.55, Math.max(kopf*0.52, gr*1.15),
+                       esc(String(opt.titel).toUpperCase()), 'middle');
     if(opt.komponist) text(B-rand, rand + kopf*0.92, kopf*0.30, esc(opt.komponist), 'end');
     /* Der Stil steht links unter dem Titel, wie bei iReal Pro. Er sagt, wie
        das Stueck gemeint ist — „Ballad" oder „Medium Swing" —, und das
@@ -9598,17 +9633,33 @@ const IR = (function(){
         const x = kanten[ti], xr = kanten[ti+1], w = xr - x;
 
         /* Taktstriche: der linke immer, der rechte nur ganz aussen. */
+        /* Ein Wiederholungszeichen soll man im Augenwinkel finden, ohne es
+           zu suchen. Es steht deshalb als KLAMMER da: Die Striche ragen oben
+           und unten ueber den Taktkasten hinaus und tragen kurze waagerechte
+           Ausleger, die Punkte sind groesser. Von Jens am 22. August
+           gewuenscht — vorher war es ein Taktstrich mit zwei Fliegendreck. */
+        /* Der Ueberstand macht die Klammer, nicht die Masse. Ein erster
+           Versuch am 22. August gab ihr dicke Ausleger bis fast an den
+           duennen Strich — daraus wurde ein geschlossener schwarzer Kasten.
+           Jetzt ragt der dicke Strich deutlich ueber den Takt hinaus und
+           traegt an seinen Enden zwei kurze Haken. */
+        const ueber = hoch*0.11, arm = st*3.2;
+        const klammer = (kx, ri) => {
+          linie(kx, oben-ueber, kx, unten+ueber, st*3.0);
+          linie(kx, oben-ueber+st*0.8, kx+ri*arm, oben-ueber+st*0.8, st*1.7);
+          linie(kx, unten+ueber-st*0.8, kx+ri*arm, unten+ueber-st*0.8, st*1.7);
+        };
         if(t.auf==='wdh'){
-          linie(x+st*3, oben, x+st*3, unten, st*3.2);
-          linie(x+st*7.5, oben, x+st*7.5, unten);
-          punkt(x+st*12, oben+hoch*0.36, st*1.5);
-          punkt(x+st*12, oben+hoch*0.64, st*1.5);
+          klammer(x+st*3, 1);
+          linie(x+st*9, oben, x+st*9, unten);
+          punkt(x+st*14, oben+hoch*0.36, st*1.9);
+          punkt(x+st*14, oben+hoch*0.64, st*1.9);
         } else linie(x, oben, x, unten);
         if(t.zu==='wdh'){
-          punkt(xr-st*12, oben+hoch*0.36, st*1.5);
-          punkt(xr-st*12, oben+hoch*0.64, st*1.5);
-          linie(xr-st*7.5, oben, xr-st*7.5, unten);
-          linie(xr-st*3, oben, xr-st*3, unten, st*3.2);
+          punkt(xr-st*14, oben+hoch*0.36, st*1.9);
+          punkt(xr-st*14, oben+hoch*0.64, st*1.9);
+          linie(xr-st*9, oben, xr-st*9, unten);
+          klammer(xr-st*3, -1);
         } else if(t.zu==='ende'){
           linie(xr-st*7, oben, xr-st*7, unten);
           linie(xr-st*1.6, oben, xr-st*1.6, unten, st*3.2);
@@ -9618,8 +9669,12 @@ const IR = (function(){
            so setzt es das Real Book, und so findet man sie im Augenwinkel. */
         if(t.marke){
           const k = hoch*0.30;
-          kasten(x + st*2, oben - k - st*3, k, k);
-          text(x + st*2 + k/2, oben - k*0.22 - st*3, k*0.86, esc(t.marke), 'middle', '#fff');
+          /* Steht am selben Takt eine Wiederholungsklammer, rueckt die Marke
+             zur Seite: Die Klammer ragt seit dem 22. August ueber den Takt
+             hinaus, und das schwarze Kaestchen sass genau darauf. */
+          const mx = x + (t.auf==='wdh' ? st*11 : st*2);
+          kasten(mx, oben - k - st*3, k, k);
+          text(mx + k/2, oben - k*0.22 - st*3, k*0.86, esc(t.marke), 'middle', '#fff');
         }
         /* Die Endung: waagerechte Klammer mit Abknick nach unten. */
         if(t.endung){
@@ -9639,11 +9694,14 @@ const IR = (function(){
         /* Der Rand im Takt war bis zum 22. August acht Strichstaerken breit,
            links wie rechts — zusammen ein Fuenftel der Taktbreite, das leer
            blieb und der Schrift fehlte. iReal Pro setzt den Akkord dicht an
-           den Taktstrich. */
+           den Taktstrich. Die Punkte des Wiederholungszeichens brauchen
+           dagegen viel: Sie sitzen bei `xr - st*14`, und wer dort zu wenig
+           freihaelt, schiebt sie in den letzten Akkord — auf Jens' Blatt
+           stand der Punkt mitten im `b9`. */
         const links = x + (zi===0 && ti===0 && opt.taktart ? st*22 : st*4)
                         + (t.auf==='wdh' ? st*9 : 0);
-        const rechts = xr - st*4 - (t.zu ? st*9 : 0);
-        const feld = Math.max(w*0.3, rechts-links);
+        const feld = taktPlatz(zeile, zi, t, ti);
+        const rechts = links + feld;
         const n = t.akkorde.length;
         const yb = oben + hoch*0.72;
         /* Mehrere Akkorde in einem Takt werden kleiner gesetzt — dasselbe tut
@@ -9657,20 +9715,15 @@ const IR = (function(){
            Gestaucht wird JE AKKORD und nicht fuer den ganzen Takt: Nur so
            bleibt zwischen zweien immer eine Luecke. Bei gemeinsamer Stauchung
            stand im ersten Takt `Eb-7Bb7b13` ohne Zwischenraum. */
-        /* Ein Takt mit vier Akkorden bekommt eine KLEINERE Schrift, und zwar
-           nur er. Die Blattgroesse richtet sich nach den Takten mit einem oder
-           zwei Namen — das ist der haeufige Fall und das ruhige Bild, das Jens
-           am 21. August verlangt hat. Wo mehr stehen, ist Verkleinern
-           unvermeidlich: Vier Namen in einem Viertel der Zeile lassen sich
-           nicht schmal ziehen, ohne unleserlich zu werden. Dasselbe tut iReal
-           Pro, und dafuer steht das `s` in seinem Format.
-
-           Bis zu einem Fuenftel wird trotzdem gezogen statt verkleinert. */
-        const bedarf = t.akkorde.reduce((x,a)=>x + akkordBreite(a, gr), 0) + gr*0.24*(n-1);
-        const grT = (n && bedarf > feld)
-                  ? Math.max(gr*0.45, gr * feld/bedarf * 1.20) : gr;
-        const luecke = grT*0.24;
-        const proAkk = Math.max(grT*0.6, (feld - luecke*(n-1)) / Math.max(1,n));
+        /* EINE Groesse fuer das ganze Blatt, ohne Ausnahme. Am 22. August
+           hatte ich vollen Takten eine eigene, kleinere gegeben — technisch
+           begruendbar, auf dem Pult aber genau das, was Jens am 21. August
+           schon einmal abgelehnt hatte: Ein Akkord, der kleiner steht, weil
+           zufaellig ein zweiter im Takt steht, laesst das Blatt unruhig
+           aussehen. Wo es eng wird, wird SCHMAL GEZOGEN und nicht klein
+           gesetzt. */
+        const luecke = gr*0.18;
+        const proAkk = Math.max(gr*0.5, (feld - luecke*(n-1)) / Math.max(1,n));
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
             const cx = links + feld/2, cy = oben + hoch*0.5;
@@ -9680,7 +9733,7 @@ const IR = (function(){
             return;
           }
           const ax = links + ai*(proAkk + luecke);
-          T.push(akkordSVG(a, ax, yb, grT, proAkk));
+          T.push(akkordSVG(a, ax, yb, gr, proAkk));
         });
       });
     });
@@ -11103,7 +11156,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-22 · Eine Schrift, die alle Zeichen hat';
+const APP_BUILD='2026-08-22 · Eine Größe, eine Klammer, ein Dreieck von Hand';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
