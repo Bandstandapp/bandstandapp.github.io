@@ -2724,10 +2724,27 @@ async function loadLibrary(){
       if(kt) kt.textContent=CURRENT.t;
       if(ks && CURRENT.isLib && !CURRENT.isEdit)
         ks.textContent=(CURRENT.c?CURRENT.c+' — ':'')+CURRENT.b;
-      if(window.blattNeuZeichnen) blattNeuZeichnen(true);
+      lsKopfNachziehen(CURRENT);
     }
   }
   setzerVorholen();
+}
+
+/* Auf einem gesetzten Blatt steht der Titel in einer eigenen Gruppe, die
+   NEBEN den Noten liegt (`g.bskopf`). Wer nur ihn austauscht, spart den
+   ganzen Notensatz: Am 21. August dauerte das Speichern eines neuen Namens
+   auf dem iPad vier bis fuenf Sekunden — nicht wegen des Schreibens, sondern
+   weil das Blatt dafuer neu gesetzt wurde. */
+function lsKopfNachziehen(t){
+  if(!t || t.art!=='leadsheet') return;
+  const kopf=document.querySelector('#vFit .pg svg g.bskopf');
+  if(!kopf){ if(window.blattNeuZeichnen) blattNeuZeichnen(); return; }
+  const txt=kopf.querySelectorAll('text');
+  if(txt[0]) txt[0].textContent=String(t.t||'').toUpperCase();
+  /* Ohne Komponist gab es nie einen zweiten Text — dann muss doch gesetzt
+     werden, sonst bliebe der neue Name unsichtbar. */
+  if(t.c && !txt[1]){ if(window.blattNeuZeichnen) blattNeuZeichnen(); return; }
+  if(txt[1]) txt[1].textContent=String(t.c||'');
 }
 
 /* Der Setzer wiegt 6,8 MB. Beim ersten Leadsheet kostet das auf dem iPad zwei
@@ -7244,10 +7261,25 @@ async function irealAdresse(t){
      dafuer einen Schraegstrich. */
   const stuecke = takte.map(namen=>
     namen.length ? namen.map(irealAkkord).filter(Boolean).join(' ') : ' ');
-  const folge = 'T'+taktart+'*A' + stuecke.map(x=>x+' |').join('');
+  /* Die Akkordfolge steht zwischen Taktstrichen und nicht frei. Bis zum
+     21. August fing sie ohne oeffnenden Strich an und hoerte ohne
+     Schlussstrich auf; iReal Pro startete, meldete aber „Datei konnte nicht
+     geoeffnet werden". */
+  const folge = '['+'T'+taktart+'*A' + stuecke.join(' |') + ' ]';
+  /* Kodiert wird nur, was eine URL zerreisst — nicht die Zeichen, aus denen
+     die Akkordfolge besteht. `encodeURIComponent` machte aus jedem Taktstrich
+     ein `%7C` und aus jeder Klammer ein `%5B`; was davon iReal Pro wieder
+     aufloest, ist nicht dokumentiert. Zwingend ist die Raute: In `F#-7` wuerde
+     sie den Rest der Adresse zum Sprungziel machen. */
+  const zeichen = x => String(x)
+    .replace(/%/g,'%25').replace(/#/g,'%23').replace(/&/g,'%26')
+    .replace(/=/g,'%3D').replace(/\+/g,'%2B').replace(/\?/g,'%3F')
+    .replace(/ /g,'%20')
+    /* Umlaute zuletzt, sonst wuerde das `%` ihrer Kodierung selbst kodiert. */
+    .replace(/[^\x20-\x7E]/g, c=>encodeURIComponent(c));
   const teile = [ (t.t||'Stück'), (t.c||''), 'Medium Swing',
                   (t._lsGelesen||'C'), 'n', folge ];
-  return 'irealbook://' + teile.map(x=>encodeURIComponent(String(x))).join('=');
+  return 'irealbook://' + teile.map(zeichen).join('=');
 }
 
 /* Das Blatt als Bild — mit oder ohne die eigenen Notizen. */
@@ -7349,7 +7381,20 @@ function lsTeilenBlatt(t){
         closeSheet(); location.href=adr;
       }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
     };
-    zr.append(bi); ir.append(zr); card.append(ir);
+    /* Scheitert das Oeffnen, hilft nur der Verweis selbst. iReal Pro sagt
+       nicht, WAS es nicht lesen konnte; wer ihn in der Hand hat, kann ihn in
+       Safari einfuegen oder herschicken. */
+    const bk=document.createElement('button'); bk.className='btn ghost';
+    bk.textContent='Verweis kopieren'; bk.style.marginLeft='8px';
+    bk.onclick=async()=>{
+      try{
+        const adr=await irealAdresse(t);
+        if(!adr){ alert('Auf diesem Blatt stehen keine Akkordsymbole.'); return; }
+        try{ await navigator.clipboard.writeText(adr); alert('Der Verweis liegt in der Zwischenablage.'); }
+        catch(e){ prompt('Der Verweis — zum Kopieren markieren:', adr); }
+      }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+    };
+    zr.append(bi, bk); ir.append(zr); card.append(ir);
 
     const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
     row.innerHTML='<button class="btn ghost" id="tAb" style="flex:1">Schließen</button>';
@@ -7384,7 +7429,15 @@ async function leadQuelle(t){
   }
   return await blob.text();
 }
+/* Ein Blatt zu setzen dauert. Wer an einem Regler zieht, loest dabei ein
+   Dutzend Laeufe aus, und sie kommen NICHT in der Reihenfolge zurueck, in der
+   sie gestartet sind — auf dem Mac faellt das nicht auf, auf dem iPad zeigte
+   das Blatt am Ende irgendeinen Zwischenstand oder gar keinen. Nur das
+   Ergebnis des juengsten Laufs darf auf die Buehne. */
+let _leadLauf = 0;
 async function renderLeadFit(t){
+  const lauf = ++_leadLauf;
+  const veraltet = () => lauf !== _leadLauf;
   const fit=document.getElementById('vFit'); fit.classList.remove('center');
   const stehtSchon = !!fit.querySelector('.pg');
   if(!stehtSchon) fit.innerHTML='<div class="lslade">Lädt…</div>';
@@ -7394,6 +7447,7 @@ async function renderLeadFit(t){
     /* Steht zu dieser Ausgabe schon eine Notiz, kommt ihr EINGEFRORENES
        Blatt — nicht ein neu gesetztes. Sonst wanderte die Notiz. */
     const b = await lsBlaetter(t, sagen);
+    if(veraltet()) return;
     const n = b.svgs.length;
     if(!n) throw new Error('Aus dieser Datei ist kein Blatt geworden.');
     const notiz = b.notiz;
@@ -7770,7 +7824,8 @@ const LS = (function(){
      Vier Regler aus Setup › Darstellung. Farbe und Staerke der Notenlinien
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
-  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0 };
+  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0,
+                    akkgroesse:1.0, akkfett:false };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -7787,7 +7842,11 @@ const LS = (function(){
       raster:  localStorage.getItem('bs_ls_raster') !== '0',
       /* Wie rund ein Bogen faellt. Verovio nimmt 0,2 bis 5,0; darunter wird
          der Bogen flach, darueber ein Halbkreis. */
-      bogen:   Math.max(0.2, Math.min(5.0, z('bs_ls_bogen', VORGABE.bogen)))
+      bogen:   Math.max(0.2, Math.min(5.0, z('bs_ls_bogen', VORGABE.bogen))),
+      /* Die Akkordschrift ist kein Verovio-Regler — der Setzer kennt keine
+         Groesse fuer Akkordsymbole. Beides wird am fertigen Blatt gemacht. */
+      akkgroesse: Math.max(0.7, Math.min(1.6, z('bs_ls_akkgroesse', VORGABE.akkgroesse))),
+      akkfett:    localStorage.getItem('bs_ls_akkfett') === '1'
     };
   }
   function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
@@ -8017,6 +8076,11 @@ const LS = (function(){
       + (b64 ? "@font-face{font-family:'PetalumaScript';src:url(data:font/otf;base64,"+b64+") format('opentype')}" : '')
       + "svg{font-family:'PetalumaScript',sans-serif}"
       + "g.staff>path{stroke:"+e.farbe+"}"
+      /* Petaluma Script hat keinen fetten Schnitt. Verdickt wird deshalb mit
+         einem Rand in derselben Farbe — das traegt gleichmaessig auf, wo eine
+         nachgeahmte Fettschrift die Buchstaben verschmiert. */
+      + (e.akkfett ? "g.harm text{paint-order:stroke;stroke:#000;stroke-width:6px;"
+                     + "stroke-linejoin:round}" : "")
       + '</style>';
     const filter = w ? '<filter id="'+filterId+'">'
       + '<feTurbulence type="fractalNoise" baseFrequency="'+w[0]+'" numOctaves="2" seed="7" result="n"/>'
@@ -8350,6 +8414,22 @@ const LS = (function(){
     try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
   }
 
+  /* Die Akkordsymbole groesser oder kleiner. Verovio hat dafuer keine Option;
+     die Groesse steht als `font-size` an den tspans unter `g.harm`. Der Platz
+     ist mit der Originalgroesse gerechnet — wer stark vergroessert, rueckt die
+     Namen naeher zusammen. Deshalb reicht der Regler nur von 0,7 bis 1,6. */
+  function akkordGroesse(svgText, f){
+    if(!(f>0) || Math.abs(f-1)<0.01) return svgText;
+    let doc;
+    try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(e){ return svgText; }
+    if(!doc || doc.querySelector('parsererror')) return svgText;
+    doc.querySelectorAll('g.harm [font-size]').forEach(el=>{
+      const v=parseFloat(el.getAttribute('font-size'));
+      if(v>0) el.setAttribute('font-size', Math.round(v*f)+'px');
+    });
+    try{ return new XMLSerializer().serializeToString(doc); }catch(e){ return svgText; }
+  }
+
   /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
   let _tk=null, _laeuft=null;
   function bereit(){ return !!_tk; }
@@ -8417,6 +8497,7 @@ const LS = (function(){
     for(let i=1;i<=n;i++){
       let svg = tk.renderToSVG(i);
       if(e.raster) svg = taktraster(svg, bogenBezug(tk, svg));
+      svg = akkordGroesse(svg, e.akkgroesse);
       if(kopf && i===1) svg = kopfEinsetzen(svg, opt.titel, opt.komponist);
       seiten.push(svg);
     }
@@ -8427,7 +8508,7 @@ const LS = (function(){
            bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
            QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
            ausgabe, ausgabeSetzen, eigenstaendig, ausgabeKuerzel, notizSchluessel,
-           schriftBase64, taktraster, bogenBezug, kopfEinsetzen, KOPF_HOEHE };
+           schriftBase64, taktraster, bogenBezug, akkordGroesse, kopfEinsetzen, KOPF_HOEHE };
 })();
 window.LS = LS;
 
@@ -9634,7 +9715,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Zwei Gesten, zwei Wege, ein frischer Titel';
+const APP_BUILD='2026-08-21 · Die Regler greifen, der Kopf wandert allein';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -13208,7 +13289,10 @@ setTimeout(ablageAnmelden, 0);
        Voreinstellung und nicht Zierrat. Farbe, Linien- und Halsstaerke
        stehen getrennt, weil duenne Linien mit kraeftigem Hals der
        Handschrift naeher kommen als eine gleichmaessige Verdickung. */
-    const lsNeu=()=>{ if(window.blattNeuZeichnen) blattNeuZeichnen(true); };
+    /* Ohne `true`: der Aufruf wird um 180 ms verzoegert und von einem
+       nachfolgenden ueberschrieben. Wer an einem Regler zieht, loest sonst je
+       Zwischenschritt einen vollen Satz aus. */
+    const lsNeu=()=>{ if(window.blattNeuZeichnen) blattNeuZeichnen(); lsGeaendert=true; };
     const eLS=LS.E();
 
     const z_lh=zeile('Handschrift','Wie stark die Linien aus der Geraden laufen');
@@ -13226,13 +13310,20 @@ setTimeout(ablageAnmelden, 0);
     const z_lr=zeile('Gleich breite Takte',
       'Ein Takt ist ein Zeitmaß — gleiche Breite zeigt, wie dicht die Noten stehen');
     z_lr._ctl.append(schalter(eLS.raster, an=>{ LS.setzen('raster', an?'1':'0'); lsNeu(); }));
-    const z_lb=zeile('Rundung der Bögen','Flach wie mit dem Lineal oder rund wie von Hand');
-    z_lb._ctl.append(regler(0.2, 2.0, 0.1, eLS.bogen,
+    /* Gilt nur fuer Bindeboegen. Haltebogen zwischen zwei gleichen Noten haben
+       im Setzer eine feste Form; gemessen am 21. August, alle Werte gleich. */
+    const z_lb=zeile('Rundung der Bindebögen','Flach wie mit dem Lineal oder rund wie von Hand. Haltebögen bleiben, wie sie sind');
+    z_lb._ctl.append(regler(0.2, 3.0, 0.1, eLS.bogen,
       v=>{ LS.setzen('bogen',v); lsNeu(); }, v=>v.toFixed(1)));
     const z_la=zeile('Akkordschrift','Wie geliefert oder in der Schreibweise des Real Book');
     z_la._ctl.append(wahl([['lang','Cmin7'],['kurz','C-7']],
       eLS.akkorde, v=>{ LS.setzen('akkorde',v); lsNeu(); }));
-    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la],
+    const z_lg=zeile('Größe der Akkorde','Der Platz ist fest gerechnet — viel größer rückt sie zusammen');
+    z_lg._ctl.append(regler(0.7, 1.6, 0.05, eLS.akkgroesse,
+      v=>{ LS.setzen('akkgroesse',v); lsNeu(); }, v=>v.toFixed(2)));
+    const z_lw=zeile('Akkorde fett','Kräftiger auf dem Pult, auch aus zwei Metern');
+    z_lw._ctl.append(schalter(eLS.akkfett, an=>{ LS.setzen('akkfett', an?'1':'0'); lsNeu(); }));
+    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la,z_lg,z_lw],
       'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
       +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
   }
@@ -15206,7 +15297,19 @@ setTimeout(ablageAnmelden, 0);
     unter=null;
     zeichne();
   }
-  function zu(){ unter=null; kopfSetzen(); delete document.body.dataset.page; if(window.layout) window.layout(); }
+  /* Auf dem iPad liegt Setup als Vollbild ueber der Buehne. Das Blatt darunter
+     hat dann keine Breite, und was waehrend dieser Zeit gesetzt wird, passt
+     nicht auf die Flaeche, die nachher da ist. Deshalb wird nach dem Schliessen
+     noch einmal gesetzt, wenn an den Leadsheet-Reglern etwas geaendert wurde.
+     Am 21. August von Jens gemeldet: „Die Regler beeinflussen die Darstellung
+     nicht." */
+  let lsGeaendert=false;
+  function zu(){
+    unter=null; kopfSetzen(); delete document.body.dataset.page;
+    if(window.layout) window.layout();
+    if(lsGeaendert){ lsGeaendert=false;
+      if(window.blattNeuZeichnen) setTimeout(()=>blattNeuZeichnen(true), 60); }
+  }
   /* Mit einem Thema aufgerufen springt das Setup gleich dorthin. Der Knopf in
      der Kopfzeile fuehrt so unmittelbar zur Instrumentenwahl. */
   /* Die Dateiwahl traegt die Ruecksicht, die das iPad verlangt: Das Feld haengt
