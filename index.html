@@ -9472,7 +9472,7 @@ const IR = (function(){
   function akkordSVG(a, x, y, gr, hoechstens){
     const z = akkordZerlegen(a);
     const roh = akkordBreite(a, gr);
-    const sx = (hoechstens && roh > hoechstens) ? Math.max(0.38, hoechstens/roh) : 1;
+    const sx = (hoechstens && roh > hoechstens) ? Math.max(0.30, hoechstens/roh) : 1;
     const huelle = inhalt => '<g transform="translate('+Math.round(x)+','+Math.round(y)+')'
          + (sx<1 ? ' scale('+(Math.round(sx*1000)/1000)+',1)' : '')+'">' + inhalt + '</g>';
     /* Was kein Akkordname ist — `N.C.`, ein Wort, ein Schraegstrich — steht
@@ -9563,36 +9563,51 @@ const IR = (function(){
        Wiederholungsklammer zweiundzwanzig verliert. Die Folge waren einzelne
        Akkorde, die auf 0,57 zusammengezogen wurden und neben ihren Nachbarn
        aussahen, als waeren sie kleiner gesetzt. */
+    /* ---- Ein Takt ist ein Zeitmass ------------------------------------------
+       Alle Takte sind gleich breit, und die LETZTE Zeile endet dort, wo das
+       Stueck endet — sie wird nicht auf die volle Breite gezogen. Bis zum
+       22. August fuellte jede Zeile die Seite, und zwei Schlusstakte standen
+       doppelt so breit da wie alle anderen. Wer ein Blatt liest, nimmt die
+       Taktbreite als Zeit; ein gedehnter Schlusstakt liest sich wie ein
+       Ritardando, das niemand gemeint hat.
+
+       Eine Zeile MITTEN im Stueck, die weniger Takte traegt, ist etwas
+       anderes: Dort hat `zeilenBauen` umgebrochen, weil die Akkorde eng
+       stehen, und der Platz wird gebraucht. Sie fuellt weiter die Breite. */
+    const proZeile = Math.max(1, ...zeilen.map(z=>z.length));
+    const taktBreite = (zeile, zi) =>
+      (zi === zeilen.length-1 && zeile.length < proZeile)
+        ? breite/proZeile : breite/zeile.length;
+
     const taktPlatz = (zeile, zi, t, ti) => {
-      const tb = breite/zeile.length;
+      const tb = taktBreite(zeile, zi);
       const li = (zi===0 && ti===0 && opt.taktart ? st*22 : st*4)
                + (t.auf==='wdh' ? st*9 : 0);
       const re = st*4 + (t.zu==='wdh' ? st*18 : (t.zu ? st*9 : 0));
       return Math.max(tb*0.3, tb - li - re);
     };
+    /* Wie weit ein Takt schmal gezogen werden darf, bevor die Schrift kleiner
+       werden muss. Ein Takt mit einem oder zwei Namen ist der Normalfall und
+       bleibt nahe an seiner vollen Breite; wo vier Namen stehen, ist starkes
+       Ziehen das kleinere Uebel, denn kleiner setzen darf nur das GANZE Blatt.
+
+       Bis zum 22. August gingen volle Takte gar nicht in diese Rechnung ein.
+       Sie stiessen dann an die Untergrenze der Stauchung und liefen ueber den
+       Taktstrich in den naechsten Takt — im Pruefstand an `Eb7 D7 Db7 C7`
+       gesehen. */
+    const reserve = n => n > 2 ? 2.2 : 1.30;
     let engster = 0;
     zeilen.forEach((zeile, zi)=>{
       zeile.forEach((t, ti)=>{
         const n = t.akkorde.length;
-        /* Takte mit drei und mehr Akkorden bestimmen die Groesse NICHT — sie
-           werden schmal gezogen. Sonst zieht ein einziger voller Takt das
-           ganze Blatt klein. */
-        if(!n || n > 2) return;
+        if(!n) return;
         const je = t.akkorde.reduce((x,a)=>x + akkordBreite(a, 1000), 0)/1000
                  + 0.18*(n-1);
-        const q = je / taktPlatz(zeile, zi, t, ti);
+        const q = je / taktPlatz(zeile, zi, t, ti) / reserve(n);
         if(q > engster) engster = q;
       });
     });
-    /* Bis zu einem Fuenftel Ueberbreite wird NICHT kleiner gesetzt, sondern
-       schmal gezogen — so hat Jens es am 21. August verlangt, und es ist der
-       Unterschied zwischen einem Blatt, auf dem die Akkorde stehen, und einem,
-       auf dem sie sich verlieren. */
-    /* Der Regler aus Setup wirkt auf BEIDE Schranken. Sonst deckelt die
-       Breite ihn nach oben weg, und wer groesser stellt, sieht nichts
-       geschehen. Was er ueber die Breite hinaus verlangt, faengt die
-       Stauchung auf: hoeher und schmaler, aber wirklich groesser. */
-    const grBreite = (engster > 0 ? 1.30/engster : grHoehe) * (opt.akkgroesse || 1);
+    const grBreite = (engster > 0 ? 1/engster : grHoehe) * (opt.akkgroesse || 1);
     let gr = Math.round(Math.min(grHoehe, Math.max(grHoehe*0.55, grBreite)));
     const farbe = '#000';
 
@@ -9628,7 +9643,8 @@ const IR = (function(){
          das ohnehin Platz hat, ist das ein Schoenheitsfehler ohne Gegenwert.
          Wo es eng wird, wird stattdessen die Schrift kleiner. */
       const kanten = [];
-      for(let k=0;k<=zeile.length;k++) kanten.push(rand + k*breite/zeile.length);
+      const tb = taktBreite(zeile, zi);
+      for(let k=0;k<=zeile.length;k++) kanten.push(rand + k*tb);
       zeile.forEach((t, ti)=>{
         const x = kanten[ti], xr = kanten[ti+1], w = xr - x;
 
@@ -9643,23 +9659,28 @@ const IR = (function(){
            duennen Strich — daraus wurde ein geschlossener schwarzer Kasten.
            Jetzt ragt der dicke Strich deutlich ueber den Takt hinaus und
            traegt an seinen Enden zwei kurze Haken. */
-        const ueber = hoch*0.11, arm = st*3.2;
-        const klammer = (kx, ri) => {
-          linie(kx, oben-ueber, kx, unten+ueber, st*3.0);
-          linie(kx, oben-ueber+st*0.8, kx+ri*arm, oben-ueber+st*0.8, st*1.7);
-          linie(kx, unten+ueber-st*0.8, kx+ri*arm, unten+ueber-st*0.8, st*1.7);
-        };
+        /* Das Wiederholungszeichen, wie es im Real Book steht und wie iReal
+           Pro es setzt: ein DICKER und ein duenner Strich dicht nebeneinander,
+           dazu zwei Punkte. Sonst nichts.
+
+           Am 22. August habe ich daraus erst eine Klammer mit Haken gemacht,
+           die ueber den Takt hinausragte. Sie war deutlich sichtbar und
+           trotzdem falsch — fuer dieses Zeichen gibt es eine Schreibweise,
+           die jeder Musiker im Augenwinkel erkennt, und eine eigene Erfindung
+           daneben liest sich wie ein Rechtschreibfehler. Kraeftig wird es
+           ueber das VERHAELTNIS der beiden Striche, nicht ueber Groesse. */
+        const dick = st*3.6, duenn = st*1.0, luftS = st*3.2, pAb = st*4.0;
         if(t.auf==='wdh'){
-          klammer(x+st*3, 1);
-          linie(x+st*9, oben, x+st*9, unten);
-          punkt(x+st*14, oben+hoch*0.36, st*1.9);
-          punkt(x+st*14, oben+hoch*0.64, st*1.9);
+          linie(x+st*2,        oben, x+st*2,        unten, dick);
+          linie(x+st*2+luftS,  oben, x+st*2+luftS,  unten, duenn);
+          punkt(x+st*2+luftS+pAb, oben+hoch*0.34, st*1.9);
+          punkt(x+st*2+luftS+pAb, oben+hoch*0.66, st*1.9);
         } else linie(x, oben, x, unten);
         if(t.zu==='wdh'){
-          punkt(xr-st*14, oben+hoch*0.36, st*1.9);
-          punkt(xr-st*14, oben+hoch*0.64, st*1.9);
-          linie(xr-st*9, oben, xr-st*9, unten);
-          klammer(xr-st*3, -1);
+          punkt(xr-st*2-luftS-pAb, oben+hoch*0.34, st*1.9);
+          punkt(xr-st*2-luftS-pAb, oben+hoch*0.66, st*1.9);
+          linie(xr-st*2-luftS, oben, xr-st*2-luftS, unten, duenn);
+          linie(xr-st*2,       oben, xr-st*2,       unten, dick);
         } else if(t.zu==='ende'){
           linie(xr-st*7, oben, xr-st*7, unten);
           linie(xr-st*1.6, oben, xr-st*1.6, unten, st*3.2);
@@ -9669,19 +9690,26 @@ const IR = (function(){
            so setzt es das Real Book, und so findet man sie im Augenwinkel. */
         if(t.marke){
           const k = hoch*0.30;
-          /* Steht am selben Takt eine Wiederholungsklammer, rueckt die Marke
-             zur Seite: Die Klammer ragt seit dem 22. August ueber den Takt
-             hinaus, und das schwarze Kaestchen sass genau darauf. */
-          const mx = x + (t.auf==='wdh' ? st*11 : st*2);
+          /* Steht am selben Takt ein Wiederholungszeichen, rueckt die Marke
+             nach rechts — sonst stehen zwei schwarze Zeichen uebereinander. */
+          const mx = x + (t.auf==='wdh' ? st*9 : st*2);
           kasten(mx, oben - k - st*3, k, k);
           text(mx + k/2, oben - k*0.22 - st*3, k*0.86, esc(t.marke), 'middle', '#fff');
         }
         /* Die Endung: waagerechte Klammer mit Abknick nach unten. */
         if(t.endung){
           const yk = oben - hoch*0.17;
-          linie(x, yk, xr - w*0.06, yk);
-          linie(x, yk, x, yk + hoch*0.16);
-          text(x + st*6, yk - hoch*0.06, hoch*0.26, esc(t.endung)+'.');
+          /* Die Klammer der Endung ist ein Wegweiser und kein Beiwerk: Beim
+             zweiten Durchgang entscheidet sie, wohin man springt, und gelesen
+             wird sie im Vorbeigehen. Sie traegt deshalb eine eigene
+             Strichstaerke, und die Ziffer steht kraeftig. */
+          linie(x, yk, xr - w*0.06, yk, st*1.7);
+          linie(x, yk, x, yk + hoch*0.16, st*1.7);
+          const gz = hoch*0.32;
+          T.push('<text x="'+Math.round(x + st*6)+'" y="'+Math.round(yk - hoch*0.05)
+            +'" font-size="'+Math.round(gz)+'" fill="#000" paint-order="stroke" '
+            +'stroke="#000" stroke-linejoin="round" stroke-width="'+Math.round(gz*0.05)
+            +'">'+esc(t.endung)+'.</text>');
         }
         /* Die Taktart steht einmal, vor dem ersten Takt. */
         if(zi===0 && ti===0 && opt.taktart){
@@ -9723,7 +9751,11 @@ const IR = (function(){
            aussehen. Wo es eng wird, wird SCHMAL GEZOGEN und nicht klein
            gesetzt. */
         const luecke = gr*0.18;
-        const proAkk = Math.max(gr*0.5, (feld - luecke*(n-1)) / Math.max(1,n));
+        /* KEINE Untergrenze: Ein Mindestplatz je Akkord, der groesser sein
+           kann als der Takt, laesst den letzten Namen zwangslaeufig ueber den
+           Taktstrich laufen. Im Pruefstand stand `Eb7 D7 Db7 C7` mit einem
+           Bein im naechsten Takt. Enger als schoen ist besser als daneben. */
+        const proAkk = (feld - luecke*(n-1)) / Math.max(1,n);
         t.akkorde.forEach((a, ai)=>{
           if(a==='%'){
             const cx = links + feld/2, cy = oben + hoch*0.5;
@@ -11156,7 +11188,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-22 · Eine Größe, eine Klammer, ein Dreieck von Hand';
+const APP_BUILD='2026-08-22 · Ein Takt ist ein Zeitmaß';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
