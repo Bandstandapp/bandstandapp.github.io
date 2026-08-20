@@ -7440,6 +7440,139 @@ function lsTeilenBlatt(t){
   });
 }
 
+/* ================================================================
+   Chord-Sheets hereinholen                                (21. August 2026)
+
+   iReal Pro teilt als HTML-Datei, und darin steht je Stueck ein
+   `irealb://`-Verweis. Eine Playlist bringt sie alle mit — derselbe Weg
+   traegt also ein einzelnes Stueck und einen ganzen Bestand.
+
+   Zugeordnet wird ueber den Namen, und das ist der bequeme Weg und zugleich
+   der gefaehrliche: Ein Fehlgriff bleibt still, und wer es merkt, steht auf
+   der Buehne. Deshalb wird gezeigt, was gefunden wurde, bevor geschrieben
+   wird — dieselbe Regel wie beim Import von Noten.
+   ================================================================ */
+function irealAusText(txt){
+  const gefunden=[];
+  const re=/irealb:\/\/[^"'\s<>]+/g;
+  let m;
+  while((m=re.exec(String(txt||'')))){
+    try{ const o=IR.lesen(m[0]); if(o.takte && o.takte.length) gefunden.push({o, url:m[0]}); }
+    catch(e){}
+  }
+  return gefunden;
+}
+
+function irealBlatt(txt, dateiname){
+  const stuecke = irealAusText(txt);
+  if(!stuecke.length){
+    alert('Darin steht kein Stück aus iReal Pro.\n\nErwartet wird die HTML-Datei, '
+        + 'die iReal Pro beim Teilen erzeugt, oder ein Verweis, der mit „irealb://" beginnt.');
+    return;
+  }
+  /* Was steht schon im Bestand? Verglichen wird ueber `norm` — dieselbe
+     Normalisierung, mit der der Import seit dem 6. August dieselbe Frage
+     beantwortet. */
+  const vorhanden = new Map();
+  (BS_KATALOG.titel||[]).forEach(t=>{
+    const k=norm(t.titel||''); if(!k) return;
+    if(!vorhanden.has(k)) vorhanden.set(k, []);
+    vorhanden.get(k).push(t);
+  });
+  const zeilen = stuecke.map(x=>{
+    const treffer = vorhanden.get(norm(x.o.titel)) || [];
+    return { ...x, treffer, ziel: treffer.length===1 ? treffer[0].id : null, an:true };
+  });
+  const passend = zeilen.filter(z=>z.ziel).length;
+  const mehrdeutig = zeilen.filter(z=>!z.ziel && z.treffer.length>1).length;
+  const neu = zeilen.length - passend - mehrdeutig;
+
+  openSheet(card=>{
+    card.innerHTML='<h2>Aus iReal Pro</h2>';
+    const kopf=document.createElement('div'); kopf.className='muted';
+    kopf.style.margin='-6px 0 14px';
+    kopf.innerHTML='<b>'+zeilen.length+'</b> Stück'+(zeilen.length===1?'':'e')+' gefunden'
+      + (dateiname ? ' in „'+esc(dateiname)+'"' : '')+'. '
+      + '<b>'+passend+'</b> '+(passend===1?'passt':'passen')+' zu einem Titel im Bestand, '
+      + '<b>'+neu+'</b> '+(neu===1?'wird':'werden')+' neu angelegt'
+      + (mehrdeutig ? ', <b>'+mehrdeutig+'</b> '+(mehrdeutig===1?'ist':'sind')
+                      +' mehrdeutig und '+(mehrdeutig===1?'bleibt':'bleiben')+' liegen' : '')+'.';
+    card.append(kopf);
+
+    const l=document.createElement('div'); l.className='lbl'; l.style.margin='0 0 6px';
+    l.textContent='Buch für die neuen Titel';
+    const bf=document.createElement('input'); bf.className='txt';
+    bf.value='iReal Pro'; card.append(l,bf);
+
+    /* Eine Liste, aber keine vierhundert Zeilen: Gezeigt werden die ersten
+       zwanzig, damit man sieht, was passiert. Der Rest zaehlt mit. */
+    const li=document.createElement('div');
+    li.style.cssText='margin:14px 0 0;max-height:34vh;overflow:auto';
+    zeilen.slice(0,20).forEach(z=>{
+      const r=document.createElement('div'); r.className='srow';
+      const wo = z.ziel ? 'an vorhandenen Titel'
+               : (z.treffer.length>1 ? 'mehrdeutig — bleibt liegen' : 'neuer Titel');
+      r.innerHTML='<div style="flex:1;min-width:0"><div>'+esc(z.o.titel)+'</div>'
+        +'<div class="sb">'+z.o.takte.length+' Takte · '+esc(z.o.tonart||'?')+' · '+wo+'</div></div>';
+      li.append(r);
+    });
+    if(zeilen.length>20){
+      const r=document.createElement('div'); r.className='muted'; r.style.padding='8px 2px';
+      r.textContent='… und '+(zeilen.length-20)+' weitere';
+      li.append(r);
+    }
+    card.append(li);
+
+    const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
+    const ab=document.createElement('button'); ab.className='btn ghost'; ab.textContent='Abbrechen';
+    ab.onclick=closeSheet;
+    const luft=document.createElement('span'); luft.style.flex='1';
+    const ok=document.createElement('button'); ok.className='btn';
+    ok.textContent='Übernehmen';
+    ok.onclick=async()=>{
+      ok.disabled=true; ab.disabled=true;
+      try{
+        const zahl = await irealSchreiben(zeilen, bf.value.trim()||'iReal Pro');
+        closeSheet();
+        await loadLibrary(); render();
+        alert(zahl+(zahl===1?' Chord-Sheet':' Chord-Sheets')+' übernommen.');
+      }catch(e){
+        ok.disabled=false; ab.disabled=false;
+        alert('Fehlgeschlagen: '+(e&&e.message||e));
+      }
+    };
+    row.append(ab, luft, ok); card.append(row); a11y(card);
+  });
+}
+
+/* Geschrieben wird blockweise, aus demselben Grund wie beim Import von Noten:
+   Wird die Seite mittendrin abgeraeumt, ist wenigstens das Geschriebene da.
+   Ein Chord-Sheet wiegt allerdings ein paar hundert Zeichen — die Gefahr ist
+   klein, die Gewohnheit trotzdem richtig. */
+async function irealSchreiben(zeilen, buchname){
+  let buchId = null;
+  let zahl = 0;
+  for(const z of zeilen){
+    if(z.treffer.length>1) continue;          /* mehrdeutig: bleibt liegen */
+    let titelId = z.ziel;
+    if(!titelId){
+      if(!buchId){
+        const vorh=(BS_KATALOG.buecher||[]).find(b=>norm(b.name)===norm(buchname));
+        buchId = vorh ? vorh.id : await BS.buchAnlegen({name:buchname, chip:buchname.slice(0,8)});
+        if(buchId && buchId.id) buchId = buchId.id;
+      }
+      const t = await BS.titelAnlegen({ buchId, titel:z.o.titel, komponist:z.o.komponist||'' });
+      titelId = t && (t.id||t);
+    }
+    await BS.elementAnlegen({ titelId, art:'chordsheet', etikett:'Changes',
+      dateiname: safeName(z.o.titel)+'.ireal',
+      blob: new Blob([z.url], {type:'text/plain'}), np:1 });
+    zahl++;
+    if(zahl % 25 === 0) await atemzug();
+  }
+  return zahl;
+}
+
 /* ---- Ein Chord-Sheet auf die Buehne ---------------------------------------
    Derselbe Platz wie ein Blatt und ein Leadsheet, aber ohne Setzer: Das SVG
    entsteht in wenigen Millisekunden aus den Akkorden selbst. */
@@ -8863,13 +8996,20 @@ const IR = (function(){
   function esc(x){ return String(x==null?'':x)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-  /* Die Schreibweise des Real Book. Die Vorzeichen bleiben `b` und `#`: Die
-     Zeichen der Notenschrift (U+EA64 und U+EA66) kennt Petaluma Script an
-     dieser Stelle nicht, und was die Schrift nicht hat, wird zur Luecke — aus
-     `Eb-7` wurde `E -7`. Ein sichtbares b ist besser als ein schoenes Nichts. */
+  /* Die Schreibweise des Real Book. Gemessen am 21. August, welche Zeichen
+     Petaluma Script wirklich hat: das Dreieck der grossen Septime, das ø, das
+     ° und das Kreuz — aber KEIN b-Vorzeichen, weder als Zeichen der
+     Notenschrift (U+EA64) noch als U+266D.
+
+     Der erste Versuch nahm U+EA64, und das steht im Privatbereich: Dort hat
+     auch keine Ersatzschrift etwas, und aus `Eb-7` wurde `E -7`. U+266D ist
+     dagegen ein gewoehnliches Zeichen — die Ersatzschrift springt dafuer ein,
+     und ein ♭ sieht ueberall aehnlich aus. */
   function akkordSetzen(a){
     return esc(String(a)
       .replace(/\^/g, '\u25b3')      /* grosse Septime: das Dreieck */
+      .replace(/b/g, '\u266d')        /* das b-Vorzeichen */
+      .replace(/#/g, '\u266f')        /* das Kreuz */
       .replace(/h/g, '\u00f8')        /* halbvermindert */
       .replace(/o/g, '\u00b0'));      /* vermindert */
   }
@@ -10153,7 +10293,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Changes aus iReal Pro, lesbar auf dem Pult';
+const APP_BUILD='2026-08-21 · Ein Stapel Changes kommt herein';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -14781,6 +14921,26 @@ setTimeout(ablageAnmelden, 0);
     w.append(karte('Fertige Pakete',[z_pak],
       'Ein Paket bringt seine Kennungen mit. Daran erkennt BandStand, was schon '
       +'da ist — erneutes Einlesen legt nichts doppelt an.'));
+
+    /* ---- Chord-Sheets aus iReal Pro (21. August) -------------------------
+       iReal Pro teilt seine Stücke als HTML-Datei, und darin steht je Stück
+       ein `irealb://`-Verweis. Eine Playlist bringt sie alle auf einmal mit —
+       deshalb ist dieser Eingang zugleich der Weg für einen ganzen Bestand
+       und für ein einzelnes Stück. */
+    const z_ir=zeile('Chord-Sheets aus iReal Pro',
+      'Die geteilte HTML-Datei oder ein einzelner Verweis. Was schon als Titel '
+      +'im Bestand steht, bekommt sein Chord-Sheet dazu');
+    z_ir._ctl.append(knopf('Datei wählen', ()=>dateiWaehlen(async f=>{
+      try{ const txt=await f.text(); irealBlatt(txt, f.name||''); }
+      catch(e){ alert('Die Datei ließ sich nicht lesen: '+(e&&e.message||e)); }
+    }, '')));
+    z_ir._ctl.append(knopf('Verweis einfügen', ()=>{
+      const v=prompt('Den Verweis aus iReal Pro hier einfügen:');
+      if(v && v.trim()) irealBlatt(v.trim(), '');
+    }));
+    w.append(karte('Aus iReal Pro',[z_ir],
+      'Ein Chord-Sheet trägt die Akkorde und sonst nichts. Es wiegt ein paar '
+      +'hundert Zeichen und steht sofort da — es braucht keinen Notensetzer.'));
 
     /* Eine eigene Überschrift, obwohl es nur eine Zeile ist. Ohne sie stünde
        ihr Hinweis unmittelbar unter der Paket-Karte und sähe aus, als gehörte
