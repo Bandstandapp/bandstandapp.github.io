@@ -5073,6 +5073,7 @@ async function shareTune(t){
      Verschiedenes. Deshalb wird gefragt, statt eine davon zu erraten.
      So verlangt es das Konzept unter „Notizen, Einfrieren und Teilen". */
   if(t.art==='leadsheet'){ return lsTeilenBlatt(t); }
+  if(t.art==='chordsheet'){ return csTeilenBlatt(t); }
   await urlSichern(t);
   /* Ein Blatt aus der eigenen Ablage hat keine teilbare Adresse — sein Verweis
      gilt nur in dieser Sitzung. Geteilt wird dann die Datei, nicht die URL. */
@@ -7661,6 +7662,87 @@ async function renderChordFit(t){
       +esc(err&&err.message||String(err))+'</div>';
   }
 }
+/* ---- Ein Chord-Sheet weitergeben ------------------------------------------
+   Der Rundlauf, den das Konzept als Pruefstein nennt: Ein Stueck kommt als
+   Scan herein, bekommt seine Changes aus iReal Pro, wird hier transponiert
+   und geht in der neuen Tonart zurueck — dort spielt die Begleitband dazu.
+
+   Weitergegeben wird die Fassung, die gerade auf dem Blatt steht. */
+function csTeilenBlatt(t){
+  openSheet(card=>{
+    card.innerHTML='<h2>Weitergeben</h2><div class="muted" style="margin:-6px 0 14px">'
+      +'Die Changes, so wie sie gerade auf dem Blatt stehen — in der eingestellten Tonart.</div>';
+    const karte=document.createElement('div'); karte.className='scard';
+
+    const zeile=(titel, unter, knoepfe)=>{
+      const z=document.createElement('div'); z.className='srow';
+      z.innerHTML='<div style="flex:1;min-width:0"><div style="font-weight:600">'+esc(titel)+'</div>'
+        +'<div class="sb">'+unter+'</div></div>';
+      knoepfe.forEach(([text,tu])=>{
+        const b=document.createElement('button'); b.className='btn ghost'; b.textContent=text;
+        b.style.marginLeft='8px'; b.onclick=tu; z.append(b);
+      });
+      karte.append(z);
+    };
+
+    /* Den Verweis erst bauen, wenn er gebraucht wird — er kostet einen
+       Datenbankzugriff und das Entwuerfeln. */
+    const bauen = async () => {
+      const o = await csAusgabe(t);
+      return IR.schreiben(o, { titel:t.t||o.titel, komponist:t.c||o.komponist,
+        tonart: (t._lsGelesen||o.tonart) + (o && t._lsOrg && t._lsOrg.moll ? '-' : '') });
+    };
+
+    zeile('Öffnen in iReal Pro',
+      'Springt hinüber und legt das Stück dort an, in der Tonart, die hier eingestellt ist.',
+      [['Öffnen', async()=>{
+        try{ const adr=await bauen(); closeSheet(); location.href=adr; }
+        catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+      }]]);
+
+    zeile('Verweis kopieren',
+      'Zum Einfügen in eine Nachricht — oder um nachzusehen, was hinübergeht.',
+      [['Kopieren', async()=>{
+        try{
+          const adr=await bauen();
+          try{ await navigator.clipboard.writeText(adr); alert('Der Verweis liegt in der Zwischenablage.'); }
+          catch(e){ prompt('Der Verweis — zum Kopieren markieren:', adr); }
+        }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+      }]]);
+
+    zeile('Als Datei',
+      'Dieselbe HTML-Datei, die iReal Pro beim Teilen erzeugt. Auf dem Mac aufs Dock-Symbol ziehen.',
+      [['Datei', async()=>{
+        try{
+          const adr=await bauen();
+          const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>iReal Pro</title></head>'
+            +'<body><h3><a href="'+esc(adr)+'">'+esc(t.t||'Stück')+'</a>'
+            +(t.c?' - '+esc(t.c):'')+'</h3><br/>Made with BandStand</body></html>';
+          const f=new File([html], safeName(t.t)+'.html', {type:'text/html'});
+          closeSheet();
+          await lsWeitergeben([f], t.t);
+        }catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
+      }]]);
+
+    card.append(karte);
+    const row=document.createElement('div'); row.className='row'; row.style.marginTop='16px';
+    row.innerHTML='<button class="btn ghost" id="csAb" style="flex:1">Schließen</button>';
+    card.append(row);
+    row.querySelector('#csAb').onclick=closeSheet;
+    a11y(card);
+  });
+}
+
+/* Die Fassung, die gerade auf dem Blatt steht — mit Tonart und Notation. */
+async function csAusgabe(t){
+  const o = IR.lesen(String(await chordQuelle(t)).trim());
+  const org = IR.tonartVon(o.tonart);
+  const a = LS.ausgabe(t.bsId);
+  const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
+  const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
+  return IR.transponieren(o, um.gelesenQ - org.q);
+}
+
 /* Was im Player eingestellt war, als das Stueck geteilt wurde. Ein Tempo
    steht nicht im Verweis — die beiden am 21. August vermessenen Stuecke
    tragen keines, obwohl iReal Pro unten eines anzeigt. */
@@ -9344,8 +9426,72 @@ const IR = (function(){
     return { q: LS.quintenVon(m[1]), moll: m[2]==='-', name: m[1] };
   }
 
-  return { dreh, lesen, rumpfLesen, zeichnen, zeilenBauen, transponieren,
-           akkordTransponieren, tonartVon, A4, MARKER };
+  /* ---- Der Rueckweg -------------------------------------------------------
+     Ein Verweis, den iReal Pro annimmt. Er entsteht aus demselben Rumpf, der
+     hereinkam: Die Takte werden wieder zu Text, der Text wird verwuerfelt —
+     mit DERSELBEN Funktion, denn die Vorschrift ist ihre eigene Umkehrung.
+
+     Geschrieben wird die Fassung, die gerade auf dem Blatt steht. Wer in
+     BandStand nach F transponiert hat, bekommt sie in F, und die Begleitband
+     spielt in F. Das ist der Rundlauf, den das Konzept als Pruefstein nennt. */
+  function rumpfSchreiben(o){
+    const teile = [];
+    let ersteMarke = true;
+    (o.takte||[]).forEach((t, i)=>{
+      if(t.auf==='wdh') teile.push('{');
+      if(t.marke){ teile.push((ersteMarke?'':'|')+'*'+t.marke); ersteMarke=false; }
+      if(t.endung) teile.push('N'+t.endung);
+      if(i===0 && o.taktart) teile.push('T'+String(o.taktart).replace('/',''));
+      if(!t.akkorde.length) teile.push(' ');
+      t.akkorde.forEach((a,k)=>{
+        if(a==='%'){ teile.push('Kcl'); return; }
+        teile.push(k ? ','+a : a);
+      });
+      /* Ein Takt mit nur einem Akkord wird aufgefuellt — so schreibt es iReal
+         Pro selbst, und ohne das ruecken die Takte zusammen. */
+      if(t.akkorde.length===1 && t.akkorde[0]!=='%') teile.push('XyQ');
+      if(t.zu==='wdh') teile.push('}');
+      /* Der erzwungene Umbruch: leere Takte fuellen den Rest der Zeile, damit
+         das Naechste — eine Endung, ein Abschnitt — neu beginnt. */
+      if(t.umbruch) teile.push('XyQ');
+      if(t.zu==='ende') teile.push('Z');
+      else if(!t.zu && i < (o.takte.length-1)) teile.push('|');
+      else if(t.zu==='wdh' && i < (o.takte.length-1)) teile.push('|');
+    });
+    return teile.join('');
+  }
+
+  /* Der Komponist geht als „Nachname Vorname" zurueck — so haelt iReal Pro es. */
+  function nameDrehen(n){
+    const p = String(n||'').trim().split(/\s+/);
+    return p.length===2 ? p[1]+' '+p[0] : String(n||'').trim();
+  }
+
+  function schreiben(o, opt){
+    opt = opt || {};
+    const rumpf = MARKER + dreh(rumpfSchreiben(o));
+    const felder = [
+      opt.titel || o.titel || 'Stück',
+      nameDrehen(opt.komponist || o.komponist || ''),
+      '',
+      o.stil || 'Medium Swing',
+      opt.tonart || o.tonart || 'C',
+      o.durchgaenge || '',
+      rumpf,
+      o.genre || '',
+      '0', '0'
+    ];
+    /* Kodiert wird alles, was nicht in eine URL gehoert. Die Raute zuerst:
+       In `F#-7` wuerde sie sonst den Rest der Adresse zum Sprungziel machen.
+       `encodeURI` laesst `=` stehen, und das trennt hier die Felder. */
+    const z = x => encodeURI(String(x))
+      .replace(/#/g,'%23').replace(/&/g,'%26').replace(/=/g,'%3D')
+      .replace(/\?/g,'%3F').replace(/\+/g,'%2B');
+    return 'irealb://' + felder.map(z).join('=');
+  }
+
+  return { dreh, lesen, rumpfLesen, rumpfSchreiben, schreiben, zeichnen, zeilenBauen,
+           transponieren, akkordTransponieren, tonartVon, A4, MARKER };
 })();
 window.IR = IR;
 
@@ -10559,7 +10705,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Eine Schriftgröße, ein Tempo';
+const APP_BUILD='2026-08-21 · Der Rundlauf schließt sich';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
