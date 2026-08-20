@@ -7711,7 +7711,7 @@ const LS = (function(){
      Vier Regler aus Setup › Darstellung. Farbe und Staerke der Notenlinien
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
-  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true };
+  const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0 };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -7725,7 +7725,10 @@ const LS = (function(){
       linie:   Math.max(0.10, Math.min(0.30, z('bs_ls_linie', VORGABE.linie))),
       hals:    Math.max(0.10, Math.min(0.50, z('bs_ls_hals',  VORGABE.hals))),
       akkorde: localStorage.getItem('bs_ls_akkorde') || VORGABE.akkorde,
-      raster:  localStorage.getItem('bs_ls_raster') !== '0'
+      raster:  localStorage.getItem('bs_ls_raster') !== '0',
+      /* Wie rund ein Bogen faellt. Verovio nimmt 0,2 bis 5,0; darunter wird
+         der Bogen flach, darueber ein Halbkreis. */
+      bogen:   Math.max(0.2, Math.min(5.0, z('bs_ls_bogen', VORGABE.bogen)))
     };
   }
   function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
@@ -8069,11 +8072,42 @@ const LS = (function(){
     const t=el.getAttribute('transform')||'';
     el.setAttribute('transform', 'translate('+Math.round(dx*100)/100+',0) '+t);
   }
+  /* Ein Pfad wird nicht mit einer Textsuche gelesen, sondern Kommando fuer
+     Kommando. Verovio schreibt gerade Linien als `M x y L x y`, Boegen aber als
+     `M x,y C x,y x,y x,y` — dieselben Zahlen, zwei Schreibweisen. Wer nur nach
+     `Zahl Leerzeichen Zahl` sucht, findet bei einem Bogen die y-Werte und dreht
+     ihn dabei um. Genau das war auf dem iPad zu sehen. */
+  const PFAD_ARG = {M:2, L:2, T:2, C:6, S:4, Q:4, A:7, H:1, V:1, Z:0};
+  /* Welche Werte einer Kommando-Gruppe sind x? */
+  function xStellen(c, n){
+    if(c==='H') return [0];
+    if(c==='V' || c==='Z') return [];
+    if(c==='A') return [5];
+    const r=[]; for(let i=0;i<n;i+=2) r.push(i); return r;
+  }
+  function pfadXAbbilden(d, f){
+    const tok = String(d).match(/[a-zA-Z]|-?[\d.]+(?:[eE][-+]?\d+)?/g);
+    if(!tok) return d;
+    let aus=[], cmd=null, i=0;
+    while(i<tok.length){
+      if(/[a-zA-Z]/.test(tok[i])){ cmd=tok[i]; aus.push(cmd); i++;
+        if(cmd==='Z'||cmd==='z') continue; }
+      if(cmd===null) return d;
+      const gross=cmd.toUpperCase(), n=PFAD_ARG[gross];
+      if(n===undefined) return d;
+      const g=tok.slice(i, i+n); if(g.length<n) break;
+      i += n;
+      /* Relative Kommandos sind Abstaende, keine Orte — die bleiben. */
+      if(cmd===gross) for(const k of xStellen(gross, n))
+        g[k] = String(Math.round(f(+g[k])*100)/100);
+      aus.push(g.join(' '));
+    }
+    return aus.join(' ');
+  }
   /* Einzelne x-Werte eines Pfades oder Vielecks abbilden. */
   function xWerteAbbilden(el, f){
     const d=el.getAttribute && el.getAttribute('d');
-    if(d) el.setAttribute('d', d.replace(/(-?[\d.]+)(\s+)(-?[\d.]+)/g,
-      (m,a,sp,b)=>(Math.round(f(+a)*100)/100)+sp+b));
+    if(d) el.setAttribute('d', pfadXAbbilden(d, f));
     const pts=el.getAttribute && el.getAttribute('points');
     if(pts) el.setAttribute('points', pts.replace(/(-?[\d.]+)\s*,\s*(-?[\d.]+)/g,
       (m,a,b)=>(Math.round(f(+a)*100)/100)+','+b));
@@ -8081,7 +8115,11 @@ const LS = (function(){
     if(el.hasAttribute && el.hasAttribute('cx')) el.setAttribute('cx', Math.round(f(+el.getAttribute('cx'))*100)/100);
   }
 
-  function taktraster(svgText){
+  /* `bezug` ordnet jedem Bogen seine beiden Noten zu: {bogenId:{startid,endid}}.
+     Verovio kennt diese Zuordnung, schreibt sie aber nicht ins SVG — `setze`
+     holt sie sich vor dem Rastern beim Setzer ab. Ohne Tabelle faellt der
+     Bogen auf die naechstgelegene Note zurueck. */
+  function taktraster(svgText, bezug){
     let doc;
     try{ doc = new DOMParser().parseFromString(svgText,'image/svg+xml'); }catch(e){ return svgText; }
     if(!doc || doc.querySelector('parsererror')) return svgText;
@@ -8128,6 +8166,7 @@ const LS = (function(){
 
       /* ---- 1. Jede Note, Pause und jeder Akkord als GANZES ---------------- */
       const anker=[];   /* {x, dx} je Ereignis — daran hängt alles Weitere */
+      const dxJeId=new Map();   /* dieselbe Verschiebung, nach Kennung nachschlagbar */
       const erledigt=new Set();
       sys.querySelectorAll('g.chord, g.note, g.rest, g.mRest').forEach(el=>{
         let p=el.parentElement, drin=false;
@@ -8140,6 +8179,10 @@ const LS = (function(){
         schieben(el, dx);
         erledigt.add(el);
         anker.push({x, dx});
+        /* Ein Bogen zeigt auf die einzelne Note, auch wenn sie in einem
+           Akkord steckt — der als Ganzes verschoben wurde. */
+        if(el.id) dxJeId.set(el.id, dx);
+        el.querySelectorAll('g.note').forEach(n=>{ if(n.id) dxJeId.set(n.id, dx); });
       });
       if(!anker.length) return;
       anker.sort((a,b)=>a.x-b.x);
@@ -8201,16 +8244,27 @@ const LS = (function(){
         });
       });
 
-      /* ---- 3. Bögen hängen an zwei Noten ---------------------------------- */
+      /* ---- 3. Bögen hängen an zwei Noten ----------------------------------
+         Verovio zeichnet einen Bogen als geschlossene Sichel: Hinkurve,
+         Rueckkurve, letzter Punkt gleich erstem. Seine Enden sind deshalb
+         nicht der erste und der letzte Punkt des Pfades, sondern der linkeste
+         und der rechteste. Beide haengen an einer Note, nicht an einer Stelle
+         im Takt — sonst loest sich der Bogen von seinen Koepfen. */
       sys.querySelectorAll('g.tie, g.slur, g.phrase').forEach(g=>{
         g.querySelectorAll('path').forEach(p=>{
-          const d=p.getAttribute('d')||'';
-          const zahlen=[...d.matchAll(/(-?[\d.]+)(\s+)(-?[\d.]+)/g)];
-          if(zahlen.length<2) return;
-          const x0=+zahlen[0][1], x1=+zahlen[zahlen.length-1][1];
-          const d0=dxI(x0), d1=dxI(x1);
-          const sp=x1-x0;
-          xWerteAbbilden(p, x=> x + (sp<=0 ? d0 : d0 + (x-x0)/sp*(d1-d0)));
+          const d=p.getAttribute('d')||''; if(!d) return;
+          let lo=Infinity, hi=-Infinity;
+          pfadXAbbilden(d, x=>{ if(x<lo) lo=x; if(x>hi) hi=x; return x; });
+          if(!(hi>lo)) return;
+          /* Endet ein Bogen im naechsten System, kennt dieses Blatt seine
+             zweite Note nicht — dann bleibt die naechstgelegene. */
+          const bz = (bezug && bezug[g.id]) || {};
+          const ohne = r=>String(r||'').replace(/^#/,'');
+          const links = dxJeId.get(ohne(bz.startid)), rechts = dxJeId.get(ohne(bz.endid));
+          const d0 = links===undefined ? nahDx(lo) : links;
+          const d1 = rechts===undefined ? nahDx(hi) : rechts;
+          const sp=hi-lo;
+          p.setAttribute('d', pfadXAbbilden(d, x=> x + d0 + (x-lo)/sp*(d1-d0)));
         });
       });
 
@@ -8261,6 +8315,19 @@ const LS = (function(){
      `opt.tonart`  Verovio-Schreibweise: '+M2', 'Eb', '' fuer wie geliefert
      `opt.stimme`  Kennung der Stimme aus `stimmen()`, leer = alles
      Zurueck kommt ein Satz fertiger Seiten als SVG. */
+  /* Welche zwei Noten traegt ein Bogen? Der Setzer weiss es, das SVG nicht.
+     Gefragt wird erst nach dem Zeichnen, weil vorher die Kennungen fehlen. */
+  function bogenBezug(tk, svgText){
+    const b={};
+    const re=/<g[^>]*\bid="([^"]+)"[^>]*\bclass="(?:tie|slur|phrase)"/g;
+    let m;
+    while((m=re.exec(svgText))){
+      try{ const a=tk.getElementAttr(m[1]); if(a && (a.startid||a.endid)) b[m[1]]=a; }
+      catch(e){}
+    }
+    return b;
+  }
+
   async function setze(quelle, opt){
     opt = opt || {};
     const e = E();
@@ -8274,7 +8341,7 @@ const LS = (function(){
     const o = Object.assign({}, A4, {
       scale:100, unit:9, font:'Petaluma', breaks:'line',
       header:'none', footer:'none', harmDist:2.2, spacingStaff:12,
-      staffLineWidth:e.linie, stemWidth:e.hals,
+      staffLineWidth:e.linie, stemWidth:e.hals, slurCurveFactor:e.bogen,
       barLineWidth:0.5, thickBarlineThickness:1.5, ledgerLineThickness:0.34,
       transpose: opt.tonart || '',
       /* Der Titel braucht Platz, und zwar NUR auf der ersten Seite. Verovio
@@ -8290,7 +8357,7 @@ const LS = (function(){
     const seiten=[];
     for(let i=1;i<=n;i++){
       let svg = tk.renderToSVG(i);
-      if(e.raster) svg = taktraster(svg);
+      if(e.raster) svg = taktraster(svg, bogenBezug(tk, svg));
       if(kopf && i===1) svg = kopfEinsetzen(svg, opt.titel, opt.komponist);
       seiten.push(svg);
     }
@@ -8301,7 +8368,7 @@ const LS = (function(){
            bereit, holen, umbrechen, stimmeZiehen, akkordeKuerzen, A4_VERH,
            QUINTEN, quintenVon, nameVonQuinten, NOTATION, tonartLesen, rechne, gelesene,
            ausgabe, ausgabeSetzen, eigenstaendig, ausgabeKuerzel, notizSchluessel,
-           schriftBase64, taktraster, kopfEinsetzen, KOPF_HOEHE };
+           schriftBase64, taktraster, bogenBezug, kopfEinsetzen, KOPF_HOEHE };
 })();
 window.LS = LS;
 
@@ -9508,7 +9575,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Noten wandern, statt sich zu dehnen';
+const APP_BUILD='2026-08-21 · Bögen hängen wieder an ihren Noten';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -13072,10 +13139,13 @@ setTimeout(ablageAnmelden, 0);
     const z_lr=zeile('Gleich breite Takte',
       'Ein Takt ist ein Zeitmaß — gleiche Breite zeigt, wie dicht die Noten stehen');
     z_lr._ctl.append(schalter(eLS.raster, an=>{ LS.setzen('raster', an?'1':'0'); lsNeu(); }));
+    const z_lb=zeile('Rundung der Bögen','Flach wie mit dem Lineal oder rund wie von Hand');
+    z_lb._ctl.append(regler(0.2, 2.0, 0.1, eLS.bogen,
+      v=>{ LS.setzen('bogen',v); lsNeu(); }, v=>v.toFixed(1)));
     const z_la=zeile('Akkordschrift','Wie geliefert oder in der Schreibweise des Real Book');
     z_la._ctl.append(wahl([['lang','Cmin7'],['kurz','C-7']],
       eLS.akkorde, v=>{ LS.setzen('akkorde',v); lsNeu(); }));
-    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_la],
+    w.append(karte('Leadsheets',[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la],
       'Gilt für gesetzte Noten aus MusicXML oder ABC, nicht für gescannte Blätter. '
       +'Änderungen greifen sofort auf dem Blatt, das gerade offen ist.'));
   }
