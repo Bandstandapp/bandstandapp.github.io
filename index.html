@@ -7400,7 +7400,10 @@ function lsTeilenBlatt(t){
     const ir=document.createElement('div'); ir.className='scard'; ir.style.marginTop='12px';
     const zr=document.createElement('div'); zr.className='srow';
     zr.innerHTML='<div style="flex:1;min-width:0"><div style="font-weight:600">Changes an iReal Pro</div>'
-      +'<div class="sb">Nur die Akkorde, in der eingestellten Tonart — dort spielt die Begleitband dazu.</div></div>';
+      +'<div class="sb">Nur die Akkorde, in der eingestellten Tonart. <b>Neuere Fassungen von '
+      +'iReal Pro nehmen dieses ältere Verweis-Format nicht mehr an</b> und melden „Datei konnte '
+      +'nicht geöffnet werden". Am 21. August so vorgefunden; das heutige Format wird gerade '
+      +'untersucht.</div></div>';
     const bi=document.createElement('button'); bi.className='btn ghost'; bi.textContent='Öffnen';
     bi.onclick=async()=>{
       try{
@@ -9875,7 +9878,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Die Vorschau folgt dem Finger';
+const APP_BUILD='2026-08-21 · Der iReal-Weg, ehrlich beschriftet';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
