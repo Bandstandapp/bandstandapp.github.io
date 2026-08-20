@@ -7584,22 +7584,25 @@ async function renderChordFit(t){
     const o = IR.lesen(String(roh).trim());
     const e = LS.E();
 
-    /* Ein Chord-Sheet hat kein Papierformat. Es wird fuer die Flaeche gesetzt,
-       die da ist — hochkant wie quer. Ein A4-Blatt in einem breiten Fenster
-       laesst die halbe Buehne leer, und auf dem Pult zaehlt jede Millimeter
-       Schrifthoehe. Beim Drucken und Weitergeben gilt A4, hier die Buehne. */
+    /* Das Blatt bleibt A4, und zwar aus einem Grund, den ich am 21. August
+       selbst gebaut habe: Die Buehnenbreite folgt dem Seitenverhaeltnis des
+       Blattes. Wer das Verhaeltnis aus der Buehnenbreite rechnet, schliesst
+       einen Kreis — schmale Buehne, flacheres Blatt, noch schmalere Buehne.
+       Nach dem Drehen und Zurueckdrehen blieb die Buehne dann schmal.
+
+       Gefuellt wird trotzdem: Die Zeilen verteilen sich ueber die ganze Hoehe,
+       und die Akkorde wachsen mit. Ein Chord-Sheet mit sechs Zeilen hat
+       groessere Schrift als eines mit zwoelf — das ist richtig so. */
+    const verh = LS.A4_VERH;
     const cs=getComputedStyle(fit);
     const p=n=>parseFloat(cs[n])||0;
     const cw=Math.max(320, fit.clientWidth  - p('paddingLeft') - p('paddingRight'));
     const ch=Math.max(320, fit.clientHeight - p('paddingTop')  - p('paddingBottom'));
-    /* Nicht beliebig flach und nicht beliebig schmal: Sonst stehen vier Takte
-       als Streifen da oder die Schrift wird zum Punkt. */
-    const verh = Math.max(0.55, Math.min(1.55, cw/ch));
 
     const svg = IR.zeichnen(o, {
       breite: 21000, hoehe: Math.round(21000/verh),
       titel:t.t||'', komponist:t.c||'', taktart:o.taktart, stil:o.stil||'',
-      akkgroesse:e.akkgroesse, farbe:e.farbe });
+      akkgroesse:e.akkgroesse });
 
     if(window.SHEET_RATIO!==undefined && Math.abs(verh-window.SHEET_RATIO)>0.002){
       window.SHEET_RATIO=verh; if(window.layout) window.layout();
@@ -9050,6 +9053,10 @@ const IR = (function(){
     return { grund: akkordSetzen(m[1]), rest: akkordSetzen(m[2]) };
   }
 
+  /* Alles auf diesem Blatt ist schwarz. Der Regler in Setup faerbt die
+     NOTENLINIEN eines gesetzten Blattes, und ein Chord-Sheet hat keine — es
+     hat Taktstriche, und die gehoeren zur Schrift. Am 21. August standen
+     Wiederholungszeichen grau neben schwarzen Akkorden. */
   function zeichnen(o, opt){
     opt = opt || {};
     const B = Math.round(opt.breite || A4.b);
@@ -9064,7 +9071,7 @@ const IR = (function(){
     const hoch = ZH * 0.60;                     /* Hoehe eines Taktkastens */
     const gr = Math.round(hoch * 0.62 * (opt.akkgroesse || 1));
     const st = Math.max(3, Math.round(hoch*0.028));
-    const farbe = opt.farbe || '#000';
+    const farbe = '#000';
 
     const T = [];
     const linie = (x1,y1,x2,y2,dick) => T.push('<path d="M'+Math.round(x1)+' '+Math.round(y1)
@@ -10393,7 +10400,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Vierundzwanzig Takte, drei Abschnitte';
+const APP_BUILD='2026-08-21 · Das Blatt bleibt A4, die Striche bleiben schwarz';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -14053,7 +14060,7 @@ setTimeout(ablageAnmelden, 0);
     z_lh._ctl.append(wahl([['0','Aus'],['1','Fein'],['2','Mittel'],['3','Stark']],
       String(eLS.hand), v=>{ LS.setzen('hand',v); lsNeu(); }));
     const z_lf=zeile('Farbe der Notenlinien','Grau nimmt dem Blatt die Härte, Schwarz die Unschärfe');
-    z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#555555','Mittel'],['#777777','Grau']],
+    z_lf._ctl.append(wahl([['#000000','Schwarz'],['#333333','Dunkel'],['#666666','Mittel'],['#999999','Grau']],
       eLS.farbe, v=>{ LS.setzen('farbe',v); lsNeu(); }));
     const z_ll=zeile('Stärke der Notenlinien','Die fünf Linien des Systems');
     z_ll._ctl.append(regler(0.10, 0.60, 0.02, eLS.linie,
