@@ -2679,6 +2679,13 @@ function gruppenLibNachtragen(){
    ohne eine einzige Object-URL. Der alte Weg las alle Blobs mit und legte je
    Blatt eine URL an — 709 ms, bei jedem Start und nach jeder Aenderung. */
 let BS_KATALOG={buecher:[],titel:[],elemente:[]};
+
+/* Einen Bildaufbau abwarten. Wer vor einer laengeren Rechnung darauf wartet,
+   laesst den Browser vorher zeichnen — sonst friert die Oberflaeche in dem
+   Zustand ein, den sie beim Start der Rechnung hatte. */
+function atemzug(){
+  return new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
+}
 async function loadLibrary(){
   let k={buecher:[],titel:[],elemente:[]};
   try{ k=await BS.katalog(); }catch(e){ k={buecher:[],titel:[],elemente:[]}; }
@@ -2703,6 +2710,39 @@ async function loadLibrary(){
      ohne je Zeile in die Datenbank zu greifen. */
   if(typeof notizKennungenLaden==='function') await notizKennungenLaden();
   rebuildByKey();
+  /* Was gerade auf der Buehne liegt, zeigt auf ein Objekt aus der ALTEN Runde.
+     Nach einem Umbenennen stand deshalb auf dem gesetzten Blatt weiter der
+     alte Titel — bis man das Stueck einmal verliess und wieder aufschlug.
+     Am 21. August von Jens gemeldet. */
+  if(typeof CURRENT!=='undefined' && CURRENT && CURRENT.bsId){
+    const frisch = LIBTUNES.find(x=>x.bsId===CURRENT.bsId);
+    if(frisch && (CURRENT.t!==frisch.t || CURRENT.c!==frisch.c)){
+      /* Nur die beiden Felder, nicht das ganze Objekt: An CURRENT haengt der
+         geliehene Verweis auf die Bytes, und der ginge sonst verloren. */
+      CURRENT.t=frisch.t; CURRENT.c=frisch.c;
+      const kt=document.getElementById('vTitle'), ks=document.getElementById('vSub');
+      if(kt) kt.textContent=CURRENT.t;
+      if(ks && CURRENT.isLib && !CURRENT.isEdit)
+        ks.textContent=(CURRENT.c?CURRENT.c+' — ':'')+CURRENT.b;
+      if(window.blattNeuZeichnen) blattNeuZeichnen(true);
+    }
+  }
+  setzerVorholen();
+}
+
+/* Der Setzer wiegt 6,8 MB. Beim ersten Leadsheet kostet das auf dem iPad zwei
+   bis drei Sekunden — lang fuer jemanden, der nur ein Blatt aufschlagen will.
+   Er wird deshalb im Hintergrund geholt, sobald der Bestand steht und ueberhaupt
+   ein Leadsheet darin liegt. Danach liegt er im Cache `libs-bs-1` und ueberlebt
+   jeden Versionswechsel; ein zweites Mal geht nichts ueber die Leitung. */
+let _setzerVorrat=false;
+function setzerVorholen(){
+  if(_setzerVorrat || !window.LS || LS.bereit()) return;
+  if(!(BS_KATALOG.elemente||[]).some(e=>e.art==='leadsheet')) return;
+  _setzerVorrat=true;
+  /* Erst die Liste zeigen. Ein Blatt aufzuschlagen ist wichtiger als ein
+     Vorrat fuer spaeter. */
+  setTimeout(()=>{ LS.holen().catch(()=>{ _setzerVorrat=false; }); }, 1500);
 }
 
 /* ---- Bytes auf Zuruf: ein Verweis wird geliehen, nicht gehalten ----------
@@ -3047,6 +3087,19 @@ function langesTippen(el, tuWas){
   });
   ['pointerup','pointercancel','pointerleave'].forEach(n=>el.addEventListener(n, ab));
 }
+/* Zwei Wege zum selben Ziel. Jens am 21. August: Was in Content der Doppeltipp
+   tut, soll in der Liste auch der lange Tipp tun — und umgekehrt. Welche Geste
+   mit dem Finger traegt, haengt am Gerät und an der Gewohnheit; beide
+   anzubieten kostet nichts. */
+function bearbeitenGeste(el, tuWas){
+  if(!el) return;
+  langesTippen(el, tuWas);
+  el.addEventListener('dblclick', e=>{
+    e.stopPropagation(); e.preventDefault();
+    const li=el.closest('li'); if(li) li._langGetippt=true;
+    tuWas();
+  });
+}
 function tuneRow(t, stimmen){
   const li=document.createElement('li'); li.className='tune'; li.dataset.key=t.key;
   /* Die Zeile steht fuer das ganze Stueck, nicht fuer eine seiner Ausgaben.
@@ -3086,7 +3139,7 @@ function tuneRow(t, stimmen){
      ✎ ist dafuer aus der Zeile gefallen; sie traegt jetzt die vier Symbole des
      Entwurfs. Das Menue von iOS laesst sich nicht erweitern — entweder dessen
      Textauswahl oder unsere Geste, beides zusammen geht nicht. */
-  langesTippen(li.querySelector('.title'), ()=>openMetaSheet(t));
+  bearbeitenGeste(li.querySelector('.title'), ()=>openMetaSheet(t));
   /* Wer die Zeile antippt, waehlt ein STUECK und keine Stimme. Ein frueher
      gesetzter Wunsch faellt damit weg, und es gilt wieder das Instrument —
      also genau das, was die Zeile zeigt. */
@@ -3837,7 +3890,13 @@ function titelBearbeiten(titelId){
       const v=tf.value.trim(); if(!v || v===ti.titel){ tf.value=ti.titel||''; return; }
       try{ await BS.aendern('titel', titelId, {titel:v}); }
       catch(e){ alert('Umbenennen fehlgeschlagen: '+(e&&e.message||e)); return; }
-      ti.titel=v; await loadLibrary(); render();
+      ti.titel=v;
+      /* Die Liste neu zu bauen kostet bei einem grossen Bestand Zeit, und
+         solange sie laeuft, zeichnet der Browser nichts — das Blatt blieb
+         nach „Fertig" noch Sekunden sichtbar stehen, obwohl es laengst
+         geschlossen war. Erst einen Bildaufbau abwarten, dann rechnen. */
+      await atemzug();
+      await loadLibrary(); render();
     };
     const kf=feld('Komponist', ti.komponist, 'Komponist');
     kf.style.marginTop='0';
@@ -3845,7 +3904,7 @@ function titelBearbeiten(titelId){
       const v=kf.value.trim(); if(v===(ti.komponist||'')) return;
       try{ await BS.aendern('titel', titelId, {komponist:v}); }
       catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); return; }
-      ti.komponist=v; await loadLibrary(); render();
+      ti.komponist=v; await atemzug(); await loadLibrary(); render();
     };
 
     const bz=document.createElement('div'); bz.className='muted'; bz.style.margin='10px 2px 0';
@@ -5177,7 +5236,7 @@ function recentRow(t,ts){
       <div class="meta">${t.c?`<span>${esc(t.c)} ·</span>`:''}<span class="book">${esc(bookName(t))}</span>${t.isEdit?'':`<span class="book">· S.&nbsp;${esc(t.pg)}</span>`}${setsHTML}<span style="color:var(--text-faint)">· <i class="i ic-clock"></i> ${dateStr}</span></div>
       ${tagZeile(tt)}
     </div>`;
-  langesTippen(li.querySelector('.title'), ()=>openMetaSheet(t));
+  bearbeitenGeste(li.querySelector('.title'), ()=>openMetaSheet(t));
   li.querySelector('.main').onclick=()=>{ if(li._langGetippt){ li._langGetippt=false; return; }
     STIMMWUNSCH=''; openViewer(t); };
   verdrahteAktionen(li,t); verdrahtePillen(li);
@@ -9575,7 +9634,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Bögen hängen wieder an ihren Noten';
+const APP_BUILD='2026-08-21 · Zwei Gesten, zwei Wege, ein frischer Titel';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -10910,7 +10969,9 @@ setTimeout(ablageAnmelden, 0);
 (function(){
   const KANTE_KEY = { land:'rb_dockedge_land', port:'rb_dockedge_port' };
   const VORGABE   = { land:'left', port:'bottom' };   /* quer seitlich, hoch unten */
-  const ZULAUF    = 4000;                             /* danach klappt es wieder ein */
+  /* Bis zum 21. August 4000 ms. Jens wollte ein Drittel mehr Luft — wer im
+     Dock etwas sucht, war vorher oft zu langsam. */
+  const ZULAUF    = 5300;                             /* danach klappt es wieder ein */
   const dock  = document.getElementById('dock');
   const grip  = document.getElementById('dockGrip');
   const knopfAuf = document.getElementById('dockBtn');
@@ -10973,7 +11034,27 @@ setTimeout(ablageAnmelden, 0);
   window.dockFaltZustand = faltZustand;
 
   let uhr = null;
-  function zuhalten(){ clearTimeout(uhr); uhr = setTimeout(dockZu, ZULAUF); }
+  /* Zwei Arten, die Leiste wieder loszuwerden. „Von selbst" schliesst sie nach
+     ZULAUF, „mit einem Tipp" laesst sie stehen, bis man das Blatt noch einmal
+     antippt. Wer beim Spielen liest, will das eine; wer im Dock arbeitet, das
+     andere. Von Jens am 21. August gewuenscht. */
+  const WEG_KEY = 'bs_dockweg';
+  function dockWeg(){
+    try{ return localStorage.getItem(WEG_KEY)==='tipp' ? 'tipp' : 'auto'; }catch(e){ return 'auto'; }
+  }
+  window.dockWegLesen  = dockWeg;
+  window.dockWegSetzen = v => {
+    try{ localStorage.setItem(WEG_KEY, v==='tipp'?'tipp':'auto'); }catch(e){}
+    clearTimeout(uhr);
+    /* Steht die Leiste gerade offen und wird auf „von selbst" gestellt,
+       soll die Uhr sofort laufen — sonst bliebe sie bis zum naechsten Tipp. */
+    if(dockWeg()==='auto' && document.body.dataset.dock==='auf') zuhalten();
+  };
+  function zuhalten(){
+    clearTimeout(uhr);
+    if(dockWeg()!=='auto') return;
+    uhr = setTimeout(dockZu, ZULAUF);
+  }
   /* Der Stimmen-Schalter kommt und geht mit dem Dock. Wer an ihm arbeitet,
      soll ihn nicht unter der Hand verlieren — deshalb verlaengert auch eine
      Beruehrung dort die Zeit. */
@@ -11009,7 +11090,13 @@ setTimeout(ablageAnmelden, 0);
       if(!e.touches.length) return;
       if(Math.abs(e.touches[0].clientX-x0)>12 || Math.abs(e.touches[0].clientY-y0)>12) weit=true;
     }, {passive:true});
-    fit.addEventListener('click', () => { if(!weit) dockAuf(); });
+    fit.addEventListener('click', () => {
+      if(weit) return;
+      /* Bei „mit einem Tipp" schaltet dasselbe Antippen die Leiste auch
+         wieder weg — sonst gaebe es keinen Weg zurueck ausser dem Knopf. */
+      if(dockWeg()==='tipp' && document.body.dataset.dock==='auf') dockZu();
+      else dockAuf();
+    });
   })();
 
   /* Beim Drehen gilt die Einstellung der neuen Ausrichtung. */
@@ -11825,8 +11912,8 @@ setTimeout(ablageAnmelden, 0);
        verwirft. Über die Leiste geht es ebenso, bei genau einer Auswahl. */
     const nameEl=document.createElement('div'); nameEl.className='cname';
     nameEl.textContent = r.name || '(ohne Namen)';
-    nameEl.title = 'Doppeltippen zum Umbenennen';
-    nameEl.ondblclick = e=>{ e.stopPropagation(); cFeldStattText(nameEl, r, umbenennen); };
+    nameEl.title = 'Doppelt oder lang tippen zum Umbenennen';
+    bearbeitenGeste(nameEl, ()=>cFeldStattText(nameEl, r, umbenennen));
     text.append(nameEl);
     if('komponist' in r && r.komponist){
       const k=document.createElement('div'); k.className='sb ckomp';
@@ -13163,7 +13250,12 @@ setTimeout(ablageAnmelden, 0);
     z_fq._ctl.append(schalter(window.dockEinklappbar('land'), an=>window.dockSetzeEinklappbar('land',an)));
     const z_fh=zeile('Im Hochformat einklappen','Dasselbe für das Hochformat');
     z_fh._ctl.append(schalter(window.dockEinklappbar('port'), an=>window.dockSetzeEinklappbar('port',an)));
-    w.append(karte(null,[z_pq,z_ph,z_fq,z_fh]));
+    const z_weg=zeile('Wieder wegklappen',
+      'Ein Tipp auf das Blatt holt die Leiste hervor. Von selbst: nach gut fünf Sekunden. '
+      +'Mit einem Tipp: sie bleibt, bis Du das Blatt noch einmal antippst');
+    z_weg._ctl.append(wahl([['auto','Von selbst'],['tipp','Mit einem Tipp']],
+      window.dockWegLesen(), v=>window.dockWegSetzen(v)));
+    w.append(karte(null,[z_pq,z_ph,z_fq,z_fh,z_weg]));
   }
 
   /* ---- Thema: Listen und Tags ---- */
