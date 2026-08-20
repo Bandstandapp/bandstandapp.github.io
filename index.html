@@ -4771,6 +4771,11 @@ function openViewer(t, keepNav){
     fit.style.display='flex'; document.getElementById('vTab').style.display='none';
     lsKnopfBeschriften(t);
     fitOn=true; renderLeadFit(t);
+  } else if(t.art==='chordsheet'){
+    /* Wie ein Leadsheet aus dem eigenen Bestand — aber ohne Setzer. */
+    frame.style.display='none'; frame.src='about:blank';
+    fit.style.display='flex'; document.getElementById('vTab').style.display='none';
+    fitOn=true; renderChordFit(t);
   } else if(t.isEdit){
     frame.style.display='none'; frame.src='about:blank';
     fit.style.display='flex'; document.getElementById('vTab').style.display='none';
@@ -7116,6 +7121,7 @@ function blattNeuZeichnen(sofort){
     const stimme = window.aktiveStimme ? window.aktiveStimme() : null;
     if(stimme) renderPdfFit(stimme);
     else if(CURRENT.art==='leadsheet') renderLeadFit(CURRENT);
+    else if(CURRENT.art==='chordsheet') renderChordFit(CURRENT);
     else if(CURRENT.isEdit) renderUserFit(CURRENT); else renderPdfFit(CURRENT);
   };
   if(sofort) tu(); else _blattUhr=setTimeout(tu,180);
@@ -7432,6 +7438,45 @@ function lsTeilenBlatt(t){
     card.append(row);
     row.querySelector('#tAb').onclick=closeSheet;
   });
+}
+
+/* ---- Ein Chord-Sheet auf die Buehne ---------------------------------------
+   Derselbe Platz wie ein Blatt und ein Leadsheet, aber ohne Setzer: Das SVG
+   entsteht in wenigen Millisekunden aus den Akkorden selbst. */
+async function renderChordFit(t){
+  const fit=document.getElementById('vFit'); fit.classList.remove('center');
+  if(!fit.querySelector('.pg')) fit.innerHTML='<div class="lslade">Lädt…</div>';
+  try{
+    const roh = await chordQuelle(t);
+    const o = typeof roh==='string' && roh.trim().startsWith('irealb://')
+      ? IR.lesen(roh.trim()) : IR.lesen('irealb://'+roh);
+    const e = LS.E();
+    const svg = IR.zeichnen(o, { titel:t.t||'', komponist:t.c||'',
+      akkgroesse:e.akkgroesse, farbe:e.farbe,
+      strich: Math.round(26 * (e.linie/0.24)) });
+
+    if(window.SHEET_RATIO!==undefined && Math.abs(LS.A4_VERH-window.SHEET_RATIO)>0.002){
+      window.SHEET_RATIO=LS.A4_VERH; if(window.layout) window.layout();
+    }
+    const halter=document.createDocumentFragment();
+    const d=document.createElement('div'); d.className='pg ls';
+    d.innerHTML=svg.replace(/^<svg([^>]*)>/, (m,a)=>
+      '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'')
+      +' preserveAspectRatio="xMidYMid meet">');
+    halter.append(d);
+    fit.replaceChildren(halter);
+    passeBlattEin();
+    if(window.navKann) navKann();
+  }catch(err){
+    fit.innerHTML='<div class="lslade">Dieses Chord-Sheet lässt sich nicht lesen.<br>'
+      +esc(err&&err.message||String(err))+'</div>';
+  }
+}
+/* Die Bytes eines Chord-Sheets sind Text, kein Blob-Verweis. */
+async function chordQuelle(t){
+  const b = await BS.bytes(t.bsId);
+  if(!b) throw new Error('Zu diesem Chord-Sheet stehen keine Daten im Bestand.');
+  return typeof b==='string' ? b : await b.text();
 }
 
 /* ---- Ein Leadsheet auf die Buehne -----------------------------------------
@@ -8675,6 +8720,229 @@ const LS = (function(){
 })();
 window.LS = LS;
 
+/* ============================================================================
+   IR — iReal Pro lesen und schreiben                       (21. August 2026)
+
+   Ein Chord-Sheet ist kein Leadsheet ohne Noten, sondern etwas anderes: eine
+   Liste von Takten mit Akkordnamen darin. Es braucht keinen Notensetzer, es
+   steht sofort da, und Transponieren ist eine Rechnung ueber Namen statt ueber
+   Tonhoehen.
+
+   Das Format hat der Hersteller nie veroeffentlicht. Am 21. August ist es an
+   einem geteilten Stueck vermessen worden — „Body And Soul", zusammen mit dem
+   MusicXML, das iReal Pro zum selben Stueck ausgibt.
+
+   Der Aufbau: `irealb://` und dann zehn Felder, durch `=` getrennt. Belegt
+   sind Titel, Komponist als „Nachname Vorname", der Stil, die Tonart und der
+   Rumpf; die uebrigen sind leer oder tragen eine Null.
+
+   Der Rumpf traegt den Marker `1r34LbKcu7` und ist danach VERWUERFELT, nicht
+   verschluesselt: Jeder Block von fuenfzig Zeichen wird umgekehrt, und drei
+   Bereiche bleiben dabei stehen — 5 bis 9, 24 bis 25 und 40 bis 44. Was am
+   Ende keinen vollen Block mehr fuellt, wird gar nicht angefasst.
+
+   Die Vorschrift ist ihre eigene Umkehrung. Deshalb steht hier nur EINE
+   Funktion fuer beide Richtungen.                                          */
+const IR = (function(){
+  const MARKER = '1r34LbKcu7';
+  const FEST = new Set([5,6,7,8,9,24,25,40,41,42,43,44]);
+
+  function dreh(s){
+    let aus = '';
+    s = String(s||'');
+    while(s.length > 50){
+      const p = s.slice(0,50); s = s.slice(50);
+      let t = '';
+      for(let j=0;j<50;j++) t += FEST.has(j) ? p[j] : p[49-j];
+      aus += t;
+    }
+    return aus + s;
+  }
+
+  /* ---- Den Rumpf in Takte zerlegen ---------------------------------------
+     Die Syntax, am Beispiel abgelesen:
+       *A *B   Abschnittsmarke        { }   Wiederholung
+       [ ]     Abschnittsklammer      T44   Taktart
+       LZ |    Taktstrich             Z     Schlussstrich
+       N1 N2   erste, zweite Endung   s l   klein, wieder gross
+       XyQ     Wiederholungstakt      , ' ' Trenner
+     Was nicht erkannt wird, wird uebergangen und nicht geraten — ein falsch
+     gelesener Akkord auf dem Pult ist schlimmer als eine Luecke.            */
+  const AKKORD = /^([A-G][b#]?)((?:\^|-|h|o|\+|sus|alt|add|[0-9#b]|\(|\))*)(\/[A-G][b#]?)?/;
+
+  function rumpfLesen(t){
+    const takte = [];
+    let takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'' };
+    let taktart = '';
+    const neuerTakt = () => {
+      takte.push(takt);
+      takt = { akkorde:[], marke:'', auf:'', zu:'', endung:'' };
+    };
+    let i = 0;
+    while(i < t.length){
+      const r = t.slice(i);
+      let m;
+      if(r.startsWith('LZ') || r[0]==='|'){ neuerTakt(); i += r.startsWith('LZ') ? 2 : 1; continue; }
+      if(r[0]==='Z'){ takt.zu='ende'; neuerTakt(); i++; continue; }
+      if((m = /^T(\d)(\d)/.exec(r))){ taktart = m[1]+'/'+m[2]; i += 3; continue; }
+      if((m = /^\*([A-Za-z])/.exec(r))){ takt.marke = m[1].toUpperCase(); i += 2; continue; }
+      if((m = /^N(\d)/.exec(r))){ takt.endung = m[1]; i += 2; continue; }
+      /* Klammern sind AUCH Taktstriche: Zwischen zwei Abschnitten steht
+         `]*B[` und sonst nichts. Wer nur `LZ` und `|` trennt, laesst drei
+         Takte zu einem verschmelzen. */
+      if(r[0]==='}'){ takt.zu='wdh'; neuerTakt(); i++; continue; }
+      if(r[0]===']'){ neuerTakt(); i++; continue; }
+      if(r[0]==='{'){ if(takt.akkorde.length) neuerTakt(); takt.auf='wdh'; i++; continue; }
+      if(r[0]==='['){ if(takt.akkorde.length) neuerTakt(); i++; continue; }
+      /* `XyQ` fuellt den Rest einer Zeile optisch auf. Im MusicXML zum selben
+         Stueck steht an diesen Stellen nichts — also ist es kein Takt. */
+      if(r.startsWith('XyQ')){ i += 3; continue; }
+      if(r[0]==='s' || r[0]==='l' || r[0]==='U' || r[0]==='Y'){ i++; continue; }
+      if(r[0]===',' || r[0]===' '){ i++; continue; }
+      if((m = AKKORD.exec(r))){ takt.akkorde.push(m[0]); i += m[0].length; continue; }
+      i++;   /* unbekanntes Zeichen: uebergehen */
+    }
+    neuerTakt();
+    return { taktart: taktart || '4/4',
+             takte: takte.filter((x,k)=> x.akkorde.length || x.marke || x.endung || k===0) };
+  }
+
+  function lesen(url){
+    const s = decodeURIComponent(String(url||'').replace(/^irealb:\/\//,''));
+    const f = s.split('=');
+    if(f.length < 7) throw new Error('Das sieht nicht nach einem iReal-Pro-Verweis aus.');
+    let rumpf = f[6] || '';
+    const k = rumpf.indexOf(MARKER);
+    if(k < 0) throw new Error('In diesem Verweis steht kein Stück.');
+    rumpf = dreh(rumpf.slice(k + MARKER.length));
+    const komp = (f[1]||'').trim();
+    const teile = komp.split(/\s+/);
+    return Object.assign({
+      titel: (f[0]||'').trim(),
+      /* iReal Pro schreibt „Nachname Vorname". */
+      komponist: teile.length===2 ? teile[1]+' '+teile[0] : komp,
+      stil: (f[3]||'').trim(),
+      tonart: (f[4]||'').trim(),
+      rumpf
+    }, rumpfLesen(rumpf));
+  }
+
+  /* ---- Das Blatt ---------------------------------------------------------
+     Vier Takte je Zeile ist die Konvention des Real Book. Wo viele Wechsel
+     mit langen Namen stehen, werden es zwei — das entscheidet sich je Zeile
+     und nicht fuer das ganze Stueck, so hat Jens es am 21. August verlangt.
+
+     Gezeichnet wird A4 als SVG, in denselben Maßen wie ein gesetztes
+     Leadsheet. Damit gilt alles Weitere unveraendert: Einpassen, Drehen,
+     Vollbild, spaeter die Notiz und das Bild.                              */
+  const A4 = { b:21000, h:29700, rand:1100 };
+  const KOPF  = 1400;          /* Platz fuer Titel und Komponist */
+
+  /* Wie breit ein Takt werden will — grob aus der Zeichenzahl. Genauer ginge
+     nur mit einer Schriftmessung, und die braucht es hier nicht: Es geht um
+     die Frage, ob vier Takte in eine Zeile passen. */
+  const taktBreite = t => Math.max(6, (t.akkorde.join(' ').length || 2));
+
+  function zeilenBauen(takte){
+    const zeilen = [];
+    let i = 0;
+    while(i < takte.length){
+      const vier = takte.slice(i, i+4);
+      /* Zu voll fuer vier: mehr als zwei Akkorde in einem Takt, ein sehr
+         langer Name, oder zusammen zu breit. */
+      const eng = vier.some(t => t.akkorde.length > 2
+                              || t.akkorde.some(a => a.length > 7))
+               || vier.reduce((n,t)=>n+taktBreite(t),0) > 38;
+      const n = eng ? 2 : 4;
+      zeilen.push(takte.slice(i, i+n));
+      i += n;
+    }
+    return zeilen;
+  }
+
+  function esc(x){ return String(x==null?'':x)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  /* Die Schreibweise des Real Book. Die Vorzeichen bleiben `b` und `#`: Die
+     Zeichen der Notenschrift (U+EA64 und U+EA66) kennt Petaluma Script an
+     dieser Stelle nicht, und was die Schrift nicht hat, wird zur Luecke — aus
+     `Eb-7` wurde `E -7`. Ein sichtbares b ist besser als ein schoenes Nichts. */
+  function akkordSetzen(a){
+    return esc(String(a)
+      .replace(/\^/g, '\u25b3')      /* grosse Septime: das Dreieck */
+      .replace(/h/g, '\u00f8')        /* halbvermindert */
+      .replace(/o/g, '\u00b0'));      /* vermindert */
+  }
+
+  function zeichnen(o, opt){
+    opt = opt || {};
+    const zeilen = zeilenBauen(o.takte || []);
+    const breite = A4.b - 2*A4.rand;
+    const kopfHoch = (opt.titel || opt.komponist) ? KOPF : 0;
+    const y0 = A4.rand + kopfHoch + 300;
+    /* Die Zeilen fuellen die Seite. Ein Real Book laesst unten kein Drittel
+       leer, und auf dem Pult zaehlt jede Millimeter Schrifthoehe. Nach oben
+       begrenzt, damit vier Takte nicht auseinanderfallen. */
+    const platz = A4.h - y0 - A4.rand;
+    const ZH = Math.max(1800, Math.min(3600, Math.floor(platz / Math.max(1, zeilen.length))));
+    const gr = Math.round(ZH * 0.19 * (opt.akkgroesse || 1));
+    const st = opt.strich || 26;
+    const farbe = opt.farbe || '#000';
+
+    const teile = [];
+    const linie = (x1,y1,x2,y2,dick) => teile.push(
+      '<path d="M'+Math.round(x1)+' '+Math.round(y1)+' L'+Math.round(x2)+' '+Math.round(y2)
+      +'" stroke="'+farbe+'" stroke-width="'+(dick||st)+'" fill="none"/>');
+    const punkt = (x,y) => teile.push(
+      '<circle cx="'+Math.round(x)+'" cy="'+Math.round(y)+'" r="55" fill="'+farbe+'"/>');
+    const text = (x,y,gross,inhalt,anker,fett) => teile.push(
+      '<text x="'+Math.round(x)+'" y="'+Math.round(y)+'" font-size="'+gross+'" fill="#000"'
+      + (anker ? ' text-anchor="'+anker+'"' : '')
+      + (fett ? ' font-weight="bold"' : '') + '>' + inhalt + '</text>');
+
+    /* Die Maße sind die des Blattes, nicht die einer Bildschirmseite: A4 ist
+       hier 21000 Einheiten breit. Ein Titel mit 72 waere ein Staubkorn. */
+    if(opt.titel) text(A4.b/2, A4.rand+620, 700, esc(String(opt.titel).toUpperCase()), 'middle', true);
+    if(opt.komponist) text(A4.b-A4.rand, A4.rand+1150, 400, esc(opt.komponist), 'end');
+
+    zeilen.forEach((zeile, zi)=>{
+      const oben = y0 + zi*ZH;
+      const unten = oben + ZH*0.72;
+      const w = breite / zeile.length;
+      zeile.forEach((t, ti)=>{
+        const x = A4.rand + ti*w;
+        linie(x, oben, x, unten);
+        if(ti===zeile.length-1) linie(x+w, oben, x+w, unten);
+        if(t.auf==='wdh'){ punkt(x+160, oben+(unten-oben)*0.35); punkt(x+160, oben+(unten-oben)*0.65); }
+        if(t.zu==='wdh'){ punkt(x+w-160, oben+(unten-oben)*0.35); punkt(x+w-160, oben+(unten-oben)*0.65); }
+        if(t.zu==='ende') linie(x+w-130, oben, x+w-130, unten, st*3);
+        if(t.marke) text(x+60, oben-140, Math.round(ZH*0.16), esc(t.marke), null, true);
+        if(t.endung){
+          linie(x, oben-160, x+w*0.9, oben-160);
+          linie(x, oben-160, x, oben-40);
+          text(x+90, oben-250, Math.round(ZH*0.12), esc(t.endung)+'.');
+        }
+        /* Ein Akkord steht mittig, mehrere verteilen sich ueber den Takt. */
+        const n = t.akkorde.length;
+        t.akkorde.forEach((a, ai)=>{
+          if(n===1) text(x+w/2, oben+(unten-oben)*0.62, gr, akkordSetzen(a), 'middle');
+          else text(x + w*(0.10 + 0.80*ai/(n-1)), oben+(unten-oben)*0.62, gr, akkordSetzen(a),
+                    ai===0 ? 'start' : (ai===n-1 ? 'end' : 'middle'));
+        });
+      });
+    });
+
+    const hoch = Math.max(A4.h, y0 + zeilen.length*ZH + A4.rand);
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+A4.b+' '+hoch+'" '
+         + 'width="'+A4.b+'" height="'+hoch+'">'
+         + '<rect width="'+A4.b+'" height="'+hoch+'" fill="#fff"/>'
+         + teile.join('') + '</svg>';
+  }
+
+  return { dreh, lesen, rumpfLesen, zeichnen, zeilenBauen, A4, MARKER };
+})();
+window.IR = IR;
+
 const BS = (function(){
   const DB='bandstand', VER=1;
   const S_BUCH='buecher', S_TITEL='titel', S_EL='elemente', S_BYTE='bytes',
@@ -8707,6 +8975,13 @@ const BS = (function(){
        Beim Austausch ist es der guenstigste Fall im ganzen Bestand: ein paar
        Kilobyte statt ein paar hundert. Am 19. August aufgenommen. */
     leadsheet: { name:'Leadsheet',  bytes:true,  oeffnen:'noten',   austausch:'immer',  endung:'.musicxml' },
+    /* Ein Chord-Sheet traegt die Akkorde eines Stuecks und sonst nichts. Es
+       ist KEIN Leadsheet ohne Noten, sondern etwas anderes: eine Liste von
+       Takten mit Namen darin. Es braucht keinen Setzer, steht sofort da und
+       wiegt ein paar hundert Zeichen — der guenstigste Fall im ganzen
+       Bestand. Am 21. August aufgenommen, nachdem das Format von iReal Pro
+       vermessen war. */
+    chordsheet:{ name:'Chord-Sheet', bytes:true,  oeffnen:'changes', austausch:'immer',  endung:'.ireal' },
     verweis:   { name:'Verweis',    bytes:false, oeffnen:'extern',  austausch:'immer',  endung:'' },
   };
   const artOk = a => Object.prototype.hasOwnProperty.call(ARTEN,a);
@@ -9878,7 +10153,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Der iReal-Weg, ehrlich beschriftet';
+const APP_BUILD='2026-08-21 · Changes aus iReal Pro, lesbar auf dem Pult';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
