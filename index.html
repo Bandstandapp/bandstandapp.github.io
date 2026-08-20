@@ -7320,6 +7320,10 @@ async function irealAdresse(t){
   const rumpf = IR.rumpfBauen(
     takte.map(namen => namen.map(irealAkkord).filter(Boolean)),
     lsTaktart(quelle).replace(/(\d)(\d)/,'$1/$2'));
+  /* Ein Leadsheet bringt seinen Rumpf nicht mit, hier stehen die Akkorde also
+     ohnehin schon in der gesetzten Tonart. Das Feld traegt sie zur Anzeige —
+     anders als beim Chord-Sheet gibt es keine Original-Angabe, gegen die
+     iReal Pro zurueckrechnen koennte. */
   return IR.schreiben({ rumpf, stil:'Medium Swing' },
     { titel: t.t || 'Stück', komponist: t.c || '',
       tonart: (t._lsGelesen || 'C') + (t._lsOrg && t._lsOrg.moll ? '-' : '') });
@@ -7675,14 +7679,24 @@ function csTeilenBlatt(t){
 
     /* Den Verweis erst bauen, wenn er gebraucht wird — er kostet einen
        Datenbankzugriff und das Entwuerfeln. */
+    /* Das Tonart-Feld bleibt, wie es geliefert wurde — es wird NICHT auf die
+       neue Tonart gesetzt.
+
+       Gemessen am 21. August: Autumn Leaves steht in der Datei in g-Moll. Nach
+       b-Moll transponiert trugen die Akkorde im Verweis richtig `Eb-7 Ab7
+       Db^7`, und das Feld sagte `Bb-`. iReal Pro zeigte das Stueck danach in
+       g-Moll — es hatte die Transposition um genau drei Quinten rueckgaengig
+       gemacht. Das Feld ist dort offenbar keine Beschreibung, sondern eine
+       Anweisung: iReal Pro rechnet die Akkorde daran aus. Wer beides aendert,
+       aendert doppelt und landet wieder am Anfang. */
     const bauen = async () => {
       const o = await csAusgabe(t);
-      return IR.schreiben(o, { titel:t.t||o.titel, komponist:t.c||o.komponist,
-        tonart: (t._lsGelesen||o.tonart) + (o && t._lsOrg && t._lsOrg.moll ? '-' : '') });
+      return IR.schreiben(o, { titel:t.t||o.titel, komponist:t.c||o.komponist });
     };
 
     zeile('Öffnen in iReal Pro',
-      'Springt hinüber und legt das Stück dort an, in der Tonart, die hier eingestellt ist.',
+      'Springt hinüber und legt das Stück dort an, in der Tonart, die hier eingestellt ist. '
+      +'Zeigt iReal Pro trotzdem die alte Tonart, schick den kopierten Verweis her.',
       [['Öffnen', async()=>{
         try{ const adr=await bauen(); closeSheet(); location.href=adr; }
         catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
@@ -10735,7 +10749,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Vier Akkorde je Takt, nicht acht';
+const APP_BUILD='2026-08-21 · Das Tonart-Feld ist eine Anweisung';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
