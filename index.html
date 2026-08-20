@@ -428,15 +428,39 @@
      ihre eigene Schrift als Attribut. Ein `!important` hier macht aus `B♭7`
      ein Kaestchen. */
   .fitwrap .pg.ls svg{font-family:'PetalumaScript',ui-sans-serif,sans-serif}
-  .fitwrap .pg.ls g.staff>path{stroke:var(--ls-linie,#333)}
+  /* Bis zum 21. August stand hier eine Regel fuer die Farbe der Notenlinien.
+     Sie war spezifischer als der Stil, den das Blatt selbst mitbringt, und hat
+     ihn ueberstimmt — die Linien blieben dunkelgrau, was der Regler auch sagte.
+     Farbe, Schrift und Handschrift stecken seit Stufe 3 IM Blatt und nur
+     dort. */
   .lslade{color:var(--sub);font-size:14px;text-align:center;padding:24px;line-height:1.5}
   /* Die Vorschau in Setup. Weisser Grund, weil ein Notenblatt weiss ist —
      auch in der dunklen Oberflaeche. */
+  /* Kein Flex-Kasten: Der soll die Hoehe seines Kindes annehmen, und ein SVG
+     ohne Hoehenangabe bekommt darin die des Containers statt die aus seinem
+     Seitenverhaeltnis — das Blatt wurde unten abgeschnitten. */
   .lsvor{background:#fff;border-radius:var(--r-card);overflow:hidden;
-         margin:0 0 12px;min-height:80px;display:flex;align-items:center;justify-content:center}
+         margin:0 0 12px;min-height:60px}
   .lsvor svg{width:100%;height:auto;display:block}
-  .lsvor g.staff>path{stroke:var(--ls-linie,#333)}
-  .sreg{flex:1;min-width:120px;max-width:210px;accent-color:var(--accent-bright)}
+  .lsvor .muted{padding:20px;text-align:center}
+  /* Der Regler, in einer Gestalt fuer alle Stellen. `accent-color` allein gab
+     einen dicken Schlitz mit heller Umrandung; gezeichnet wird deshalb selbst.
+     Wie weit der Griff steht, sagt `--p` — gesetzt beim Bauen und bei jeder
+     Bewegung, weil CSS den Wert eines Reglers nicht kennt. */
+  .sreg{flex:1;min-width:120px;max-width:210px;-webkit-appearance:none;appearance:none;
+        background:transparent;height:22px;margin:0;cursor:pointer}
+  .sreg::-webkit-slider-runnable-track{height:4px;border:0;border-radius:2px;
+    background:linear-gradient(90deg,var(--accent-bright) 0 var(--p,50%),
+                                     var(--bg-app) var(--p,50%) 100%)}
+  .sreg::-moz-range-track{height:4px;border:0;border-radius:2px;
+    background:linear-gradient(90deg,var(--accent-bright) 0 var(--p,50%),
+                                     var(--bg-app) var(--p,50%) 100%)}
+  .sreg::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:16px;height:16px;border-radius:50%;border:0;margin-top:-6px;
+    background:var(--accent-bright);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .sreg::-moz-range-thumb{width:16px;height:16px;border-radius:50%;border:0;
+    background:var(--accent-bright);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .sreg:focus-visible::-webkit-slider-thumb{outline:2px solid var(--accent-bright);outline-offset:2px}
   /* Die Wahlknöpfe im Tonart-Blatt. Ohne diese Regel sagt `aria-pressed` nur
      der Vorlesesoftware, was gewählt ist, und dem Auge nichts. */
   .wahlk[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--white)}
@@ -7829,7 +7853,7 @@ const LS = (function(){
      sind getrennt vom Hals, weil duenne Linien mit kraeftigem Hals der
      Handschrift naeher kommen als eine gleichmaessige Verdickung. */
   const VORGABE = { hand:2, farbe:'#333333', linie:0.24, hals:0.32, akkorde:'lang', raster:true, bogen:1.0,
-                    akkgroesse:1.0, akkfett:false };
+                    akkgroesse:1.0, akkstrich:0 };
   function E(){
     const z=(k,v)=>{ const x=parseFloat(localStorage.getItem(k)); return isNaN(x)?v:x; };
     return {
@@ -7851,7 +7875,11 @@ const LS = (function(){
       /* Die Akkordschrift ist kein Verovio-Regler — der Setzer kennt keine
          Groesse fuer Akkordsymbole. Beides wird am fertigen Blatt gemacht. */
       akkgroesse: Math.max(0.7, Math.min(1.6, z('bs_ls_akkgroesse', VORGABE.akkgroesse))),
-      akkfett:    localStorage.getItem('bs_ls_akkfett') === '1'
+      /* Wie kraeftig die Akkordschrift traegt, in Bruchteilen ihrer eigenen
+         Hoehe. Null ist die Schrift, wie sie kommt; 0,10 ist deutlich fett.
+         Bis zum 21. August war das ein Schalter mit zwei Stufen — Jens wollte
+         dazwischen regeln koennen. */
+      akkstrich:  Math.max(0, Math.min(0.12, z('bs_ls_akkstrich', VORGABE.akkstrich)))
     };
   }
   function setzen(k,v){ localStorage.setItem('bs_ls_'+k, String(v)); }
@@ -8072,15 +8100,27 @@ const LS = (function(){
     }catch(e){ _schrift=''; }
     return _schrift;
   }
-  async function eigenstaendig(svg, e){
+  /* `ohneSchrift`: Wer das Blatt IN der Seite zeigt, braucht den Schriftblock
+     nicht — die Seite bringt PetalumaScript selbst mit. Er wiegt 258 KB als
+     Datenblock, und den bei jedem Reglerschritt neu zu parsen kostete die
+     Vorschau am 21. August eine ganze Sekunde je Bild. Fuer alles, was das
+     Blatt VERLAESST — Bild, eingefrorene Notiz, Weitergabe —, muss er hinein. */
+  async function eigenstaendig(svg, e, ohneSchrift){
     e = e || E();
-    const b64 = await schriftBase64();
+    const b64 = ohneSchrift ? '' : await schriftBase64();
     const w = WELLE[e.hand];
     const filterId = 'lsw'+e.hand;
     const stil = '<style>'
       + (b64 ? "@font-face{font-family:'PetalumaScript';src:url(data:font/otf;base64,"+b64+") format('opentype')}" : '')
       + "svg{font-family:'PetalumaScript',sans-serif}"
-      + "g.staff>path{stroke:"+e.farbe+"}"
+      /* `!important` ist hier kein Faustschlag, sondern noetig: Verovio legt in
+         jedes Blatt eine eigene Regel mit ID-Selektor —
+         `#id path{stroke:currentcolor}` —, und eine ID schlaegt jede Klasse.
+         Ohne das blieben die Notenlinien schwarz, was der Regler auch tat und
+         was Jens am 21. August zweimal gemeldet hat. Nur fuer die Linienfarbe,
+         nicht fuer die Schrift: Ein `!important` auf `font-family` macht aus
+         `B♭7` ein Kaestchen. */
+      + "g.staff>path{stroke:"+e.farbe+" !important}"
       /* Petaluma Script hat keinen fetten Schnitt. Verdickt wird deshalb mit
          einem Rand in derselben Farbe — das traegt gleichmaessig auf, wo eine
          nachgeahmte Fettschrift die Buchstaben verschmiert. */
@@ -8088,8 +8128,10 @@ const LS = (function(){
          hoch, sechs Pixel Rand waren daran nicht zu sehen. Und die Regel muss
          den TSPAN treffen: Verovio setzt am `<text>` `font-size="0px"` und die
          wirkliche Groesse erst am tspan darin — ein `em` am text waere null. */
-      + (e.akkfett ? "g.harm tspan{paint-order:stroke;stroke:#000;stroke-width:0.06em;"
-                     + "stroke-linejoin:round}" : "")
+      + (e.akkstrich > 0.002
+          ? "g.harm tspan{paint-order:stroke;stroke:#000;stroke-width:"
+            + e.akkstrich.toFixed(3) + "em;stroke-linejoin:round}"
+          : "")
       + '</style>';
     const filter = w ? '<filter id="'+filterId+'">'
       + '<feTurbulence type="fractalNoise" baseFrequency="'+w[0]+'" numOctaves="2" seed="7" result="n"/>'
@@ -8544,7 +8586,7 @@ const LS = (function(){
      anderes als die Buehne. */
   async function probeblatt(){
     const r = await setze(PROBE, {});
-    return await eigenstaendig(r.seiten[0], E());
+    return await eigenstaendig(r.seiten[0], E(), true);
   }
 
   /* ---- Der Setzer, auf Zuruf geholt --------------------------------------- */
@@ -9833,7 +9875,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Eine Vorschau, die zeigt, was die Regler tun';
+const APP_BUILD='2026-08-21 · Die Vorschau folgt dem Finger';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -11701,9 +11743,13 @@ setTimeout(ablageAnmelden, 0);
     r.min=min; r.max=max; r.step=schritt; r.value=jetzt;
     const z=document.createElement('span'); z.className='muted';
     z.style.cssText='min-width:42px;text-align:right;font-variant-numeric:tabular-nums';
+    /* Wie weit der Griff steht, weiss nur JavaScript — CSS kann den Wert eines
+       Reglers nicht lesen. Ohne diese Zeile bliebe die Fuellung stehen. */
+    const stand=()=>{ const p=(max-min)>0 ? (r.value-min)/(max-min)*100 : 0;
+                      r.style.setProperty('--p', p.toFixed(1)+'%'); };
     const zeig=v=>{ z.textContent = format ? format(v) : String(v); };
-    zeig(jetzt);
-    r.oninput=()=>{ zeig(+r.value); tu(+r.value); };
+    zeig(jetzt); stand();
+    r.oninput=()=>{ stand(); zeig(+r.value); tu(+r.value); };
     w.append(r,z); return w;
   }
   function karte(titel, zeilen, erklaerung){
@@ -13421,35 +13467,69 @@ setTimeout(ablageAnmelden, 0);
        jetzt ueber der Karte und gehen denselben Weg wie ein echtes Blatt. */
     const vor=document.createElement('div'); vor.className='lsvor';
     vor.innerHTML='<div class="muted" style="padding:14px">Vorschau wird gesetzt…</div>';
-    let vorUhr=null, vorLauf=0;
+    let vorUhr=0, vorLauf=0, vorLaeuft=false, vorNochmal=false;
     async function vorschauZeichnen(){
+      if(vorLaeuft){ vorNochmal=true; return; }
+      vorLaeuft=true;
       const lauf = ++vorLauf;
       try{
         const svg = await LS.probeblatt();
-        if(lauf!==vorLauf || !vor.isConnected) return;
-        /* Nur zwei Takte zeigen — der Rest der A4-Seite ist leer.
-           Verovio legt in das aeussere svg ein zweites mit eigener viewBox.
-           Bleiben beide stehen, rechnet das innere ein zweites Mal auf die
-           ganze Seite. Die innere viewBox faellt deshalb weg; dann gelten die
-           Koordinaten des aeusseren, und das zeigt den Ausschnitt. Die Lage
-           stammt aus dem Blatt selbst: `page-margin` verschiebt um (1100, 900),
-           die Akkorde stehen bei 278, die unterste Notenlinie bei 1536. Bei
-           `y` eines Textes steht die GRUNDLINIE — der Akkordname reicht von
-           dort gut vierhundert Einheiten nach oben, bei grosser Schrift mehr. */
-        let aus = svg.replace(/<svg(\s[^>]*class="definition-scale"[^>]*)>/,
-          (m,a)=>'<svg'+a.replace(/\sviewBox="[^"]*"/,'')+'>');
-        aus = aus.replace(/^<svg([^>]*)>/, (m,a)=>
-          '<svg'+a.replace(/\s(width|height)="[^"]*"/g,'').replace(/\sviewBox="[^"]*"/g,'')
-          +' viewBox="180 480 8620 2100" preserveAspectRatio="xMidYMid meet">');
-        vor.innerHTML = aus;
+        if(!vor.isConnected) return;
+        /* Das aeussere svg traegt den Ausschnitt, das innere darf keine eigene
+           viewBox behalten — sonst rechnet es ein zweites Mal auf die ganze
+           A4-Seite. */
+        vor.innerHTML = svg
+          .replace(/<svg(\s[^>]*class="definition-scale"[^>]*)>/,
+            (m,x)=>'<svg'+x.replace(/\sviewBox="[^"]*"/,'')+'>')
+          .replace(/^<svg([^>]*)>/, (m,x)=>
+            '<svg'+x.replace(/\s(width|height)="[^"]*"/g,'').replace(/\sviewBox="[^"]*"/g,'')
+            +' preserveAspectRatio="xMidYMid meet">');
+        /* Der Ausschnitt wird nicht geraten, sondern am Blatt gemessen: Wo das
+           erste System wirklich steht, haengt an Schluessel, Akkordgroesse und
+           Boegen und aendert sich mit jedem Regler. Bis zum 21. August stand
+           er fest, und der Schluessel war angeschnitten. */
+        const wSvg = vor.querySelector('svg');
+        const sys  = vor.querySelector('g.system');
+        if(wSvg && sys && wSvg.getScreenCTM()){
+          /* NICHT `getBBox()`: Das liefert die Box im eigenen Koordinatensystem
+             des Systems, ohne die Verschiebung des Seitenrands (1100, 900) —
+             der Ausschnitt saesse dann um genau diesen Betrag daneben, und das
+             Blatt lag unten halb ausserhalb. Ueber die Bildschirmkoordinaten
+             und die Matrix des aeusseren svg stimmt es. */
+          const M = wSvg.getScreenCTM().inverse();
+          const pt = (x,y)=>{ const q=wSvg.createSVGPoint(); q.x=x; q.y=y;
+                              return q.matrixTransform(M); };
+          const r = sys.getBoundingClientRect();
+          const a = pt(r.left, r.top), b2 = pt(r.right, r.bottom);
+          const luft = 90;
+          wSvg.setAttribute('viewBox',
+            [Math.round(a.x-luft), Math.round(a.y-luft),
+             Math.round(b2.x-a.x+2*luft), Math.round(b2.y-a.y+2*luft)].join(' '));
+        }
       }catch(e){
-        if(lauf!==vorLauf || !vor.isConnected) return;
+        if(!vor.isConnected) return;
         vor.innerHTML='<div class="muted" style="padding:14px">'
           +'Die Vorschau braucht den Notensetzer. Schlage einmal ein Leadsheet auf.</div>';
+      }finally{
+        vorLaeuft=false;
+        /* Wer am Regler zieht, loest waehrend eines Laufs weitere aus. Statt
+           sie zu verwerfen, wird genau EINER nachgeholt — so folgt das Bild
+           dem Finger, ohne dass sich Laeufe stauen. */
+        if(vorNochmal){ vorNochmal=false; vorschauZeichnen(); }
       }
     }
-    function vorschauNeu(){ clearTimeout(vorUhr); vorUhr=setTimeout(vorschauZeichnen, 200); }
-    vorschauNeu();
+    /* Ein Bildaufbau statt zweihundert Millisekunden: Vier Takte zu setzen
+       kostet 27 ms, und Jens will beim Ziehen sehen, was er tut. Gekoppelt an
+       `requestAnimationFrame` und nicht an einen Zeitgeber — ein Browser
+       drosselt Zeitgeber im Hintergrund auf eine Sekunde, und mehr als ein
+       Bild je Aufbau braucht ohnehin niemand. */
+    function vorschauNeu(){
+      if(vorUhr) return;
+      vorUhr = requestAnimationFrame(()=>{ vorUhr=0; vorschauZeichnen(); });
+    }
+    /* Das erste Bild ohne Umweg — sonst bliebe die Vorschau leer, solange die
+       Seite noch nicht gezeichnet wird. */
+    vorschauZeichnen();
 
     const z_lh=zeile('Handschrift','Wie stark die Linien aus der Geraden laufen');
     z_lh._ctl.append(wahl([['0','Aus'],['1','Fein'],['2','Mittel'],['3','Stark']],
@@ -13477,8 +13557,9 @@ setTimeout(ablageAnmelden, 0);
     const z_lg=zeile('Größe der Akkorde','Der Platz ist fest gerechnet — viel größer rückt sie zusammen');
     z_lg._ctl.append(regler(0.7, 1.6, 0.05, eLS.akkgroesse,
       v=>{ LS.setzen('akkgroesse',v); lsNeu(); }, v=>v.toFixed(2)));
-    const z_lw=zeile('Akkorde fett','Kräftiger auf dem Pult, auch aus zwei Metern');
-    z_lw._ctl.append(schalter(eLS.akkfett, an=>{ LS.setzen('akkfett', an?'1':'0'); lsNeu(); }));
+    const z_lw=zeile('Strichstärke der Akkorde','Von der Schrift, wie sie kommt, bis kräftig — auch aus zwei Metern lesbar');
+    z_lw._ctl.append(regler(0, 0.12, 0.005, eLS.akkstrich,
+      v=>{ LS.setzen('akkstrich',v); lsNeu(); }, v=>v.toFixed(3)));
     const kopfz=document.createElement('div'); kopfz.className='sgrp';
     kopfz.textContent='Leadsheets'; w.append(kopfz, vor);
     w.append(karte(null,[z_lh,z_lf,z_ll,z_ls,z_lr,z_lb,z_la,z_lg,z_lw],
