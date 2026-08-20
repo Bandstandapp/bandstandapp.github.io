@@ -7679,24 +7679,26 @@ function csTeilenBlatt(t){
 
     /* Den Verweis erst bauen, wenn er gebraucht wird — er kostet einen
        Datenbankzugriff und das Entwuerfeln. */
-    /* Das Tonart-Feld bleibt, wie es geliefert wurde — es wird NICHT auf die
-       neue Tonart gesetzt.
+    /* Weitergegeben wird die Fassung, die in der DATEI steht — nicht die
+       transponierte.
 
-       Gemessen am 21. August: Autumn Leaves steht in der Datei in g-Moll. Nach
-       b-Moll transponiert trugen die Akkorde im Verweis richtig `Eb-7 Ab7
-       Db^7`, und das Feld sagte `Bb-`. iReal Pro zeigte das Stueck danach in
-       g-Moll — es hatte die Transposition um genau drei Quinten rueckgaengig
-       gemacht. Das Feld ist dort offenbar keine Beschreibung, sondern eine
-       Anweisung: iReal Pro rechnet die Akkorde daran aus. Wer beides aendert,
-       aendert doppelt und landet wieder am Anfang. */
-    const bauen = async () => {
-      const o = await csAusgabe(t);
-      return IR.schreiben(o, { titel:t.t||o.titel, komponist:t.c||o.komponist });
-    };
+       Am 21. August dreimal gemessen, immer mit demselben Verweis, in dem die
+       Akkorde in b-Moll standen. iReal Pro zeigte sie als g-Moll, dann als
+       f-Moll, dann als c-Moll — je nachdem, was in den Feldern 4 und 5 stand.
+       Feld 5 ist erkennbar ein Versatz in Halbtoenen; eine Aenderung um fuenf
+       verschob die Anzeige um genau fuenf. Aber auch bei Versatz null bleibt
+       eine Verschiebung von zwei Halbtoenen uebrig, fuer die es keine
+       Erklaerung gibt.
 
+       Solange die Regel nicht bekannt ist, waere jede transponierte Ausgabe
+       ein Gluecksspiel — und ein Blatt, das in einer anderen Tonart ankommt
+       als angekuendigt, ist auf der Buehne schlimmer als gar keins. Also geht
+       das Stueck so hinueber, wie es geliefert wurde; die Tonart stellt man
+       in iReal Pro ein, das kann es ohnehin besser. */
     zeile('Öffnen in iReal Pro',
-      'Springt hinüber und legt das Stück dort an, in der Tonart, die hier eingestellt ist. '
-      +'Zeigt iReal Pro trotzdem die alte Tonart, schick den kopierten Verweis her.',
+      'Springt hinüber und legt das Stück dort an — in der Tonart der Quelle. '
+      +'<b>Nicht in der, die hier eingestellt ist:</b> Wie iReal Pro eine Transposition '
+      +'im Verweis ausdrückt, ist noch nicht herausgefunden. Dort umstellen.',
       [['Öffnen', async()=>{
         try{ const adr=await bauen(); closeSheet(); location.href=adr; }
         catch(e){ alert('Fehlgeschlagen: '+(e&&e.message||e)); }
@@ -7733,16 +7735,6 @@ function csTeilenBlatt(t){
     row.querySelector('#csAb').onclick=closeSheet;
     a11y(card);
   });
-}
-
-/* Die Fassung, die gerade auf dem Blatt steht — mit Tonart und Notation. */
-async function csAusgabe(t){
-  const o = IR.lesen(String(await chordQuelle(t)).trim());
-  const org = IR.tonartVon(o.tonart);
-  const a = LS.ausgabe(t.bsId);
-  const ziel = (a.tonart===undefined || a.tonart==='') ? org.q : +a.tonart;
-  const um = LS.rechne(org.q, ziel, a.notation||'C', org.moll);
-  return IR.transponieren(o, um.gelesenQ - org.q);
 }
 
 /* Was im Player eingestellt war, als das Stueck geteilt wurde. Ein Tempo
@@ -10757,7 +10749,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-21 · Feld fünf ist ein Versatz, kein Durchgang';
+const APP_BUILD='2026-08-21 · Unverändert hinüber, statt zu raten';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
