@@ -11211,7 +11211,7 @@ if(location.protocol==='file:'){
   document.body.appendChild(d);
 }
 /* Build-Kennung: sichtbar im Notiz-Editor, damit sofort erkennbar ist, WELCHER Stand geladen ist. */
-const APP_BUILD='2026-08-22 · measure-style ist kein Takt';
+const APP_BUILD='2026-09-24 · Der Dropbox-Knopf tut wieder etwas';
 /* Ein Tipp auf die Build-Kennung zeigt AUSKUNFT ueber den Stand — Build,
    Speicher, Umfang des Bestands. Bis zum 31. Juli startete er statt dessen die
    Pencil-Diagnose und bat darum, etwas zu zeichnen; Jens hat in der Probe
@@ -11546,7 +11546,10 @@ setTimeout(ablageAnmelden, 0);
   function setStatus(s){ statusText = s; const el = document.getElementById('rbSyncStatus'); if(el) el.textContent = s; }
 
   function renderSettings(card){
-    if(!card || document.getElementById('rbSyncBox')) return;
+    /* Gesucht wird im Kasten selbst, nicht im Dokument: Setup baut die Zeile
+       auf, BEVOR sie auf der Seite steht. Mit getElementById fand sich der
+       Knopf deshalb nie, und „Mit Dropbox verbinden" tat seit Ende Juli nichts. */
+    if(!card || card.querySelector('#rbSyncBox')) return;
     const box = document.createElement('div');
     box.id = 'rbSyncBox';
     box.style.cssText = 'border-top:1px solid var(--line);padding-top:14px;margin-top:14px';
@@ -11557,7 +11560,7 @@ setTimeout(ablageAnmelden, 0);
         + '<button class="btn" id="rbSyncConnect" style="width:100%">Mit Dropbox verbinden</button>'
         + '<div class="muted" id="rbSyncStatus" style="margin:8px 2px 0">'+esc(statusText)+'</div>';
       card.append(box);
-      const b = document.getElementById('rbSyncConnect'); if(b) b.onclick = startLogin;
+      const b = box.querySelector('#rbSyncConnect'); if(b) b.onclick = startLogin;
     } else {
       box.innerHTML = '<div class="lbl" style="margin:0 0 8px">Cloud-Abgleich (Dropbox)</div>'
         + '<div class="muted" style="margin:0 0 10px">Verbunden.'+(last?' Letzter Abgleich: '+esc(stamp(parseInt(last,10))):' Noch nicht abgeglichen.')+'</div>'
@@ -11567,14 +11570,14 @@ setTimeout(ablageAnmelden, 0);
         + '<input type="checkbox" id="rbSyncAuto"'+(autoOn()?' checked':'')+'> Automatisch abgleichen</label>'
         + '<div class="muted" id="rbSyncStatus" style="margin:8px 2px 0">'+esc(statusText)+'</div>';
       card.append(box);
-      const now_ = document.getElementById('rbSyncNow'); if(now_) now_.onclick = () => syncAll(true);
-      const off = document.getElementById('rbSyncOff'); if(off) off.onclick = () => {
+      const now_ = box.querySelector('#rbSyncNow'); if(now_) now_.onclick = () => syncAll(true);
+      const off = box.querySelector('#rbSyncOff'); if(off) off.onclick = () => {
         if(confirm('Verbindung zu Dropbox trennen? Deine Daten bleiben lokal erhalten.')){
           [K.ref,K.acc,K.exp,K.ver].forEach(lsDel); renderReplace(card); } };
-      const au = document.getElementById('rbSyncAuto'); if(au) au.onchange = () => { lsSet(K.auto, au.checked?'1':'0'); if(au.checked) syncAll(); };
+      const au = box.querySelector('#rbSyncAuto'); if(au) au.onchange = () => { lsSet(K.auto, au.checked?'1':'0'); if(au.checked) syncAll(); };
     }
   }
-  function renderReplace(card){ const old=document.getElementById('rbSyncBox'); if(old) old.remove(); renderSettings(card); }
+  function renderReplace(card){ const old=card.querySelector('#rbSyncBox'); if(old) old.remove(); renderSettings(card); }
 
   /* ---------- Init / Redirect-Rücksprung ---------- */
   function boot(){
